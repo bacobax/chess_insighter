@@ -1,0 +1,50 @@
+sampling:
+  min_samples: 3
+
+complexity:
+  simple_percentile: 50
+  complex_percentile: 85
+  high_percentile: 90
+
+opening:
+  post_opening_move_count: 6
+  weights:
+    book_accuracy: 0.15
+    eval_stability_after_opening: 0.5
+    result_from_opening_positions: 0.35
+
+time_management:
+  time_pressure_seconds: 30.0
+  blunder_win_prob_loss: 0.10
+  critical_underthinking_seconds: 5.0
+  simple_overthinking_seconds: 30.0
+  opponent_error_win_prob_loss: 0.05
+  weights:
+    time_trouble: 0.35
+    blunders_in_time_pressure: 0.35
+    bad_time_allocation: 0.30
+
+game_analysis:
+  weakness_loss_threshold: 0.08
+  improvement_delta: 0.02
+
+advantage_capitalization:
+  winning_eval_cp: 200
+  clearly_winning_eval_cp: 500
+  weights:
+    conversion_rate_from_winning_positions: 0.5
+    eval_preservation_when_ahead: 0.3
+    low_blunder_rate_when_ahead: 0.2
+
+resourcefulness:
+  worse_eval_cp: -200
+  lost_eval_cp: -500
+  weights:
+    save_rate_from_bad_positions: 0.4
+    eval_recovery_after_disadvantage: 0.3
+    low_collapse_rate_when_worse: 0.3
+
+result_scores:
+  win: 1.0
+  draw: 0.5
+  loss: 0.0

@@ -1,0 +1,21 @@
+opening_id,opening_name,eco,canonical_moves,tactical_density,quiet_position_density,king_safety_risk,early_castling_tendency,opposite_side_castling_tendency,middlegame_complexity,pawn_structure_sharpness,material_imbalance,endgame_likelihood_proxy,structure_diversity,confidence,calibration_note
+sicilian_najdorf,Sicilian Defense: Najdorf Variation,B90-B99,1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6,0.88,0.22,0.78,0.52,0.72,0.91,0.74,0.7,0.28,0.86,high,Sharp Sicilian mainline; high forcing play and opposite-side castling potential.
+sicilian_dragon,Sicilian Defense: Dragon Variation,B70-B79,1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 g6,0.9,0.18,0.84,0.75,0.82,0.9,0.72,0.66,0.24,0.74,high,Dragon/Yugoslav structures are among the sharpest Sicilian systems.
+french_defense,French Defense,C00-C19,1.e4 e6,0.48,0.67,0.36,0.58,0.16,0.66,0.76,0.34,0.58,0.7,high,Solid but strategically sharp; locked centers and pawn-chain play are common.
+caro_kann_defense,Caro-Kann Defense,B10-B19,1.e4 c6,0.35,0.76,0.24,0.68,0.07,0.52,0.46,0.26,0.72,0.54,high,Solid and lower-chaos defense; often reaches stable structures/endgames.
+ruy_lopez,Ruy Lopez / Spanish Opening,C60-C99,1.e4 e5 2.Nf3 Nc6 3.Bb5,0.55,0.62,0.42,0.82,0.18,0.76,0.58,0.44,0.55,0.88,high,Highly diverse classical opening; can become tactical or deeply strategic depending on line.
+italian_game,Italian Game / Giuoco Piano,C50-C54,1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5,0.58,0.57,0.45,0.82,0.1,0.64,0.42,0.36,0.56,0.58,high,Classical development with both quiet maneuvering and sharp gambit/offshoot possibilities.
+scotch_game,Scotch Game,C45,1.e4 e5 2.Nf3 Nc6 3.d4 exd4 4.Nxd4,0.64,0.43,0.46,0.74,0.12,0.66,0.5,0.42,0.5,0.5,medium-high,Earlier central confrontation than Ruy Lopez; more open-piece play.
+kings_gambit,King's Gambit,C30-C39,1.e4 e5 2.f4,0.86,0.18,0.78,0.66,0.14,0.82,0.62,0.78,0.22,0.52,high,Classical attacking gambit; material imbalance and king exposure are central themes.
+queens_gambit_declined,Queen's Gambit Declined,D30-D69,1.d4 d5 2.c4 e6,0.38,0.78,0.28,0.74,0.08,0.66,0.62,0.3,0.68,0.72,high,"Classical, solid d4 defense with strategic pawn-structure play."
+slav_defense,Slav Defense,D10-D19,1.d4 d5 2.c4 c6,0.42,0.72,0.26,0.72,0.07,0.63,0.56,0.32,0.66,0.64,high,Solid queen's-pawn defense; stable but can become dynamic in main lines.
+semi_slav_defense,Semi-Slav Defense,D43-D49,1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Nf3 c6,0.66,0.45,0.5,0.7,0.14,0.82,0.68,0.48,0.45,0.74,high,More complex and tactical than the pure Slav/QGD; Meran and Botvinnik-type structures raise complexity.
+nimzo_indian_defense,Nimzo-Indian Defense,E20-E59,1.d4 Nf6 2.c4 e6 3.Nc3 Bb4,0.5,0.66,0.32,0.78,0.08,0.76,0.7,0.52,0.57,0.82,high,Flexible strategic defense; bishop-pair vs structure imbalance is common.
+kings_indian_defense,King's Indian Defense,E60-E99,1.d4 Nf6 2.c4 g6,0.74,0.4,0.69,0.8,0.22,0.87,0.82,0.63,0.34,0.84,high,Strategically rich and often tactically sharp; pawn storms and locked centers common.
+grunfeld_defense,Grünfeld Defense,D70-D99,1.d4 Nf6 2.c4 g6 3.Nc3 d5,0.7,0.38,0.52,0.82,0.1,0.84,0.7,0.58,0.42,0.78,high,Hypermodern central pressure; dynamic pawn-center vs piece-pressure imbalance.
+english_opening,English Opening,A10-A39,1.c4,0.42,0.74,0.3,0.76,0.08,0.68,0.54,0.36,0.62,0.86,medium-high,Flexible transpositional opening; generally strategic with broad structural diversity.
+catalan_opening,Catalan Opening,E01-E09,1.d4 Nf6 2.c4 e6 3.g3 d5 4.Bg2,0.4,0.78,0.26,0.82,0.04,0.68,0.58,0.38,0.7,0.68,high,Long-term pressure and fianchetto play; usually strategic and technically demanding.
+london_system,London System,D02-D05,1.d4 d5 2.Nf3 Nf6 3.Bf4,0.3,0.82,0.2,0.78,0.05,0.46,0.34,0.22,0.66,0.38,medium,"System opening; typically stable and lower-diversity, though aggressive h-pawn plans exist."
+dutch_defense,Dutch Defense,A80-A99,1.d4 f5,0.68,0.38,0.66,0.72,0.08,0.78,0.68,0.5,0.36,0.62,high,Imbalanced defense; weakens kingside but creates attacking chances.
+pirc_defense,Pirc Defense,B07-B09,1.e4 d6 2.d4 Nf6,0.62,0.46,0.58,0.78,0.18,0.74,0.66,0.42,0.4,0.62,high,Hypermodern defense; allows White space and often leads to tense attacking setups.
+scandinavian_defense,Scandinavian Defense,B01,1.e4 d5,0.5,0.54,0.42,0.64,0.1,0.55,0.42,0.3,0.56,0.42,high,Early central clarification; often practical and structurally simpler than Sicilian/French.
