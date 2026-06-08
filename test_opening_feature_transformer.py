@@ -83,7 +83,8 @@ def test_castling_stats_detect_early_and_opposite_side_castling():
 
     early, opposite, castled, sides = detect_castling_stats(boards, moves)
 
-    assert early == 1.0
+    assert early[chess.WHITE] == 1.0
+    assert early[chess.BLACK] == 1.0
     assert opposite == 1.0
     assert castled[chess.WHITE] is True
     assert castled[chess.BLACK] is True
@@ -183,7 +184,8 @@ def test_opposite_side_castling_potential_without_both_kings_castled():
 
     assert white_side > 0.0
     assert black_side > 0.0
-    assert early > 0.0
+    assert early[chess.WHITE] > 0.0
+    assert early[chess.BLACK] > 0.0
     assert opposite > 0.0
 
 

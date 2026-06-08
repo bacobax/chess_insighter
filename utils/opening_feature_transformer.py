@@ -33,6 +33,13 @@ MATCHER_COLUMNS_V2 = [
     "endgame_likelihood_proxy",
 ]
 
+WHITE_MATCHER_COLUMNS_V2 = [f"white_{column}" for column in MATCHER_COLUMNS_V2]
+BLACK_MATCHER_COLUMNS_V2 = [f"black_{column}" for column in MATCHER_COLUMNS_V2]
+SIDE_MATCHER_COLUMNS_V2 = [
+    *WHITE_MATCHER_COLUMNS_V2,
+    *BLACK_MATCHER_COLUMNS_V2,
+]
+
 REPORT_METADATA_COLUMNS = [
     "final_structure_entropy",
     "structure_diversity",
@@ -87,6 +94,24 @@ class LineFeatureVector:
     material_imbalance: float
     endgame_likelihood_proxy: float
     structure_signature: str
+    white_tactical_density: float = 0.0
+    white_quiet_position_density: float = 0.0
+    white_king_safety_risk: float = 0.0
+    white_early_castling_tendency: float = 0.0
+    white_opposite_side_castling_tendency: float = 0.0
+    white_middlegame_complexity: float = 0.0
+    white_pawn_structure_sharpness: float = 0.0
+    white_material_imbalance: float = 0.0
+    white_endgame_likelihood_proxy: float = 0.0
+    black_tactical_density: float = 0.0
+    black_quiet_position_density: float = 0.0
+    black_king_safety_risk: float = 0.0
+    black_early_castling_tendency: float = 0.0
+    black_opposite_side_castling_tendency: float = 0.0
+    black_middlegame_complexity: float = 0.0
+    black_pawn_structure_sharpness: float = 0.0
+    black_material_imbalance: float = 0.0
+    black_endgame_likelihood_proxy: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +133,24 @@ class OpeningGroupFeatureVector:
     structure_diversity: float
     final_structure_entropy: float = 0.0
     structure_distribution: dict[str, int] = field(default_factory=dict)
+    white_tactical_density: float = 0.0
+    white_quiet_position_density: float = 0.0
+    white_king_safety_risk: float = 0.0
+    white_early_castling_tendency: float = 0.0
+    white_opposite_side_castling_tendency: float = 0.0
+    white_middlegame_complexity: float = 0.0
+    white_pawn_structure_sharpness: float = 0.0
+    white_material_imbalance: float = 0.0
+    white_endgame_likelihood_proxy: float = 0.0
+    black_tactical_density: float = 0.0
+    black_quiet_position_density: float = 0.0
+    black_king_safety_risk: float = 0.0
+    black_early_castling_tendency: float = 0.0
+    black_opposite_side_castling_tendency: float = 0.0
+    black_middlegame_complexity: float = 0.0
+    black_pawn_structure_sharpness: float = 0.0
+    black_material_imbalance: float = 0.0
+    black_endgame_likelihood_proxy: float = 0.0
 
     def vector(self) -> list[float]:
         return [float(getattr(self, column)) for column in VECTOR_COLUMNS]
@@ -479,6 +522,19 @@ def pawn_structure_sharpness(board: chess.Board) -> float:
     return clamp01(0.35 * min(1.0, weak_pawns / 8) + 0.25 * max(open_center_score, closed_center_score) + 0.2 * files_score + 0.2 * islands_score)
 
 
+def pawn_structure_sharpness_for_color(board: chess.Board, color: chess.Color) -> float:
+    weak_pawns = isolated_pawns(board, color) + doubled_pawns(board, color) + passed_pawns(board, color)
+    open_center_score, closed_center_score = center_state_scores(board)
+    files_score = (open_files(board) / 8 + semi_open_files(board, color) / 8) / 2
+    islands_score = pawn_islands(board, color) / 4
+    return clamp01(
+        0.4 * min(1.0, weak_pawns / 4)
+        + 0.25 * max(open_center_score, closed_center_score)
+        + 0.2 * files_score
+        + 0.15 * islands_score
+    )
+
+
 def pawn_structure_signature(board: chess.Board) -> str:
     open_center_score, closed_center_score = center_state_scores(board)
     return "|".join(
@@ -509,6 +565,67 @@ def material_imbalance_score(
         0.65 * realized_material_imbalance_score(board)
         + 0.35 * material_imbalance_potential(board, engine_info)
     )
+
+
+def material_imbalance_score_for_color(
+    board: chess.Board,
+    color: chess.Color,
+    engine_info: Optional[EnginePositionInfo] = None,
+) -> float:
+    values = {
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+    }
+    own_material = sum(values[piece] * len(board.pieces(piece, color)) for piece in values)
+    enemy_material = sum(values[piece] * len(board.pieces(piece, not color)) for piece in values)
+    material_gap = abs(own_material - enemy_material) / 10
+    own_pawn_gap = abs(len(board.pieces(chess.PAWN, color)) - len(board.pieces(chess.PAWN, not color))) / 2
+    own_bishop_pair_gap = abs(
+        int(len(board.pieces(chess.BISHOP, color)) >= 2)
+        - int(len(board.pieces(chess.BISHOP, not color)) >= 2)
+    )
+    own_minor_mix = min(
+        1.0,
+        abs(
+            (len(board.pieces(chess.BISHOP, color)) - len(board.pieces(chess.KNIGHT, color)))
+            - (len(board.pieces(chess.BISHOP, not color)) - len(board.pieces(chess.KNIGHT, not color)))
+        )
+        / 4,
+    )
+    pv_pressure = 0.0
+    if engine_info is not None and engine_info.top_moves:
+        pv_pressure = max(
+            pv_material_asymmetry_after_prefix(board, move.line_uci)
+            for move in engine_info.top_moves
+        )
+    return clamp01(
+        0.35 * min(1.0, material_gap)
+        + 0.2 * min(1.0, own_pawn_gap)
+        + 0.2 * own_bishop_pair_gap
+        + 0.15 * own_minor_mix
+        + 0.1 * pv_pressure
+    )
+
+
+def side_tactical_pressure_score(board: chess.Board, color: chess.Color, engine_info: EnginePositionInfo) -> float:
+    return tactical_position_score(board, engine_info)
+
+
+def side_quiet_position_score(board: chess.Board, color: chess.Color, engine_info: EnginePositionInfo) -> float:
+    return quiet_position_score(board, engine_info)
+
+
+def opening_vector_for_color(row: dict[str, Any], target_color: str) -> dict[str, Optional[float]]:
+    prefix = "white_" if target_color == "white" else "black_" if target_color == "black" else ""
+    vector: dict[str, Optional[float]] = {}
+    for feature in MATCHER_COLUMNS_V2:
+        value = row.get(f"{prefix}{feature}") if prefix else row.get(feature)
+        if value is None and prefix:
+            value = row.get(feature)
+        vector[feature] = float_or_none(value)
+    return vector
 
 
 def realized_material_imbalance_score(board: chess.Board) -> float:
@@ -761,7 +878,10 @@ def king_safety_context_score(
     return clamp01(max(risk, floor))
 
 
-def detect_castling_stats(boards: list[chess.Board], moves: list[chess.Move]) -> tuple[float, float, dict[chess.Color, bool], dict[chess.Color, Optional[str]]]:
+def detect_castling_stats(
+    boards: list[chess.Board],
+    moves: list[chess.Move],
+) -> tuple[dict[chess.Color, float], float, dict[chess.Color, bool], dict[chess.Color, Optional[str]]]:
     castle_move_number: dict[chess.Color, Optional[int]] = {chess.WHITE: None, chess.BLACK: None}
     castle_side: dict[chess.Color, Optional[str]] = {chess.WHITE: None, chess.BLACK: None}
 
@@ -775,15 +895,14 @@ def detect_castling_stats(boards: list[chess.Board], moves: list[chess.Move]) ->
             castle_side[color] = castling_side(temp.king(color))
 
     final_board = boards[-1] if boards else chess.Board()
-    early_values = []
+    early_by_color: dict[chess.Color, float] = {}
     for color in [chess.WHITE, chess.BLACK]:
         if castle_move_number[color] is not None:
-            early_values.append(1.0 if castle_move_number[color] <= 10 else 0.65)
+            early_by_color[color] = 1.0 if castle_move_number[color] <= 10 else 0.65
         elif final_board.fullmove_number < 8:
-            early_values.append(0.65 * castling_opportunity_score(final_board, color))
+            early_by_color[color] = 0.65 * castling_opportunity_score(final_board, color)
         else:
-            early_values.append(0.35 * castling_opportunity_score(final_board, color))
-    early_castling = mean(early_values)
+            early_by_color[color] = 0.35 * castling_opportunity_score(final_board, color)
     both_castled = castle_side[chess.WHITE] is not None and castle_side[chess.BLACK] is not None
     if both_castled:
         opposite = 1.0 if castle_side[chess.WHITE] != castle_side[chess.BLACK] else 0.0
@@ -798,7 +917,7 @@ def detect_castling_stats(boards: list[chess.Board], moves: list[chess.Move]) ->
             opposite = 0.55 * min(white_strength, black_strength)
         else:
             opposite = 0.0
-    return early_castling, opposite, {color: castle_move_number[color] is not None for color in [chess.WHITE, chess.BLACK]}, castle_side
+    return early_by_color, opposite, {color: castle_move_number[color] is not None for color in [chess.WHITE, chess.BLACK]}, castle_side
 
 
 def is_endgame(board: chess.Board) -> bool:
@@ -896,7 +1015,8 @@ def compute_line_features(
     tactical_density = mean(tactical_position_score(board, info) for board, info in zip(boards, position_infos))
     quiet_density = mean(quiet_position_score(board, info) for board, info in zip(boards, position_infos))
 
-    early_castling, opposite_castling, castled, _castle_sides = detect_castling_stats(boards, moves)
+    early_by_color, opposite_castling, castled, _castle_sides = detect_castling_stats(boards, moves)
+    early_castling = mean(early_by_color.values())
     final_board = boards[-1]
     final_move_number = final_board.fullmove_number
     king_risk = mean(
@@ -910,6 +1030,36 @@ def compute_line_features(
     complexity_infos = position_infos[-len(complexity_boards):]
     complexity = mean(absolute_position_complexity(board, info) for board, info in zip(complexity_boards, complexity_infos))
     final_eval_volatility = position_infos[-1].eval_volatility if position_infos else 0.0
+    final_engine_info = position_infos[-1] if position_infos else None
+
+    side_features: dict[chess.Color, dict[str, float]] = {}
+    for color in [chess.WHITE, chess.BLACK]:
+        side_pairs = [
+            (board, info)
+            for board, info in zip(boards, position_infos)
+            if board.turn == color
+        ]
+        if not side_pairs:
+            side_pairs = list(zip(boards, position_infos))
+        side_complexity_pairs = side_pairs[-4:] if len(side_pairs) >= 4 else side_pairs
+        side_tactical = mean(side_tactical_pressure_score(board, color, info) for board, info in side_pairs)
+        side_quiet = mean(side_quiet_position_score(board, color, info) for board, info in side_pairs)
+        side_king_risk = king_safety_risk_for_color(final_board, color, final_move_number, castled[color])
+        side_features[color] = {
+            "tactical_density": round_float(side_tactical),
+            "quiet_position_density": round_float(side_quiet),
+            "king_safety_risk": round_float(side_king_risk),
+            "early_castling_tendency": round_float(early_by_color[color]),
+            "opposite_side_castling_tendency": round_float(opposite_castling),
+            "middlegame_complexity": round_float(
+                mean(absolute_position_complexity(board, info) for board, info in side_complexity_pairs)
+            ),
+            "pawn_structure_sharpness": round_float(pawn_structure_sharpness_for_color(final_board, color)),
+            "material_imbalance": round_float(material_imbalance_score_for_color(final_board, color, final_engine_info)),
+            "endgame_likelihood_proxy": round_float(
+                endgame_likelihood_proxy(final_board, side_tactical, side_king_risk, final_eval_volatility)
+            ),
+        }
 
     return LineFeatureVector(
         opening_name=line.name,
@@ -926,6 +1076,24 @@ def compute_line_features(
         material_imbalance=round_float(material_imbalance_score(final_board, position_infos[-1] if position_infos else None)),
         endgame_likelihood_proxy=round_float(endgame_likelihood_proxy(final_board, tactical_density, king_risk, final_eval_volatility)),
         structure_signature=pawn_structure_signature(final_board),
+        white_tactical_density=side_features[chess.WHITE]["tactical_density"],
+        white_quiet_position_density=side_features[chess.WHITE]["quiet_position_density"],
+        white_king_safety_risk=side_features[chess.WHITE]["king_safety_risk"],
+        white_early_castling_tendency=side_features[chess.WHITE]["early_castling_tendency"],
+        white_opposite_side_castling_tendency=side_features[chess.WHITE]["opposite_side_castling_tendency"],
+        white_middlegame_complexity=side_features[chess.WHITE]["middlegame_complexity"],
+        white_pawn_structure_sharpness=side_features[chess.WHITE]["pawn_structure_sharpness"],
+        white_material_imbalance=side_features[chess.WHITE]["material_imbalance"],
+        white_endgame_likelihood_proxy=side_features[chess.WHITE]["endgame_likelihood_proxy"],
+        black_tactical_density=side_features[chess.BLACK]["tactical_density"],
+        black_quiet_position_density=side_features[chess.BLACK]["quiet_position_density"],
+        black_king_safety_risk=side_features[chess.BLACK]["king_safety_risk"],
+        black_early_castling_tendency=side_features[chess.BLACK]["early_castling_tendency"],
+        black_opposite_side_castling_tendency=side_features[chess.BLACK]["opposite_side_castling_tendency"],
+        black_middlegame_complexity=side_features[chess.BLACK]["middlegame_complexity"],
+        black_pawn_structure_sharpness=side_features[chess.BLACK]["pawn_structure_sharpness"],
+        black_material_imbalance=side_features[chess.BLACK]["material_imbalance"],
+        black_endgame_likelihood_proxy=side_features[chess.BLACK]["endgame_likelihood_proxy"],
     )
 
 
@@ -955,6 +1123,24 @@ def aggregate_line_features(features: Iterable[LineFeatureVector], *, opening_na
         structure_diversity=entropy,
         final_structure_entropy=entropy,
         structure_distribution=distribution,
+        white_tactical_density=avg_attr(items, "white_tactical_density"),
+        white_quiet_position_density=avg_attr(items, "white_quiet_position_density"),
+        white_king_safety_risk=avg_attr(items, "white_king_safety_risk"),
+        white_early_castling_tendency=avg_attr(items, "white_early_castling_tendency"),
+        white_opposite_side_castling_tendency=avg_attr(items, "white_opposite_side_castling_tendency"),
+        white_middlegame_complexity=avg_attr(items, "white_middlegame_complexity"),
+        white_pawn_structure_sharpness=avg_attr(items, "white_pawn_structure_sharpness"),
+        white_material_imbalance=avg_attr(items, "white_material_imbalance"),
+        white_endgame_likelihood_proxy=avg_attr(items, "white_endgame_likelihood_proxy"),
+        black_tactical_density=avg_attr(items, "black_tactical_density"),
+        black_quiet_position_density=avg_attr(items, "black_quiet_position_density"),
+        black_king_safety_risk=avg_attr(items, "black_king_safety_risk"),
+        black_early_castling_tendency=avg_attr(items, "black_early_castling_tendency"),
+        black_opposite_side_castling_tendency=avg_attr(items, "black_opposite_side_castling_tendency"),
+        black_middlegame_complexity=avg_attr(items, "black_middlegame_complexity"),
+        black_pawn_structure_sharpness=avg_attr(items, "black_pawn_structure_sharpness"),
+        black_material_imbalance=avg_attr(items, "black_material_imbalance"),
+        black_endgame_likelihood_proxy=avg_attr(items, "black_endgame_likelihood_proxy"),
     )
 
 
@@ -1016,6 +1202,7 @@ def write_group_features(path: str | Path, groups: list[OpeningGroupFeatureVecto
         "representative_pgn",
         "representative_uci",
         *MATCHER_COLUMNS_V2,
+        *SIDE_MATCHER_COLUMNS_V2,
         "final_structure_entropy",
         "structure_diversity",
         "structure_distribution",
@@ -1261,6 +1448,15 @@ def signature_entropy(signatures: list[str]) -> float:
 
 def round_float(value: float) -> float:
     return round(clamp01(value), 6)
+
+
+def float_or_none(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def clamp01(value: float) -> float:

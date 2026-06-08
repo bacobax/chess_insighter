@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from backend.models import ReportBuildRequest
+from backend.services import openings_service, statistics_service
 from backend.services.cache_service import stable_hash
+from backend.services.cache_service import report_cache_key
 from backend.services.chesscom_service import summarize_game
 from backend.services.openings_service import (
+    opening_feature_rows,
     structure_distribution_similarity,
     top_opening_matches,
     top_opening_matches_from_cached_report,
@@ -101,3 +107,223 @@ def test_top_opening_matches_accepts_target_color_both_without_distribution():
     )
     assert dot_matches[0].match_mode == "dot_product"
     assert dot_matches[0].dot_product_score == dot_matches[0].similarity_score
+
+
+def test_opening_feature_rows_falls_back_to_global_side_fields(tmp_path):
+    path = tmp_path / "opening_vectors.csv"
+    path.write_text(
+        ",".join(
+            [
+                "opening_name",
+                "line_count",
+                "eco_values",
+                "representative_pgn",
+                "representative_uci",
+                "tactical_density",
+                "quiet_position_density",
+                "king_safety_risk",
+                "early_castling_tendency",
+                "opposite_side_castling_tendency",
+                "middlegame_complexity",
+                "pawn_structure_sharpness",
+                "material_imbalance",
+                "endgame_likelihood_proxy",
+                "final_structure_entropy",
+                "structure_diversity",
+                "structure_distribution",
+            ]
+        )
+        + "\n"
+        + "Fallback,1,A00,,,0.7,0.2,0.1,0.3,0.4,0.5,0.6,0.8,0.9,0.0,0.0,{}\n",
+        encoding="utf-8",
+    )
+    previous = settings.opening_vectors_path
+    object.__setattr__(settings, "opening_vectors_path", path)
+    opening_feature_rows.cache_clear()
+    try:
+        row = opening_feature_rows()[0]
+        assert row["white_tactical_density"] == row["tactical_density"]
+        assert row["black_material_imbalance"] == row["material_imbalance"]
+    finally:
+        object.__setattr__(settings, "opening_vectors_path", previous)
+        opening_feature_rows.cache_clear()
+
+
+def test_top_opening_matches_uses_side_specific_opening_vectors(monkeypatch):
+    rows = [
+        _opening_row(
+            "White Fit",
+            tactical_density=0.0,
+            quiet_position_density=1.0,
+            white_tactical_density=1.0,
+            white_quiet_position_density=0.0,
+            black_tactical_density=0.0,
+            black_quiet_position_density=1.0,
+        ),
+        _opening_row(
+            "Black Fit",
+            tactical_density=1.0,
+            quiet_position_density=0.0,
+            white_tactical_density=0.0,
+            white_quiet_position_density=1.0,
+            black_tactical_density=1.0,
+            black_quiet_position_density=0.0,
+        ),
+    ]
+    monkeypatch.setattr(openings_service, "opening_feature_rows", lambda: rows)
+    vector = {"tactical_density": 1.0, "quiet_position_density": 0.0}
+
+    white = top_opening_matches(vector, target_color="white", match_mode="dot_product", limit=1)[0]
+    black = top_opening_matches(vector, target_color="black", match_mode="dot_product", limit=1)[0]
+    both = top_opening_matches(vector, target_color="both", match_mode="dot_product", limit=1)[0]
+
+    assert white.opening_name == "White Fit"
+    assert white.used_vector_color == "white"
+    assert black.opening_name == "Black Fit"
+    assert black.used_vector_color == "black"
+    assert both.opening_name == "Black Fit"
+    assert both.used_vector_color == "global"
+
+
+def test_report_cache_key_does_not_include_target_color():
+    key = report_cache_key(
+        username="Alice",
+        hparams={"sampling": {"min_samples": 3}},
+        filters={},
+        max_games=20,
+        engine_depth=10,
+        use_engine=True,
+    )
+
+    assert "target_color" not in key
+
+
+def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_path):
+    calls = {"fetch": 0, "enrich": 0, "build": 0}
+
+    class FakeCache:
+        def get(self, _cache_hash):
+            return None
+
+        def set(self, _cache_hash, _payload):
+            return None
+
+    class FakeBuilder:
+        def __init__(self, _hparams_path):
+            pass
+
+        def build(self, _games, player_name):
+            calls["build"] += 1
+            profile = SimpleNamespace(
+                player_name=player_name,
+                games_analyzed=1,
+                moves_analyzed=1,
+                style_vector={},
+                skill_vector={},
+                subfeatures={},
+                confidence={},
+            )
+            return SimpleNamespace(
+                global_statistics=_fake_stats(),
+                player_profile=profile,
+                matcher_ready_player_vector={"tactical_density": 0.5},
+                player_profiles_by_color={"white": profile, "black": profile, "both": profile},
+                matcher_ready_player_vectors={
+                    "white": {"tactical_density": 1.0},
+                    "black": {"tactical_density": 0.0},
+                    "both": {"tactical_density": 0.5},
+                },
+            )
+
+    def fake_fetch_latest_games_for_report(**_kwargs):
+        calls["fetch"] += 1
+        return [{"uuid": "game"}]
+
+    def fake_enrich_games(_games, **_kwargs):
+        calls["enrich"] += 1
+        return ([{"id": "enriched"}], {})
+
+    def fake_opening_charts(_bundle):
+        group = {
+            "opening_characteristics": [],
+            "top_opening_features": [],
+            "top_opening_matches": [],
+        }
+        return {
+            "favourite_openings": [],
+            "top_opening_features": [],
+            "opening_characteristics": [],
+            "top_opening_matches": [],
+            "opening_report_groups": {"white": group, "black": group, "both": group},
+        }
+
+    monkeypatch.setattr(statistics_service, "ReportCache", lambda: FakeCache())
+    monkeypatch.setattr(statistics_service, "PlayerStatisticsBuilder", FakeBuilder)
+    monkeypatch.setattr(statistics_service, "fetch_latest_games_for_report", fake_fetch_latest_games_for_report)
+    monkeypatch.setattr(statistics_service, "enrich_games", fake_enrich_games)
+    monkeypatch.setattr(statistics_service, "build_opening_charts", fake_opening_charts)
+    monkeypatch.setattr(
+        statistics_service,
+        "serializable",
+        lambda bundle: {
+            "player_profile": {},
+            "matcher_ready_player_vector": bundle.matcher_ready_player_vector,
+            "player_profiles_by_color": {},
+            "matcher_ready_player_vectors": bundle.matcher_ready_player_vectors,
+        },
+    )
+    monkeypatch.setattr(statistics_service, "update_player_vector_cache", lambda **_kwargs: None)
+    previous_report_config_dir = settings.report_config_dir
+    object.__setattr__(settings, "report_config_dir", tmp_path)
+    try:
+        response = statistics_service.build_report(
+            ReportBuildRequest(username="Alice", hparams={}, max_games=1, use_engine=False)
+        )
+    finally:
+        object.__setattr__(settings, "report_config_dir", previous_report_config_dir)
+
+    assert calls == {"fetch": 1, "enrich": 1, "build": 1}
+    assert set(response.report.charts.opening_report_groups) == {"white", "black", "both"}
+
+
+def _opening_row(name: str, **values):
+    row = {
+        "opening_name": name,
+        "line_count": 1,
+        "eco_values": "A00",
+        "representative_pgn": "",
+        "representative_uci": "",
+        "structure_distribution": {},
+    }
+    for feature in openings_service.MATCHER_COLUMNS_V2:
+        row[feature] = values.get(feature, 0.0)
+        row[f"white_{feature}"] = values.get(f"white_{feature}", row[feature])
+        row[f"black_{feature}"] = values.get(f"black_{feature}", row[feature])
+    return row
+
+
+def _fake_stats():
+    class Section:
+        score = 0.5
+        average_time_spent_by_complexity = {
+            "simple": 1.0,
+            "normal": 1.0,
+            "complex": 1.0,
+            "high_complexity": 1.0,
+        }
+
+        def __getattr__(self, _name):
+            return 0.5
+
+    section = Section()
+    return SimpleNamespace(
+        middlegame_strategy_score=section,
+        openings_score=section,
+        calculation_score=section,
+        tactics_score=section,
+        resourcefulness_score=section,
+        advantage_capitalization_score=section,
+        game_analysis_score=section,
+        time_management_score=section,
+        endgame_score=section,
+    )

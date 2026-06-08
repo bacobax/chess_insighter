@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import chess
+
 from utils.game_enrichment_transformer import EnrichedGame
 from utils.global_statistics_transformer import GlobalStatistics
 from utils.global_statistics_transformer import GlobalStatisticsTransformer
@@ -25,6 +27,8 @@ class PlayerStatisticsBundle:
     castling_summaries: list[GameCastlingSummary]
     player_profile: PlayerProfile
     matcher_ready_player_vector: dict[str, Optional[float]]
+    player_profiles_by_color: dict[str, PlayerProfile]
+    matcher_ready_player_vectors: dict[str, dict[str, Optional[float]]]
 
 
 class PlayerStatisticsBuilder:
@@ -55,10 +59,31 @@ class PlayerStatisticsBuilder:
             castling_summaries,
             player_name=player_name,
         )
+        white_profile = self.feature_aggregator.aggregate(
+            [sample for sample in player_samples if sample.player_color == chess.WHITE],
+            [summary for summary in castling_summaries if summary.player_color == chess.WHITE],
+            player_name=player_name,
+        )
+        black_profile = self.feature_aggregator.aggregate(
+            [sample for sample in player_samples if sample.player_color == chess.BLACK],
+            [summary for summary in castling_summaries if summary.player_color == chess.BLACK],
+            player_name=player_name,
+        )
+        player_profiles_by_color = {
+            "white": white_profile,
+            "black": black_profile,
+            "both": player_profile,
+        }
+        matcher_ready_player_vectors = {
+            color: player_opening_vector(profile)
+            for color, profile in player_profiles_by_color.items()
+        }
         return PlayerStatisticsBundle(
             global_statistics=global_statistics,
             player_samples=player_samples,
             castling_summaries=castling_summaries,
             player_profile=player_profile,
             matcher_ready_player_vector=player_opening_vector(player_profile),
+            player_profiles_by_color=player_profiles_by_color,
+            matcher_ready_player_vectors=matcher_ready_player_vectors,
         )

@@ -32,7 +32,6 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         max_games=request.max_games,
         engine_depth=request.engine_depth,
         use_engine=request.use_engine,
-        target_color=request.target_color,
     )
     cache_hash = stable_hash(key)
     cache = ReportCache()
@@ -71,7 +70,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
     bundle = PlayerStatisticsBuilder(hparams_path).build(enriched_games, player_name=request.username)
     bundle_json = serializable(bundle)
     stats = bundle.global_statistics
-    opening_charts = build_opening_charts(bundle, target_color=request.target_color)
+    opening_charts = build_opening_charts(bundle)
 
     metadata = {
         "username": request.username,
@@ -86,6 +85,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         top_opening_features=opening_charts["top_opening_features"],
         opening_characteristics=opening_charts["opening_characteristics"],
         top_opening_matches=opening_charts["top_opening_matches"],
+        opening_report_groups=opening_charts["opening_report_groups"],
         opening_components=opening_components(stats),
         time_management_indicators=time_management_indicators(stats),
         advantage_capitalization_components=advantage_components(stats),

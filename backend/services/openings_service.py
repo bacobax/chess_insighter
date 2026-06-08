@@ -12,10 +12,13 @@ from backend.models import MetricPoint, OpeningCount, OpeningFeatureSet, Opening
 from backend.services.cache_service import ReportCache
 from backend.settings import settings
 from utils.opening_feature_transformer import (
+    BLACK_MATCHER_COLUMNS_V2,
     MATCHER_COLUMNS_V2,
+    WHITE_MATCHER_COLUMNS_V2,
     decode_distribution_csv,
     histogram_intersection,
     normalize_distribution,
+    opening_vector_for_color,
 )
 
 
@@ -45,8 +48,19 @@ def opening_feature_rows() -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8", newline="") as file:
         rows = list(csv.DictReader(file))
     for row in rows:
-        for feature in [*MATCHER_COLUMNS_V2, "final_structure_entropy", "structure_diversity"]:
+        for feature in [
+            *MATCHER_COLUMNS_V2,
+            *WHITE_MATCHER_COLUMNS_V2,
+            *BLACK_MATCHER_COLUMNS_V2,
+            "final_structure_entropy",
+            "structure_diversity",
+        ]:
             row[feature] = optional_float(row.get(feature))
+        for feature in MATCHER_COLUMNS_V2:
+            if row.get(f"white_{feature}") is None:
+                row[f"white_{feature}"] = row.get(feature)
+            if row.get(f"black_{feature}") is None:
+                row[f"black_{feature}"] = row.get(feature)
         if row.get("final_structure_entropy") is None:
             row["final_structure_entropy"] = row.get("structure_diversity")
         row["structure_distribution"] = decode_distribution_csv(row.get("structure_distribution"))
@@ -56,15 +70,32 @@ def opening_feature_rows() -> list[dict[str, Any]]:
 
 
 def build_opening_charts(bundle: Any, target_color: str = "both") -> dict[str, Any]:
-    profile = bundle.player_profile
-    vector = bundle.matcher_ready_player_vector
+    profiles_by_color = getattr(bundle, "player_profiles_by_color", None) or {"both": bundle.player_profile}
+    vectors_by_color = getattr(bundle, "matcher_ready_player_vectors", None) or {"both": bundle.matcher_ready_player_vector}
+    profile = profiles_by_color.get("both") or bundle.player_profile
+    vector = vectors_by_color.get("both") or bundle.matcher_ready_player_vector
     subfeatures = profile.subfeatures
     favourite = favourite_openings(subfeatures)
+    groups = {}
+    for color in ["white", "black", "both"]:
+        color_profile = profiles_by_color.get(color) or profile
+        color_vector = vectors_by_color.get(color) or vector
+        groups[color] = {
+            "top_opening_features": top_opening_features(favourite, target_color=color),
+            "opening_characteristics": opening_characteristics(color_vector),
+            "top_opening_matches": top_opening_matches(
+                color_vector,
+                profile=color_profile,
+                target_color=color,
+                match_mode="cosine",
+            ),
+        }
     return {
         "favourite_openings": favourite,
-        "top_opening_features": top_opening_features(favourite),
-        "opening_characteristics": opening_characteristics(vector),
-        "top_opening_matches": top_opening_matches(vector, profile=profile, target_color=target_color, match_mode="cosine"),
+        "top_opening_features": groups["both"]["top_opening_features"],
+        "opening_characteristics": groups["both"]["opening_characteristics"],
+        "top_opening_matches": groups["both"]["top_opening_matches"],
+        "opening_report_groups": groups,
     }
 
 
@@ -78,14 +109,20 @@ def favourite_openings(subfeatures: dict[str, Any]) -> list[OpeningCount]:
     return items
 
 
-def top_opening_features(favourites: list[OpeningCount]) -> list[OpeningFeatureSet]:
+def top_opening_features(favourites: list[OpeningCount], target_color: str = "both") -> list[OpeningFeatureSet]:
     results: list[OpeningFeatureSet] = []
-    for color in ["white", "black"]:
+    colors = [target_color] if target_color in {"white", "black"} else ["white", "black"]
+    for color in colors:
         color_items = [item for item in favourites if item.color == color][:3]
         for item in color_items:
             family = find_opening_family_row(item.name)
+            family_vector = opening_vector_for_color(family, target_color) if family else {}
             features = [
-                MetricPoint(key=feature, label=pretty(feature), value=family.get(feature) if family else None)
+                MetricPoint(
+                    key=feature,
+                    label=pretty(feature),
+                    value=family_vector.get(feature) if feature in MATCHER_COLUMNS_V2 else family.get(feature) if family else None,
+                )
                 for feature in OPENING_FEATURES
             ]
             results.append(
@@ -114,14 +151,18 @@ def top_opening_matches(
     profile: Any | None = None,
     target_color: str = "both",
     match_mode: str = "cosine",
+    strict_repertoire_filter: bool = False,
 ) -> list[OpeningMatch]:
     matches: list[OpeningMatch] = []
+    normalized_target = target_color if target_color in {"white", "black", "both"} else "both"
+    used_vector_color = normalized_target if normalized_target in {"white", "black"} else "global"
     for row in opening_feature_rows():
         row_color = str(row.get("repertoire_color") or "both")
-        if target_color in {"white", "black"} and row_color not in {target_color, "both"}:
+        if strict_repertoire_filter and normalized_target in {"white", "black"} and row_color not in {normalized_target, "both"}:
             continue
-        cosine_score, used = weighted_cosine_similarity(vector, row, MATCHER_FEATURE_WEIGHTS)
-        dot_score, dot_used = weighted_dot_product_similarity(vector, row, MATCHER_FEATURE_WEIGHTS)
+        opening_vector = opening_vector_for_color(row, normalized_target)
+        cosine_score, used = weighted_cosine_similarity(vector, opening_vector, MATCHER_FEATURE_WEIGHTS)
+        dot_score, dot_used = weighted_dot_product_similarity(vector, opening_vector, MATCHER_FEATURE_WEIGHTS)
         if not used:
             used = dot_used
         score = dot_score if match_mode == "dot_product" else cosine_score
@@ -138,7 +179,8 @@ def top_opening_matches(
                 dot_product_score=dot_score,
                 match_mode="dot_product" if match_mode == "dot_product" else "cosine",
                 structure_distribution_similarity=structure_score,
-                target_color=target_color if target_color in {"white", "black", "both"} else "both",
+                target_color=normalized_target,
+                used_vector_color=used_vector_color,
                 eco_values=empty_to_none(row.get("eco_values")),
                 line_count=row.get("line_count"),
                 representative_pgn=empty_to_none(row.get("representative_pgn")),
@@ -161,14 +203,17 @@ def top_opening_matches_from_cached_report(
     if cached is None:
         raise FileNotFoundError(f"Report cache entry not found: {cache_hash}")
     statistics_bundle = ((cached.get("report") or {}).get("statistics_bundle") or {})
-    vector = statistics_bundle.get("matcher_ready_player_vector") or {}
-    profile_data = statistics_bundle.get("player_profile") or {}
+    normalized_target = target_color if target_color in {"white", "black", "both"} else "both"
+    vectors_by_color = statistics_bundle.get("matcher_ready_player_vectors") or {}
+    vector = vectors_by_color.get(normalized_target) or statistics_bundle.get("matcher_ready_player_vector") or {}
+    profiles_by_color = statistics_bundle.get("player_profiles_by_color") or {}
+    profile_data = profiles_by_color.get(normalized_target) or statistics_bundle.get("player_profile") or {}
     profile = type("CachedPlayerProfile", (), {"subfeatures": profile_data.get("subfeatures") or {}})()
     return top_opening_matches(
         vector,
         limit=limit,
         profile=profile,
-        target_color=target_color,
+        target_color=normalized_target,
         match_mode=match_mode,
     )
 

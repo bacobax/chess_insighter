@@ -71,6 +71,7 @@ export type OpeningMatch = {
   match_mode: "cosine" | "dot_product";
   structure_distribution_similarity: number | null;
   target_color: "white" | "black" | "both" | null;
+  used_vector_color: "white" | "black" | "global";
   eco_values: string | null;
   line_count: number | null;
   representative_pgn: string | null;
@@ -81,12 +82,19 @@ export type OpeningMatch = {
 
 export type OpeningMatchMode = "cosine" | "dot_product";
 
+export type OpeningReportGroup = {
+  opening_characteristics: MetricPoint[];
+  top_opening_features: OpeningFeatureSet[];
+  top_opening_matches: OpeningMatch[];
+};
+
 export type ReportCharts = {
   skill_profile: MetricPoint[];
   favourite_openings: OpeningCount[];
   top_opening_features: OpeningFeatureSet[];
   opening_characteristics: MetricPoint[];
   top_opening_matches: OpeningMatch[];
+  opening_report_groups: Record<"white" | "black" | "both", OpeningReportGroup>;
   opening_components: MetricPoint[];
   time_management_indicators: MetricPoint[];
   advantage_capitalization_components: MetricPoint[];
@@ -108,7 +116,7 @@ export type ReportBuildRequest = {
   engine_depth: number;
   use_engine: boolean;
   refresh_cache: boolean;
-  target_color: "white" | "black" | "both";
+  target_color?: "white" | "black" | "both";
   time_classes?: string[] | null;
   rated_filter?: boolean | null;
   since_year?: number | null;

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
 import { buildReport, rematchOpenings } from "~/lib/api";
-import type { Hparams, OpeningMatch, OpeningMatchMode, ReportBuildResponse } from "~/lib/types";
+import type { Hparams, OpeningMatch, OpeningMatchMode, OpeningReportGroup, ReportBuildResponse } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 import { OpeningBoardPreview } from "./opening-board-preview";
 import { ReportConfigForm } from "./report-config-form";
@@ -15,7 +15,6 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
   const [maxGames, setMaxGames] = useState(20);
   const [timeClass, setTimeClass] = useState<string>("all");
   const [ratedFilter, setRatedFilter] = useState<string>("all");
-  const [targetColor, setTargetColor] = useState<"white" | "black" | "both">("both");
   const [sinceYear, setSinceYear] = useState<number | "">("");
   const [sinceMonth, setSinceMonth] = useState<number | "">("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -37,7 +36,6 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
         engine_depth: engineDepth,
         use_engine: useEngine,
         refresh_cache: refreshCache,
-        target_color: targetColor,
         time_classes: timeClass === "all" ? null : [timeClass],
         rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
         since_year: sinceYear === "" ? null : sinceYear,
@@ -60,7 +58,7 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
           <CardDescription>Configure the analysis run and build a cached player report.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <label className="text-sm">
               <span className="mb-1 block text-slate-600">Max games</span>
               <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={500} value={maxGames} onChange={(event) => setMaxGames(Number(event.target.value))} />
@@ -81,14 +79,6 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
                 <option value="all">All</option>
                 <option value="rated">Rated</option>
                 <option value="unrated">Unrated</option>
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-600">Target color</span>
-              <select className="h-10 w-full rounded-md border px-3 bg-white" value={targetColor} onChange={(e) => setTargetColor(e.target.value as "white" | "black" | "both")}>
-                <option value="both">Both</option>
-                <option value="white">White</option>
-                <option value="black">Black</option>
               </select>
             </label>
             <label className="text-sm">
@@ -144,9 +134,7 @@ function ReportDashboard({ report }: { report: ReportBuildResponse }) {
       </div>
       <SkillRadarChart data={charts.skill_profile} />
       <FavouriteOpeningsChart data={charts.favourite_openings} />
-      <OpeningFeaturePanels report={report} />
-      <OpeningCharacteristics report={report} />
-      <TopOpeningMatches report={report} />
+      <OpeningReportSections report={report} />
       <MetricBarChart title="Opening Components" data={charts.opening_components} />
       <MetricBarChart title="Time Management Indicators" data={charts.time_management_indicators} />
       <MetricBarChart title="Advantage Capitalization Components" data={charts.advantage_capitalization_components} />
@@ -157,12 +145,68 @@ function ReportDashboard({ report }: { report: ReportBuildResponse }) {
   );
 }
 
-function OpeningFeaturePanels({ report }: { report: ReportBuildResponse }) {
+function OpeningReportSections({ report }: { report: ReportBuildResponse }) {
+  const groups = report.report.charts.opening_report_groups ?? {
+    white: {
+      opening_characteristics: report.report.charts.opening_characteristics,
+      top_opening_features: report.report.charts.top_opening_features.filter((item) => item.color === "white"),
+      top_opening_matches: report.report.charts.top_opening_matches.filter((item) => item.target_color === "white"),
+    },
+    black: {
+      opening_characteristics: report.report.charts.opening_characteristics,
+      top_opening_features: report.report.charts.top_opening_features.filter((item) => item.color === "black"),
+      top_opening_matches: report.report.charts.top_opening_matches.filter((item) => item.target_color === "black"),
+    },
+    both: {
+      opening_characteristics: report.report.charts.opening_characteristics,
+      top_opening_features: report.report.charts.top_opening_features,
+      top_opening_matches: report.report.charts.top_opening_matches,
+    },
+  };
+  const [open, setOpen] = useState<Record<"white" | "black" | "both", boolean>>({
+    white: true,
+    black: true,
+    both: true,
+  });
+  const sections: Array<{ key: "white" | "black" | "both"; title: string }> = [
+    { key: "white", title: "White" },
+    { key: "black", title: "Black" },
+    { key: "both", title: "Both (Avg)" },
+  ];
+
   return (
-    <Card>
-      <CardHeader><CardTitle>Top 3 Opening Features</CardTitle></CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        {report.report.charts.top_opening_features.map((opening) => (
+    <div className="space-y-4">
+      {sections.map((section) => (
+        <Card key={section.key}>
+          <CardHeader className="space-y-0">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-left"
+              onClick={() => setOpen((current) => ({ ...current, [section.key]: !current[section.key] }))}
+            >
+              <CardTitle>{section.title}</CardTitle>
+              {open[section.key] ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
+            </button>
+          </CardHeader>
+          {open[section.key] ? (
+            <CardContent className="space-y-5">
+              <OpeningCharacteristics data={groups[section.key].opening_characteristics} />
+              <OpeningFeaturePanels data={groups[section.key].top_opening_features} />
+              <TopOpeningMatches report={report} group={groups[section.key]} targetColor={section.key} />
+            </CardContent>
+          ) : null}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function OpeningFeaturePanels({ data }: { data: OpeningReportGroup["top_opening_features"] }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-base font-semibold">Top 3 Opening Features</h3>
+      <div className="grid gap-4 md:grid-cols-2">
+        {data.map((opening) => (
           <div key={`${opening.color}-${opening.opening_name}`} className="rounded-md border p-4">
             <div className="mb-3 text-sm font-semibold">{opening.color}: {opening.opening_name}</div>
             <div className="space-y-3">
@@ -175,28 +219,28 @@ function OpeningFeaturePanels({ report }: { report: ReportBuildResponse }) {
             </div>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
-function OpeningCharacteristics({ report }: { report: ReportBuildResponse }) {
+function OpeningCharacteristics({ data }: { data: OpeningReportGroup["opening_characteristics"] }) {
   return (
-    <Card>
-      <CardHeader><CardTitle>Opening Characteristics</CardTitle></CardHeader>
-      <CardContent className="flex flex-wrap gap-2">
-        {report.report.charts.opening_characteristics.map((item) => (
+    <section className="space-y-3">
+      <h3 className="text-base font-semibold">Opening Characteristics</h3>
+      <div className="flex flex-wrap gap-2">
+        {data.map((item) => (
           <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
             <span className="font-medium">{item.label}</span> <span className="text-slate-500">{formatPercent(item.value)}</span>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
-function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
-  const initialMatches = report.report.charts.top_opening_matches;
+function TopOpeningMatches({ report, group, targetColor }: { report: ReportBuildResponse; group: OpeningReportGroup; targetColor: "white" | "black" | "both" }) {
+  const initialMatches = group.top_opening_matches;
   const [matches, setMatches] = useState<OpeningMatch[]>(initialMatches);
   const [matchMode, setMatchMode] = useState<OpeningMatchMode>(initialMatches[0]?.match_mode ?? "cosine");
   const [rematching, setRematching] = useState(false);
@@ -206,7 +250,7 @@ function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
     setMatches(initialMatches);
     setMatchMode(initialMatches[0]?.match_mode ?? "cosine");
     setRematchError(null);
-  }, [report.cache_hash]);
+  }, [report.cache_hash, targetColor]);
 
   async function changeMatchMode(nextMode: OpeningMatchMode) {
     setMatchMode(nextMode);
@@ -216,7 +260,7 @@ function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
       const response = await rematchOpenings({
         cache_hash: report.cache_hash,
         match_mode: nextMode,
-        target_color: matches[0]?.target_color ?? "both",
+        target_color: targetColor,
         limit: matches.length || 15,
       });
       setMatches(response.top_opening_matches);
@@ -229,9 +273,9 @@ function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
-        <CardTitle>Top K Opening Matches</CardTitle>
+    <section className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-base font-semibold">Top K Opening Matches</h3>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <span>Match type</span>
           <select
@@ -244,20 +288,20 @@ function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
             <option value="dot_product">Dot product</option>
           </select>
         </label>
-      </CardHeader>
-      <CardContent className="grid gap-3">
+      </div>
+      <div className="grid gap-3">
         {rematchError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rematchError}</div> : null}
-        {matches.map((match) => (
-          <div key={match.opening_name} className="grid max-w-2xl gap-3 rounded-md border p-3 sm:grid-cols-[80px_minmax(0,1fr)]">
+        {matches.map((match, index) => (
+          <div key={`${targetColor}-${match.opening_name}-${index}`} className="grid max-w-2xl gap-3 rounded-md border p-3 sm:grid-cols-[80px_minmax(0,1fr)]">
             <OpeningBoardPreview fen={match.fen} />
             <div className="min-w-0">
               <div className="truncate font-semibold" title={match.opening_name}>{match.opening_name}</div>
-              <div className="mt-1 text-sm text-slate-500">{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
+              <div className="mt-1 truncate text-sm text-slate-500" title={`ECO ${match.eco_values ?? "n/a"}`}>{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · {match.used_vector_color} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
               <div className="mt-2 line-clamp-2 text-xs text-slate-500">{match.representative_pgn ?? "No representative line"}</div>
             </div>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

@@ -138,6 +138,7 @@ class OpeningMatch(BaseModel):
     match_mode: Literal["cosine", "dot_product"] = "cosine"
     structure_distribution_similarity: float | None = None
     target_color: Literal["white", "black", "both"] | None = None
+    used_vector_color: Literal["white", "black", "global"] = "global"
     eco_values: str | None
     line_count: int | None
     representative_pgn: str | None
@@ -159,12 +160,19 @@ class OpeningMatchResponse(BaseModel):
     target_color: Literal["white", "black", "both"]
 
 
+class OpeningReportGroup(BaseModel):
+    opening_characteristics: list[MetricPoint]
+    top_opening_features: list[OpeningFeatureSet]
+    top_opening_matches: list[OpeningMatch]
+
+
 class ReportCharts(BaseModel):
     skill_profile: list[MetricPoint]
     favourite_openings: list[OpeningCount]
     top_opening_features: list[OpeningFeatureSet]
     opening_characteristics: list[MetricPoint]
     top_opening_matches: list[OpeningMatch]
+    opening_report_groups: dict[str, OpeningReportGroup] = Field(default_factory=dict)
     opening_components: list[MetricPoint]
     time_management_indicators: list[MetricPoint]
     advantage_capitalization_components: list[MetricPoint]
