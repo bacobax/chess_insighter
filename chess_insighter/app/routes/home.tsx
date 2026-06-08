@@ -1,13 +1,13 @@
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
+import { UsernameForm } from "~/components/username-form";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "Chess Insighter" },
+    { name: "description", content: "Chess.com analysis dashboard" },
   ];
 }
 
 export default function Home() {
-  return <Welcome />;
+  return <UsernameForm />;
 }
