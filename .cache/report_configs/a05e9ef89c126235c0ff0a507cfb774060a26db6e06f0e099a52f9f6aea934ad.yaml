@@ -1,0 +1,89 @@
+advantage_capitalization:
+  clearly_winning_eval_cp: 500
+  weights:
+    conversion_rate_from_winning_positions: 0.5
+    eval_preservation_when_ahead: 0.3
+    low_blunder_rate_when_ahead: 0.2
+  winning_eval_cp: 200
+complexity:
+  complex_percentile: 85
+  high_percentile: 90
+  simple_percentile: 50
+game_analysis:
+  improvement_delta: 0.02
+  weakness_loss_threshold: 0.08
+opening:
+  post_opening_move_count: 6
+  weights:
+    book_accuracy: 0.15
+    eval_stability_after_opening: 0.5
+    result_from_opening_positions: 0.35
+player_profile:
+  advantage:
+    blunder_win_probability_loss: 0.2
+    centipawn_threshold: 200
+    weights:
+      accuracy_while_better: 0.45
+      conversion_rate: 0.35
+      low_blunder_rate: 0.2
+    win_probability_game_threshold: 0.7
+    win_probability_move_threshold: 0.65
+  complexity_scale_percentile: 95
+  diversity:
+    entropy_weight: 0.7
+    top_share_weight: 0.3
+  endgame:
+    equal_win_probability_high: 0.55
+    equal_win_probability_low: 0.45
+    weights:
+      conversion_rate: 0.25
+      endgame_accuracy: 0.45
+      equal_endgame_hold_rate: 0.1
+      save_rate: 0.2
+    winning_win_probability_threshold: 0.65
+    worse_win_probability_threshold: 0.35
+  king_safety_performance_threshold: 0.65
+  loss_normalization:
+    centipawn_loss: 300
+    win_probability_loss: 0.25
+  material_imbalance_threshold: 0.05
+  pawn_structure:
+    weights:
+      backward_pawn_exposure: 0.15
+      doubled_pawn_exposure: 0.15
+      isolated_pawn_exposure: 0.2
+      open_center_exposure: 0.15
+      passed_pawn_exposure: 0.2
+      semi_open_file_exposure: 0.15
+  resourcefulness:
+    centipawn_threshold: -200
+    recovery_delta: 0.05
+    weights:
+      defensive_accuracy: 0.4
+      recovery_rate: 0.3
+      save_rate: 0.3
+    win_probability_game_threshold: 0.3
+    win_probability_move_threshold: 0.35
+resourcefulness:
+  lost_eval_cp: -500
+  weights:
+    eval_recovery_after_disadvantage: 0.3
+    low_collapse_rate_when_worse: 0.3
+    save_rate_from_bad_positions: 0.4
+  worse_eval_cp: -200
+result_scores:
+  draw: 0.5
+  loss: 0
+  win: 1
+sampling:
+  min_samples: 3
+time_management:
+  blunder_win_prob_loss: 0.1
+  critical_underthinking_seconds: 5
+  opponent_error_win_prob_loss: 0.05
+  simple_overthinking_seconds: 30
+  time_pressure_seconds: 30
+  weights:
+    bad_time_allocation: 0.3
+    blunders_in_time_pressure: 0.35
+    time_trouble: 0.35

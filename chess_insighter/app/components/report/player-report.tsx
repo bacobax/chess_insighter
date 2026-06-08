@@ -13,6 +13,11 @@ import { ReportConfigForm } from "./report-config-form";
 export function PlayerReport({ username, defaultHparams }: { username: string; defaultHparams: Hparams }) {
   const [hparams, setHparams] = useState<Hparams>(defaultHparams);
   const [maxGames, setMaxGames] = useState(20);
+  const [timeClass, setTimeClass] = useState<string>("all");
+  const [ratedFilter, setRatedFilter] = useState<string>("all");
+  const [sinceYear, setSinceYear] = useState<number | "">("");
+  const [sinceMonth, setSinceMonth] = useState<number | "">("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [engineDepth, setEngineDepth] = useState(10);
   const [useEngine, setUseEngine] = useState(true);
   const [refreshCache, setRefreshCache] = useState(false);
@@ -24,7 +29,18 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
     setLoading(true);
     setError(null);
     try {
-      const response = await buildReport({ username, hparams, max_games: maxGames, engine_depth: engineDepth, use_engine: useEngine, refresh_cache: refreshCache });
+      const response = await buildReport({
+        username,
+        hparams,
+        max_games: maxGames,
+        engine_depth: engineDepth,
+        use_engine: useEngine,
+        refresh_cache: refreshCache,
+        time_classes: timeClass === "all" ? null : [timeClass],
+        rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
+        since_year: sinceYear === "" ? null : sinceYear,
+        since_month: sinceMonth === "" ? null : sinceMonth,
+      });
       setReport(response);
       setHparams(response.normalized_hparams);
     } catch (err) {
@@ -42,21 +58,61 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
           <CardDescription>Configure the analysis run and build a cached player report.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <label className="text-sm">
               <span className="mb-1 block text-slate-600">Max games</span>
               <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={500} value={maxGames} onChange={(event) => setMaxGames(Number(event.target.value))} />
             </label>
             <label className="text-sm">
-              <span className="mb-1 block text-slate-600">Engine depth</span>
-              <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={30} value={engineDepth} onChange={(event) => setEngineDepth(Number(event.target.value))} />
+              <span className="mb-1 block text-slate-600">Time category</span>
+              <select className="h-10 w-full rounded-md border px-3 bg-white" value={timeClass} onChange={(e) => setTimeClass(e.target.value)}>
+                <option value="all">All</option>
+                <option value="bullet">Bullet</option>
+                <option value="blitz">Blitz</option>
+                <option value="rapid">Rapid</option>
+                <option value="daily">Daily</option>
+              </select>
             </label>
-            <div className="flex items-end gap-4 pb-2 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={useEngine} onChange={(e) => setUseEngine(e.target.checked)} /> Use engine</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={refreshCache} onChange={(e) => setRefreshCache(e.target.checked)} /> Refresh</label>
-            </div>
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600">Rated</span>
+              <select className="h-10 w-full rounded-md border px-3 bg-white" value={ratedFilter} onChange={(e) => setRatedFilter(e.target.value)}>
+                <option value="all">All</option>
+                <option value="rated">Rated</option>
+                <option value="unrated">Unrated</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600">Since year</span>
+              <input className="h-10 w-full rounded-md border px-3" type="number" min={2000} value={sinceYear} onChange={(event) => setSinceYear(event.target.value === "" ? "" : Number(event.target.value))} placeholder="e.g. 2023" />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600">Since month</span>
+              <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={12} value={sinceMonth} onChange={(event) => setSinceMonth(event.target.value === "" ? "" : Number(event.target.value))} placeholder="1-12" />
+            </label>
           </div>
-          <ReportConfigForm value={hparams} onChange={setHparams} />
+          
+          <div>
+            <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="text-sm text-blue-600 hover:underline">
+              {showAdvanced ? "Hide advanced filters" : "Show advanced filters"}
+            </button>
+          </div>
+
+          {showAdvanced && (
+            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-sm">
+                  <span className="mb-1 block text-slate-600">Engine depth</span>
+                  <input className="h-10 w-full rounded-md border px-3 bg-white" type="number" min={1} max={30} value={engineDepth} onChange={(event) => setEngineDepth(Number(event.target.value))} />
+                </label>
+                <div className="flex items-end gap-4 pb-2 text-sm">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={useEngine} onChange={(e) => setUseEngine(e.target.checked)} /> Use engine</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={refreshCache} onChange={(e) => setRefreshCache(e.target.checked)} /> Refresh cache</label>
+                </div>
+              </div>
+              <ReportConfigForm value={hparams} onChange={setHparams} />
+            </div>
+          )}
+
           <Button onClick={submit} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Build Report

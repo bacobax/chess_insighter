@@ -1,4 +1,462 @@
 {
+  "037bf3dfaa99cacf2b1472e7cf2ce75d441c6ae4e5c779625aaeb199f3bdca7f": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 20,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "sylvathur"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 1.0,
+      "complexity_delta": 1.0,
+      "complexity_exposure": 1.0,
+      "complexity_performance": 0.06,
+      "early_castling_tendency": 0.4,
+      "endgame_frequency": 0.6666666666666666,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 1.0,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.0,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 1.0,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 0.4,
+      "opening_diversity_black": 0.18,
+      "opening_diversity_white": 0.22,
+      "opposite_side_castling_tendency": 0.4,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 0.4,
+      "quiet_choice": 0.7766666666666666,
+      "quiet_creation_rate": 0.7766666666666666,
+      "quiet_exposure": 0.7933333333333333,
+      "quiet_position_performance": 0.3466666666666667,
+      "resourcefulness": 0.8,
+      "structure_diversity": 0.4,
+      "tactical_creation_rate": 0.7766666666666666,
+      "tactical_defusal_rate": 0.7766666666666666,
+      "tactical_exposure": 0.7933333333333333,
+      "tactical_move_choice": 0.7933333333333333,
+      "tactical_performance": 0.48333333333333334,
+      "tactical_position_choice": 0.7766666666666666
+    },
+    "created_at": "2026-06-08T17:41:51.988244+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "037bf3dfaa99cacf2b1472e7cf2ce75d441c6ae4e5c779625aaeb199f3bdca7f",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 20,
+      "games_enriched": 20,
+      "games_selected": 20,
+      "moves_analyzed": 507,
+      "player_name": "Sylvathur",
+      "username": "Sylvathur"
+    },
+    "vector": {
+      "early_castling_tendency": 0.38999999999999996,
+      "endgame_likelihood_proxy": 0.35,
+      "king_safety_risk": 0.12128851540616244,
+      "material_imbalance": 0.6176470588235294,
+      "middlegame_complexity": 0.4820278598023177,
+      "opposite_side_castling_tendency": 0.3,
+      "pawn_structure_sharpness": 0.36332179930795844,
+      "quiet_position_density": 0.5579399141630901,
+      "structure_diversity": 0.9657156535906605,
+      "tactical_density": 0.4978540772532189
+    }
+  },
+  "0433d68f86e3a0e0da7c5a4205b9c7e139881049da53e31162beb61b9bcd31fc": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 20,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "zelchino"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 0.83,
+      "complexity_delta": 0.83,
+      "complexity_exposure": 0.86,
+      "complexity_performance": 0.06,
+      "early_castling_tendency": 0.4,
+      "endgame_frequency": 0.6666666666666666,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 0.83,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.0,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 0.98,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 0.4,
+      "opening_diversity_black": 0.16,
+      "opening_diversity_white": 0.24,
+      "opposite_side_castling_tendency": 0.4,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 0.4,
+      "quiet_choice": 0.5533333333333333,
+      "quiet_creation_rate": 0.5533333333333333,
+      "quiet_exposure": 0.5733333333333334,
+      "quiet_position_performance": 0.2833333333333333,
+      "resourcefulness": 1.0,
+      "structure_diversity": 0.36,
+      "tactical_creation_rate": 0.5533333333333333,
+      "tactical_defusal_rate": 0.5533333333333333,
+      "tactical_exposure": 0.5733333333333334,
+      "tactical_move_choice": 0.5733333333333334,
+      "tactical_performance": 0.3233333333333333,
+      "tactical_position_choice": 0.5533333333333333
+    },
+    "created_at": "2026-06-08T17:20:52.523169+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "0433d68f86e3a0e0da7c5a4205b9c7e139881049da53e31162beb61b9bcd31fc",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 20,
+      "games_enriched": 20,
+      "games_selected": 20,
+      "moves_analyzed": 487,
+      "player_name": "zelchino",
+      "username": "zelchino"
+    },
+    "vector": {
+      "early_castling_tendency": 0.5149999999999999,
+      "endgame_likelihood_proxy": 0.3,
+      "king_safety_risk": 0.1276957364341085,
+      "material_imbalance": 0.5697674418604651,
+      "middlegame_complexity": 0.4291061165611251,
+      "opposite_side_castling_tendency": 0.2,
+      "pawn_structure_sharpness": 0.274452804377565,
+      "quiet_position_density": 0.5240963855421686,
+      "structure_diversity": 0.9617603797052268,
+      "tactical_density": 0.45180722891566266
+    }
+  },
   "0cd61142db01bf1904da34365de89be6f4309f00c926f0c45b942372a5a99d48": {
     "cache_key": {
       "engine_depth": 7,
@@ -310,6 +768,235 @@
       "tactical_density": 0.4978540772532189
     }
   },
+  "5b30ecd8aae54a67a2680c496149bfa3c703f8dab6306efc0c36c37fb2ad12d7": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "rapid"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 20,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "bassisw"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 1.0,
+      "complexity_delta": 1.0,
+      "complexity_exposure": 1.0,
+      "complexity_performance": 0.06,
+      "early_castling_tendency": 0.4,
+      "endgame_frequency": 0.6666666666666666,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 1.0,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.0,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 1.0,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 0.4,
+      "opening_diversity_black": 0.2,
+      "opening_diversity_white": 0.2,
+      "opposite_side_castling_tendency": 0.4,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 0.4,
+      "quiet_choice": 0.7,
+      "quiet_creation_rate": 0.7,
+      "quiet_exposure": 0.7133333333333334,
+      "quiet_position_performance": 0.41333333333333333,
+      "resourcefulness": 1.0,
+      "structure_diversity": 0.32,
+      "tactical_creation_rate": 0.7,
+      "tactical_defusal_rate": 0.7,
+      "tactical_exposure": 0.7133333333333334,
+      "tactical_move_choice": 0.7133333333333334,
+      "tactical_performance": 0.33,
+      "tactical_position_choice": 0.7
+    },
+    "created_at": "2026-06-08T17:41:54.087871+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "5b30ecd8aae54a67a2680c496149bfa3c703f8dab6306efc0c36c37fb2ad12d7",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 1,
+        "since_year": 2026,
+        "time_classes": [
+          "rapid"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 20,
+      "games_enriched": 20,
+      "games_selected": 20,
+      "moves_analyzed": 579,
+      "player_name": "bassisw",
+      "username": "bassisw"
+    },
+    "vector": {
+      "early_castling_tendency": 0.37,
+      "endgame_likelihood_proxy": 0.45,
+      "king_safety_risk": 0.14084579439252334,
+      "material_imbalance": 0.6495327102803738,
+      "middlegame_complexity": 0.5740249859821206,
+      "opposite_side_castling_tendency": 0.2,
+      "pawn_structure_sharpness": 0.3000274876305662,
+      "quiet_position_density": 0.5619047619047619,
+      "structure_diversity": 0.98125,
+      "tactical_density": 0.47619047619047616
+    }
+  },
   "7b8a0b10fa4d11271dbbff87bae6545aad35935eba70bfe326e2ec92e5f68d82": {
     "cache_key": {
       "engine_depth": 10,
@@ -480,6 +1167,235 @@
       "quiet_position_density": 0.48743718592964824,
       "structure_diversity": 0.9272364821480256,
       "tactical_density": 0.5527638190954773
+    }
+  },
+  "a05e9ef89c126235c0ff0a507cfb774060a26db6e06f0e099a52f9f6aea934ad": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2025,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 100,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "sylvathur"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 1.0,
+      "complexity_delta": 1.0,
+      "complexity_exposure": 1.0,
+      "complexity_performance": 0.32,
+      "early_castling_tendency": 1.0,
+      "endgame_frequency": 1.0,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 1.0,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.08,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 1.0,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 1.0,
+      "opening_diversity_black": 1.0,
+      "opening_diversity_white": 0.96,
+      "opposite_side_castling_tendency": 1.0,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 1.0,
+      "quiet_choice": 1.0,
+      "quiet_creation_rate": 1.0,
+      "quiet_exposure": 1.0,
+      "quiet_position_performance": 1.0,
+      "resourcefulness": 1.0,
+      "structure_diversity": 1.0,
+      "tactical_creation_rate": 1.0,
+      "tactical_defusal_rate": 1.0,
+      "tactical_exposure": 1.0,
+      "tactical_move_choice": 1.0,
+      "tactical_performance": 1.0,
+      "tactical_position_choice": 1.0
+    },
+    "created_at": "2026-06-08T17:21:04.831565+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "a05e9ef89c126235c0ff0a507cfb774060a26db6e06f0e099a52f9f6aea934ad",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": null,
+        "since_month": 1,
+        "since_year": 2025,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 100,
+      "games_enriched": 100,
+      "games_selected": 100,
+      "moves_analyzed": 2699,
+      "player_name": "Sylvathur",
+      "username": "Sylvathur"
+    },
+    "vector": {
+      "early_castling_tendency": 0.387,
+      "endgame_likelihood_proxy": 0.43,
+      "king_safety_risk": 0.13601285422144288,
+      "material_imbalance": 0.6599474145486416,
+      "middlegame_complexity": 0.4401533402527923,
+      "opposite_side_castling_tendency": 0.15,
+      "pawn_structure_sharpness": 0.39537041810589263,
+      "quiet_position_density": 0.5125448028673835,
+      "structure_diversity": 0.9754989889089463,
+      "tactical_density": 0.517921146953405
     }
   },
   "cccac6c106ac3c6824c5141549ba95259fe92dcc08b90d221caedf3df24f21ad": {
@@ -705,6 +1621,464 @@
       "quiet_position_density": 0.5067873303167421,
       "structure_diversity": 0.9519550294726331,
       "tactical_density": 0.47058823529411764
+    }
+  },
+  "d9cd81cc792f41df226701ac08079bfac878808007705694d3b1ed41929ac31e": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 1,
+        "since_year": 2025,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 100,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "zelchino"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 1.0,
+      "complexity_delta": 1.0,
+      "complexity_exposure": 1.0,
+      "complexity_performance": 0.26,
+      "early_castling_tendency": 1.0,
+      "endgame_frequency": 1.0,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 1.0,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.04,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 1.0,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 1.0,
+      "opening_diversity_black": 0.98,
+      "opening_diversity_white": 1.0,
+      "opposite_side_castling_tendency": 1.0,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 1.0,
+      "quiet_choice": 1.0,
+      "quiet_creation_rate": 1.0,
+      "quiet_exposure": 1.0,
+      "quiet_position_performance": 1.0,
+      "resourcefulness": 1.0,
+      "structure_diversity": 1.0,
+      "tactical_creation_rate": 1.0,
+      "tactical_defusal_rate": 1.0,
+      "tactical_exposure": 1.0,
+      "tactical_move_choice": 1.0,
+      "tactical_performance": 1.0,
+      "tactical_position_choice": 1.0
+    },
+    "created_at": "2026-06-08T17:21:15.513692+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "d9cd81cc792f41df226701ac08079bfac878808007705694d3b1ed41929ac31e",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 1,
+        "since_year": 2025,
+        "time_classes": [
+          "blitz"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 100,
+      "games_enriched": 100,
+      "games_selected": 100,
+      "moves_analyzed": 3113,
+      "player_name": "zelchino",
+      "username": "zelchino"
+    },
+    "vector": {
+      "early_castling_tendency": 0.4670000000000001,
+      "endgame_likelihood_proxy": 0.44,
+      "king_safety_risk": 0.11636686586985379,
+      "material_imbalance": 0.749003984063745,
+      "middlegame_complexity": 0.39050041759037096,
+      "opposite_side_castling_tendency": 0.16,
+      "pawn_structure_sharpness": 0.3609678931333489,
+      "quiet_position_density": 0.49795501022494887,
+      "structure_diversity": 0.9724986200198635,
+      "tactical_density": 0.5276073619631901
+    }
+  },
+  "e0f854287ff63c2535cb848d4ab50b5d61c0358f27423ed63097fb3c9c270e65": {
+    "cache_key": {
+      "datasets": {
+        "opening_vectors": {
+          "mtime_ns": 1780863702898376518,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/opening_feature_vectors_sparsity_fix.csv",
+          "size": 34682
+        },
+        "openings": {
+          "mtime_ns": 1780799476093764611,
+          "path": "/Users/francescobassignana/chess_insighter/openings_dataset/all.tsv",
+          "size": 780532
+        }
+      },
+      "engine_depth": 10,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 3,
+        "since_year": 2026,
+        "time_classes": [
+          "rapid"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "hparams": {
+        "advantage_capitalization": {
+          "clearly_winning_eval_cp": 500,
+          "weights": {
+            "conversion_rate_from_winning_positions": 0.5,
+            "eval_preservation_when_ahead": 0.3,
+            "low_blunder_rate_when_ahead": 0.2
+          },
+          "winning_eval_cp": 200
+        },
+        "complexity": {
+          "complex_percentile": 85,
+          "high_percentile": 90,
+          "simple_percentile": 50
+        },
+        "game_analysis": {
+          "improvement_delta": 0.02,
+          "weakness_loss_threshold": 0.08
+        },
+        "opening": {
+          "post_opening_move_count": 6,
+          "weights": {
+            "book_accuracy": 0.15,
+            "eval_stability_after_opening": 0.5,
+            "result_from_opening_positions": 0.35
+          }
+        },
+        "player_profile": {
+          "advantage": {
+            "blunder_win_probability_loss": 0.2,
+            "centipawn_threshold": 200,
+            "weights": {
+              "accuracy_while_better": 0.45,
+              "conversion_rate": 0.35,
+              "low_blunder_rate": 0.2
+            },
+            "win_probability_game_threshold": 0.7,
+            "win_probability_move_threshold": 0.65
+          },
+          "complexity_scale_percentile": 95,
+          "diversity": {
+            "entropy_weight": 0.7,
+            "top_share_weight": 0.3
+          },
+          "endgame": {
+            "equal_win_probability_high": 0.55,
+            "equal_win_probability_low": 0.45,
+            "weights": {
+              "conversion_rate": 0.25,
+              "endgame_accuracy": 0.45,
+              "equal_endgame_hold_rate": 0.1,
+              "save_rate": 0.2
+            },
+            "winning_win_probability_threshold": 0.65,
+            "worse_win_probability_threshold": 0.35
+          },
+          "king_safety_performance_threshold": 0.65,
+          "loss_normalization": {
+            "centipawn_loss": 300,
+            "win_probability_loss": 0.25
+          },
+          "material_imbalance_threshold": 0.05,
+          "pawn_structure": {
+            "weights": {
+              "backward_pawn_exposure": 0.15,
+              "doubled_pawn_exposure": 0.15,
+              "isolated_pawn_exposure": 0.2,
+              "open_center_exposure": 0.15,
+              "passed_pawn_exposure": 0.2,
+              "semi_open_file_exposure": 0.15
+            }
+          },
+          "resourcefulness": {
+            "centipawn_threshold": -200,
+            "recovery_delta": 0.05,
+            "weights": {
+              "defensive_accuracy": 0.4,
+              "recovery_rate": 0.3,
+              "save_rate": 0.3
+            },
+            "win_probability_game_threshold": 0.3,
+            "win_probability_move_threshold": 0.35
+          }
+        },
+        "resourcefulness": {
+          "lost_eval_cp": -500,
+          "weights": {
+            "eval_recovery_after_disadvantage": 0.3,
+            "low_collapse_rate_when_worse": 0.3,
+            "save_rate_from_bad_positions": 0.4
+          },
+          "worse_eval_cp": -200
+        },
+        "result_scores": {
+          "draw": 0.5,
+          "loss": 0,
+          "win": 1
+        },
+        "sampling": {
+          "min_samples": 3
+        },
+        "time_management": {
+          "blunder_win_prob_loss": 0.1,
+          "critical_underthinking_seconds": 5,
+          "opponent_error_win_prob_loss": 0.05,
+          "simple_overthinking_seconds": 30,
+          "time_pressure_seconds": 30,
+          "weights": {
+            "bad_time_allocation": 0.3,
+            "blunders_in_time_pressure": 0.35,
+            "time_trouble": 0.35
+          }
+        }
+      },
+      "max_games": 20,
+      "source": "chess.com",
+      "use_engine": true,
+      "username": "bassisw"
+    },
+    "confidence": {
+      "advantage_capitalization": 1.0,
+      "complexity_choice": 1.0,
+      "complexity_delta": 1.0,
+      "complexity_exposure": 1.0,
+      "complexity_performance": 0.06,
+      "early_castling_tendency": 0.4,
+      "endgame_frequency": 0.6666666666666666,
+      "endgame_move_share": 1.0,
+      "endgame_performance": 1.0,
+      "high_complexity_choice_rate": 1.0,
+      "king_risk_delta": 1.0,
+      "king_safety_performance": 0.0,
+      "king_safety_risk_tolerance": 1.0,
+      "material_imbalance_comfort": 1.0,
+      "material_imbalance_preference": 1.0,
+      "opening_diversity": 0.4,
+      "opening_diversity_black": 0.2,
+      "opening_diversity_white": 0.2,
+      "opposite_side_castling_tendency": 0.4,
+      "pawn_structure_comfort": 1.0,
+      "pawn_structure_sharpness": 1.0,
+      "queenside_castling_tendency": 0.4,
+      "quiet_choice": 0.7,
+      "quiet_creation_rate": 0.7,
+      "quiet_exposure": 0.7133333333333334,
+      "quiet_position_performance": 0.41333333333333333,
+      "resourcefulness": 1.0,
+      "structure_diversity": 0.32,
+      "tactical_creation_rate": 0.7,
+      "tactical_defusal_rate": 0.7,
+      "tactical_exposure": 0.7133333333333334,
+      "tactical_move_choice": 0.7133333333333334,
+      "tactical_performance": 0.33,
+      "tactical_position_choice": 0.7
+    },
+    "created_at": "2026-06-08T17:11:14.491749+00:00",
+    "feature_order": [
+      "tactical_density",
+      "quiet_position_density",
+      "king_safety_risk",
+      "early_castling_tendency",
+      "opposite_side_castling_tendency",
+      "middlegame_complexity",
+      "pawn_structure_sharpness",
+      "material_imbalance",
+      "endgame_likelihood_proxy",
+      "structure_diversity"
+    ],
+    "metadata": {
+      "cache_hash": "e0f854287ff63c2535cb848d4ab50b5d61c0358f27423ed63097fb3c9c270e65",
+      "engine_depth": 10,
+      "engine_path": "/opt/homebrew/bin/stockfish",
+      "engine_used": true,
+      "fallback_reason": null,
+      "filters": {
+        "rated_filter": true,
+        "since_month": 3,
+        "since_year": 2026,
+        "time_classes": [
+          "rapid"
+        ],
+        "until_month": null,
+        "until_year": null
+      },
+      "games_analyzed": 20,
+      "games_enriched": 20,
+      "games_selected": 20,
+      "moves_analyzed": 579,
+      "player_name": "bassisw",
+      "username": "bassisw"
+    },
+    "vector": {
+      "early_castling_tendency": 0.37,
+      "endgame_likelihood_proxy": 0.45,
+      "king_safety_risk": 0.14084579439252334,
+      "material_imbalance": 0.6495327102803738,
+      "middlegame_complexity": 0.5740249859821206,
+      "opposite_side_castling_tendency": 0.2,
+      "pawn_structure_sharpness": 0.3000274876305662,
+      "quiet_position_density": 0.5619047619047619,
+      "structure_diversity": 0.98125,
+      "tactical_density": 0.47619047619047616
     }
   }
 }

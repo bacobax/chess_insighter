@@ -22,6 +22,7 @@ OPENING_FEATURES = [
     "early_castling_tendency",
     "pawn_structure_sharpness",
     "king_safety_risk",
+    "structure_diversity",
 ]
 
 
