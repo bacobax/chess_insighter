@@ -1,0 +1,686 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+import math
+from pathlib import Path
+import time
+from typing import Optional
+
+import chess
+import chess.engine
+import numpy as np
+
+from utils.opening_repository import OpeningRepository
+from utils.player_vector_cache import (
+    DEFAULT_PLAYER_VECTOR_CACHE,
+    CachedPlayerVector,
+    load_or_compute_chesscom_vector,
+    load_or_compute_pgn_vector,
+)
+from utils.position_feature_extractor import (
+    FEATURES,
+    analyse_position_safe,
+    cosine_similarity_safe,
+    extract_position_vector,
+    player_vector_to_array,
+)
+
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover - only depends on local environment.
+    tqdm = None
+
+
+@dataclass(frozen=True)
+class ExplorerConfig:
+    target_color: chess.Color
+    max_depth: int
+    top_k: int
+    engine_path: Optional[str]
+    engine_depth: int
+    no_engine: bool
+    max_candidate_moves: Optional[int]
+    opening_book: Optional[str]
+    show_progress: bool = True
+    verbose_search: bool = False
+    progress_interval_seconds: float = 5.0
+    style_weight: float = 0.75
+    cp_weight: float = 0.25
+    cp_scale: float = 600.0
+
+
+@dataclass(frozen=True)
+class MoveCandidate:
+    move: chess.Move
+    san: str
+    score: float
+    pv: list[chess.Move]
+
+
+@dataclass
+class SearchStats:
+    nodes: int = 0
+    leaves: int = 0
+    cache_hits: int = 0
+    started_at: float = 0.0
+    last_report_at: float = 0.0
+
+
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Interactive style-matching chess opening explorer.")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--username", help="Chess.com username to fetch and profile.")
+    source.add_argument("--player-pgn", help="Local PGN file containing target player games.")
+
+    parser.add_argument("--player-name", help="Target player name in local PGN mode.")
+    parser.add_argument("--max-games", type=int, default=20)
+    parser.add_argument("--since-year", type=int)
+    parser.add_argument("--since-month", type=int)
+    parser.add_argument("--time-classes", help="Comma-separated Chess.com time classes, or omit for all.")
+    parser.add_argument("--rated-filter", choices=["rated", "unrated", "both"], default="both")
+    parser.add_argument("--target-color", choices=["white", "black"])
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--engine-path")
+    parser.add_argument("--engine-depth", type=int, default=10)
+    parser.add_argument("--no-engine", action="store_true")
+    parser.add_argument("--start-fen")
+    parser.add_argument("--max-candidate-moves", type=int)
+    parser.add_argument("--opening-book", default="openings_dataset/all.tsv")
+    parser.add_argument("--player-vector-cache", default=DEFAULT_PLAYER_VECTOR_CACHE)
+    parser.add_argument("--refresh-player-vector", action="store_true")
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm/progress output during search.")
+    parser.add_argument("--verbose-search", action="store_true", help="Print periodic node/leaf counters during search.")
+    parser.add_argument("--progress-interval-seconds", type=float, default=5.0)
+    parser.add_argument("--style-weight", type=float, default=0.75, help="Weight for player-style cosine similarity.")
+    parser.add_argument("--cp-weight", type=float, default=0.25, help="Weight for target-oriented centipawn utility.")
+    parser.add_argument("--cp-scale", type=float, default=600.0, help="CP scale for logistic normalization; larger is less sensitive.")
+    return parser.parse_args(argv)
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    if args.max_games <= 0:
+        raise ValueError("--max-games must be positive")
+    if args.max_depth < 0:
+        raise ValueError("--max-depth must be non-negative")
+    if args.top_k <= 0:
+        raise ValueError("--top-k must be positive")
+    if args.engine_depth <= 0:
+        raise ValueError("--engine-depth must be positive")
+    if args.since_month is not None and not 1 <= args.since_month <= 12:
+        raise ValueError("--since-month must be between 1 and 12")
+    if args.max_candidate_moves is not None and args.max_candidate_moves <= 0:
+        raise ValueError("--max-candidate-moves must be positive when provided")
+    if args.progress_interval_seconds <= 0:
+        raise ValueError("--progress-interval-seconds must be positive")
+    if args.style_weight < 0 or args.cp_weight < 0:
+        raise ValueError("--style-weight and --cp-weight must be non-negative")
+    if args.style_weight == 0 and args.cp_weight == 0:
+        raise ValueError("At least one of --style-weight or --cp-weight must be positive")
+    if args.cp_scale <= 0:
+        raise ValueError("--cp-scale must be positive")
+    if args.player_pgn and not args.player_name:
+        raise ValueError("--player-name is required with --player-pgn")
+    if args.player_pgn and not Path(args.player_pgn).exists():
+        raise FileNotFoundError(f"PGN file not found: {args.player_pgn}")
+    if args.start_fen:
+        try:
+            chess.Board(args.start_fen)
+        except ValueError as exc:
+            raise ValueError(f"Invalid --start-fen: {args.start_fen}") from exc
+
+
+def parse_time_classes(value: Optional[str]) -> Optional[set[str]]:
+    if value is None or value.strip().lower() in {"", "all", "none"}:
+        return None
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+def parse_rated_filter(value: str) -> Optional[bool]:
+    if value == "rated":
+        return True
+    if value == "unrated":
+        return False
+    return None
+
+
+def load_opening_repository(path: Optional[str]) -> Optional[OpeningRepository]:
+    if not path:
+        return None
+    candidate = Path(path)
+    if not candidate.exists():
+        return None
+    return OpeningRepository(candidate)
+
+
+def load_player_vector(args: argparse.Namespace, opening_repository: Optional[OpeningRepository]) -> CachedPlayerVector:
+    if args.username:
+        return load_or_compute_chesscom_vector(
+            username=args.username,
+            max_games=args.max_games,
+            since_year=args.since_year,
+            since_month=args.since_month,
+            time_classes=parse_time_classes(args.time_classes),
+            rated_filter=parse_rated_filter(args.rated_filter),
+            engine_path=args.engine_path,
+            engine_depth=args.engine_depth,
+            no_engine=args.no_engine,
+            opening_repository=opening_repository,
+            cache_path=args.player_vector_cache,
+            refresh=args.refresh_player_vector,
+        )
+    return load_or_compute_pgn_vector(
+        pgn_path=args.player_pgn,
+        player_name=args.player_name,
+        engine_path=args.engine_path,
+        engine_depth=args.engine_depth,
+        no_engine=args.no_engine,
+        opening_repository=opening_repository,
+        cache_path=args.player_vector_cache,
+        refresh=args.refresh_player_vector,
+    )
+
+
+def open_engine(config: ExplorerConfig) -> Optional[chess.engine.SimpleEngine]:
+    if config.no_engine or not config.engine_path:
+        return None
+    try:
+        return chess.engine.SimpleEngine.popen_uci(config.engine_path)
+    except Exception as exc:
+        print(f"Stockfish unavailable; continuing with heuristic-only search. Reason: {exc}")
+        return None
+
+
+def minimax(
+    board: chess.Board,
+    depth: int,
+    alpha: float,
+    beta: float,
+    maximizing: bool,
+    target_color: chess.Color,
+    player_vector: np.ndarray,
+    config: ExplorerConfig,
+    cache: dict[tuple[str, int, bool, bool], tuple[float, list[chess.Move]]],
+    *,
+    engine: Optional[chess.engine.SimpleEngine] = None,
+    engine_cache: Optional[dict] = None,
+    stats: Optional[SearchStats] = None,
+) -> tuple[float, list[chess.Move]]:
+    if stats is not None:
+        stats.nodes += 1
+        maybe_report_search_progress(depth, stats, config)
+
+    key = (board.fen(), depth, maximizing, target_color)
+    cached = cache.get(key)
+    if cached is not None:
+        if stats is not None:
+            stats.cache_hits += 1
+        return cached
+
+    if depth == 0 or board.is_game_over():
+        if stats is not None:
+            stats.leaves += 1
+        score = evaluate_leaf_utility(
+            board,
+            target_color,
+            player_vector,
+            config,
+            engine,
+            engine_cache=engine_cache,
+        )
+        result = (score, [])
+        cache[key] = result
+        return result
+
+    moves = ranked_legal_moves(board, config, engine=engine, engine_cache=engine_cache)
+    if not moves:
+        return minimax(
+            board,
+            0,
+            alpha,
+            beta,
+            maximizing,
+            target_color,
+            player_vector,
+            config,
+            cache,
+            engine=engine,
+            engine_cache=engine_cache,
+            stats=stats,
+        )
+
+    best_line: list[chess.Move] = []
+    if maximizing:
+        best_score = float("-inf")
+        for move in moves:
+            board.push(move)
+            score, line = minimax(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                board.turn == target_color,
+                target_color,
+                player_vector,
+                config,
+                cache,
+                engine=engine,
+                engine_cache=engine_cache,
+                stats=stats,
+            )
+            board.pop()
+            if score > best_score:
+                best_score = score
+                best_line = [move, *line]
+            alpha = max(alpha, best_score)
+            if beta <= alpha:
+                break
+    else:
+        best_score = float("inf")
+        for move in moves:
+            board.push(move)
+            score, line = minimax(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                board.turn == target_color,
+                target_color,
+                player_vector,
+                config,
+                cache,
+                engine=engine,
+                engine_cache=engine_cache,
+                stats=stats,
+            )
+            board.pop()
+            if score < best_score:
+                best_score = score
+                best_line = [move, *line]
+            beta = min(beta, best_score)
+            if beta <= alpha:
+                break
+
+    result = (best_score, best_line)
+    cache[key] = result
+    return result
+
+
+def evaluate_leaf_utility(
+    board: chess.Board,
+    target_color: chess.Color,
+    player_vector: np.ndarray,
+    config: ExplorerConfig,
+    engine: Optional[chess.engine.SimpleEngine],
+    *,
+    engine_cache: Optional[dict] = None,
+) -> float:
+    position_vector = extract_position_vector(
+        board,
+        target_color,
+        engine,
+        list(FEATURES),
+        engine_depth=config.engine_depth,
+        engine_cache=engine_cache,
+    )
+    style_score = cosine_similarity_safe(position_vector, player_vector)
+    cp_score = cp_utility_score(
+        board,
+        target_color,
+        config,
+        engine,
+        engine_cache=engine_cache,
+    )
+    total_weight = config.style_weight + config.cp_weight
+    return (
+        config.style_weight * style_score
+        + config.cp_weight * cp_score
+    ) / total_weight
+
+
+def cp_utility_score(
+    board: chess.Board,
+    target_color: chess.Color,
+    config: ExplorerConfig,
+    engine: Optional[chess.engine.SimpleEngine],
+    *,
+    engine_cache: Optional[dict] = None,
+) -> float:
+    outcome = board.outcome()
+    if outcome is not None:
+        if outcome.winner is None:
+            return 0.5
+        return 1.0 if outcome.winner == target_color else 0.0
+
+    engine_info = analyse_position_safe(
+        board,
+        engine,
+        engine_depth=config.engine_depth,
+        cache=engine_cache,
+    )
+    if engine_info.eval_cp is not None:
+        target_cp = engine_info.eval_cp if target_color == chess.WHITE else -engine_info.eval_cp
+        return cp_to_utility(target_cp, config.cp_scale)
+
+    return material_utility_score(board, target_color, config.cp_scale)
+
+
+def cp_to_utility(target_cp: float, cp_scale: float) -> float:
+    # Logistic maps 0 cp to 0.5, positive target eval toward 1.0, and negative
+    # target eval toward 0.0 without letting huge mate scores dominate.
+    x = max(-12.0, min(12.0, float(target_cp) / cp_scale))
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def material_utility_score(board: chess.Board, target_color: chess.Color, cp_scale: float) -> float:
+    values = {
+        chess.PAWN: 100,
+        chess.KNIGHT: 320,
+        chess.BISHOP: 330,
+        chess.ROOK: 500,
+        chess.QUEEN: 900,
+    }
+    material_cp = 0
+    for piece_type, value in values.items():
+        material_cp += value * (
+            len(board.pieces(piece_type, target_color))
+            - len(board.pieces(piece_type, not target_color))
+        )
+    return cp_to_utility(material_cp, cp_scale)
+
+
+def suggest_moves(
+    board: chess.Board,
+    player_vector: np.ndarray,
+    config: ExplorerConfig,
+    *,
+    engine: Optional[chess.engine.SimpleEngine] = None,
+    engine_cache: Optional[dict] = None,
+) -> list[MoveCandidate]:
+    candidates: list[MoveCandidate] = []
+    cache: dict[tuple[str, int, bool, bool], tuple[float, list[chess.Move]]] = {}
+    root_moves = ranked_legal_moves(board, config, engine=engine, engine_cache=engine_cache)
+    if not root_moves:
+        return []
+
+    print(
+        f"Searching {len(root_moves)} candidate moves at depth {config.max_depth} "
+        f"(engine_depth={config.engine_depth}, max_candidate_moves={config.max_candidate_moves or 'all'}, "
+        f"style_weight={config.style_weight:g}, cp_weight={config.cp_weight:g})...",
+        flush=True,
+    )
+    stats = SearchStats(started_at=time.monotonic(), last_report_at=time.monotonic())
+    progress_iter = root_progress(root_moves, config)
+    for index, move in enumerate(progress_iter, start=1):
+        san = board.san(move)
+        if config.show_progress and tqdm is None:
+            print(f"[search] root {index}/{len(root_moves)}: {san}", flush=True)
+        board.push(move)
+        score, pv = minimax(
+            board,
+            max(0, config.max_depth - 1),
+            float("-inf"),
+            float("inf"),
+            board.turn == config.target_color,
+            config.target_color,
+            player_vector,
+            config,
+            cache,
+            engine=engine,
+            engine_cache=engine_cache,
+            stats=stats,
+        )
+        board.pop()
+        candidates.append(MoveCandidate(move=move, san=san, score=score, pv=[move, *pv]))
+        update_root_progress(progress_iter, stats)
+        if config.show_progress and tqdm is None:
+            elapsed = time.monotonic() - stats.started_at
+            print(
+                f"[search] done {san}: score={score:.3f}, nodes={stats.nodes}, "
+                f"leaves={stats.leaves}, cache_hits={stats.cache_hits}, elapsed={elapsed:.1f}s",
+                flush=True,
+            )
+    candidates.sort(key=lambda item: item.score, reverse=True)
+    return candidates[: config.top_k]
+
+
+def root_progress(moves: list[chess.Move], config: ExplorerConfig):
+    if not config.show_progress or tqdm is None:
+        return moves
+    return tqdm(moves, desc="Root candidates", unit="move")
+
+
+def update_root_progress(progress_iter, stats: SearchStats) -> None:
+    if tqdm is None or not hasattr(progress_iter, "set_postfix"):
+        return
+    progress_iter.set_postfix(
+        {
+            "nodes": stats.nodes,
+            "leaves": stats.leaves,
+            "cache": stats.cache_hits,
+        }
+    )
+
+
+def maybe_report_search_progress(depth: int, stats: SearchStats, config: ExplorerConfig) -> None:
+    if not config.verbose_search:
+        return
+    now = time.monotonic()
+    if now - stats.last_report_at < config.progress_interval_seconds:
+        return
+    stats.last_report_at = now
+    elapsed = now - stats.started_at
+    print(
+        f"[search] elapsed={elapsed:.1f}s nodes={stats.nodes} leaves={stats.leaves} "
+        f"cache_hits={stats.cache_hits} current_depth={depth}",
+        flush=True,
+    )
+
+
+def ranked_legal_moves(
+    board: chess.Board,
+    config: ExplorerConfig,
+    *,
+    engine: Optional[chess.engine.SimpleEngine] = None,
+    engine_cache: Optional[dict] = None,
+) -> list[chess.Move]:
+    legal = list(board.legal_moves)
+    if not legal:
+        return []
+
+    engine_rank: dict[chess.Move, int] = {}
+    if engine is not None:
+        info = analyse_position_safe(
+            board,
+            engine,
+            engine_depth=config.engine_depth,
+            cache=engine_cache,
+        )
+        for index, top_move in enumerate(info.top_moves):
+            if top_move.move_uci:
+                move = chess.Move.from_uci(top_move.move_uci)
+                if move in legal:
+                    engine_rank[move] = index
+
+    def score(move: chess.Move) -> tuple[int, int, int, int, int, str]:
+        piece = board.piece_at(move.from_square)
+        developing = int(
+            piece is not None
+            and piece.piece_type in {chess.KNIGHT, chess.BISHOP}
+            and chess.square_rank(move.from_square) in {0, 7}
+        )
+        return (
+            int(move in engine_rank),
+            int(board.gives_check(move)),
+            int(board.is_capture(move)),
+            int(board.is_castling(move)),
+            developing,
+            board.san(move),
+        )
+
+    ordered = sorted(legal, key=lambda move: (engine_rank.get(move, 999), score(move)), reverse=False)
+    # Re-sort non-engine tuple descending while keeping engine-ranked moves first.
+    ordered = sorted(
+        ordered,
+        key=lambda move: (
+            0 if move in engine_rank else 1,
+            engine_rank.get(move, 999),
+            -score(move)[1],
+            -score(move)[2],
+            -score(move)[3],
+            -score(move)[4],
+            score(move)[5],
+        ),
+    )
+    if config.max_candidate_moves is not None:
+        return ordered[: config.max_candidate_moves]
+    return ordered
+
+
+def parse_user_move(board: chess.Board, raw: str) -> Optional[chess.Move]:
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        move = chess.Move.from_uci(text.lower())
+        if move in board.legal_moves:
+            return move
+    except ValueError:
+        pass
+    try:
+        return board.parse_san(text)
+    except ValueError:
+        return None
+
+
+def prompt_legal_move(board: chess.Board) -> chess.Move:
+    while True:
+        raw = input("Enter move (SAN or UCI, or 'quit'): ").strip()
+        if raw.lower() in {"quit", "exit", "q"}:
+            raise KeyboardInterrupt
+        move = parse_user_move(board, raw)
+        if move is not None:
+            return move
+        print(f"Illegal or unrecognized move for position: {board.fen()}")
+
+
+def san_history(board: chess.Board) -> str:
+    if not board.move_stack:
+        return "(start)"
+    replay = chess.Board()
+    return replay.variation_san(board.move_stack)
+
+
+def format_pv(board: chess.Board, moves: list[chess.Move]) -> str:
+    temp = board.copy()
+    parts = []
+    for move in moves:
+        if move not in temp.legal_moves:
+            break
+        parts.append(temp.san(move))
+        temp.push(move)
+    return " ".join(parts) if parts else "(none)"
+
+
+def print_position_report(
+    board: chess.Board,
+    opening_repository: Optional[OpeningRepository],
+    candidates: Optional[list[MoveCandidate]] = None,
+) -> None:
+    opening = opening_repository.get_by_board(board) if opening_repository is not None else None
+    print("\nPosition")
+    print(f"FEN: {board.fen()}")
+    print(f"Moves: {san_history(board)}")
+    print(f"Approx opening: {opening.name if opening else 'Unknown'}")
+    if candidates:
+        best = candidates[0]
+        print(f"Best style-matching move: {best.san}")
+        print(f"Expected worst-case utility: {best.score:.3f}")
+        print("Top candidate moves:")
+        for index, candidate in enumerate(candidates, start=1):
+            print(f"{index}. {candidate.san:<8} score={candidate.score:.3f}")
+        print(f"Principal worst-case line: {format_pv(board, best.pv)}")
+
+
+def interactive_loop(
+    config: ExplorerConfig,
+    player_vector: np.ndarray,
+    opening_repository: Optional[OpeningRepository],
+    *,
+    start_fen: Optional[str] = None,
+) -> None:
+    board = chess.Board(start_fen) if start_fen else chess.Board()
+    engine = open_engine(config)
+    engine_cache = {}
+    try:
+        while not board.is_game_over():
+            if board.turn == config.target_color:
+                candidates = suggest_moves(
+                    board,
+                    player_vector,
+                    config,
+                    engine=engine,
+                    engine_cache=engine_cache,
+                )
+                print_position_report(board, opening_repository, candidates)
+            else:
+                print_position_report(board, opening_repository)
+
+            move = prompt_legal_move(board)
+            board.push(move)
+
+        print_position_report(board, opening_repository)
+        print(f"Game over: {board.outcome()}")
+    except KeyboardInterrupt:
+        print("\nExplorer stopped.")
+    finally:
+        if engine is not None:
+            engine.quit()
+
+
+def target_color_from_args(value: Optional[str]) -> chess.Color:
+    if value is None:
+        while True:
+            raw = input("Target color (white/black): ").strip().lower()
+            if raw in {"white", "black"}:
+                value = raw
+                break
+            print("Please enter 'white' or 'black'.")
+    return chess.WHITE if value == "white" else chess.BLACK
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    args = parse_args(argv)
+    validate_args(args)
+    opening_repository = load_opening_repository(args.opening_book)
+    cached = load_player_vector(args, opening_repository)
+    if cached.cache_hit:
+        print(f"Loaded cached player vector from {args.player_vector_cache}")
+    else:
+        print(f"Computed and cached player vector in {args.player_vector_cache}")
+    if cached.metadata.get("fallback_reason") and not cached.metadata.get("engine_used"):
+        print(f"Player vector computed with heuristic fallback: {cached.metadata['fallback_reason']}")
+
+    config = ExplorerConfig(
+        target_color=target_color_from_args(args.target_color),
+        max_depth=args.max_depth,
+        top_k=args.top_k,
+        engine_path=args.engine_path,
+        engine_depth=args.engine_depth,
+        no_engine=args.no_engine,
+        max_candidate_moves=args.max_candidate_moves,
+        opening_book=args.opening_book,
+        show_progress=not args.no_progress,
+        verbose_search=args.verbose_search,
+        progress_interval_seconds=args.progress_interval_seconds,
+        style_weight=args.style_weight,
+        cp_weight=args.cp_weight,
+        cp_scale=args.cp_scale,
+    )
+    player_vector = player_vector_to_array(cached.vector, list(FEATURES))
+    interactive_loop(config, player_vector, opening_repository, start_fen=args.start_fen)
+
+
+if __name__ == "__main__":
+    main()
