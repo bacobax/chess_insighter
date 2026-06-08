@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
+from utils.statistics_shared import PlayerGameSampler, StatisticsHparams, username_key_value
 
 
 @dataclass(frozen=True)
@@ -110,101 +111,101 @@ class GlobalStatisticsTransformer:
 
     def __init__(self, hparams_path: str | Path):
         self.hparams_path = Path(hparams_path)
-        hparams = self._load_simple_yaml(self.hparams_path)
+        self.hparams = StatisticsHparams(self.hparams_path)
+        self.player_games = PlayerGameSampler(self.hparams)
 
-        self.min_samples = self._required_int(hparams, "sampling.min_samples")
+        self.min_samples = self.hparams.required_int("sampling.min_samples")
 
-        self.complexity_simple_percentile = self._required_float(
-            hparams, "complexity.simple_percentile"
+        self.complexity_simple_percentile = self.hparams.required_float(
+            "complexity.simple_percentile"
         )
-        self.complexity_complex_percentile = self._required_float(
-            hparams, "complexity.complex_percentile"
+        self.complexity_complex_percentile = self.hparams.required_float(
+            "complexity.complex_percentile"
         )
-        self.complexity_high_percentile = self._required_float(
-            hparams, "complexity.high_percentile"
-        )
-
-        self.opening_post_opening_move_count = self._required_int(
-            hparams, "opening.post_opening_move_count"
-        )
-        self.opening_weight_book_accuracy = self._required_float(
-            hparams, "opening.weights.book_accuracy"
-        )
-        self.opening_weight_eval_stability_after_opening = self._required_float(
-            hparams, "opening.weights.eval_stability_after_opening"
-        )
-        self.opening_weight_result_from_opening_positions = self._required_float(
-            hparams, "opening.weights.result_from_opening_positions"
+        self.complexity_high_percentile = self.hparams.required_float(
+            "complexity.high_percentile"
         )
 
-        self.time_pressure_seconds = self._required_float(
-            hparams, "time_management.time_pressure_seconds"
+        self.opening_post_opening_move_count = self.hparams.required_int(
+            "opening.post_opening_move_count"
         )
-        self.blunder_win_prob_loss = self._required_float(
-            hparams, "time_management.blunder_win_prob_loss"
+        self.opening_weight_book_accuracy = self.hparams.required_float(
+            "opening.weights.book_accuracy"
         )
-        self.critical_underthinking_seconds = self._required_float(
-            hparams, "time_management.critical_underthinking_seconds"
+        self.opening_weight_eval_stability_after_opening = self.hparams.required_float(
+            "opening.weights.eval_stability_after_opening"
         )
-        self.simple_overthinking_seconds = self._required_float(
-            hparams, "time_management.simple_overthinking_seconds"
-        )
-        self.opponent_error_win_prob_loss = self._required_float(
-            hparams, "time_management.opponent_error_win_prob_loss"
-        )
-        self.time_weight_time_trouble = self._required_float(
-            hparams, "time_management.weights.time_trouble"
-        )
-        self.time_weight_blunders_in_time_pressure = self._required_float(
-            hparams, "time_management.weights.blunders_in_time_pressure"
-        )
-        self.time_weight_bad_time_allocation = self._required_float(
-            hparams, "time_management.weights.bad_time_allocation"
+        self.opening_weight_result_from_opening_positions = self.hparams.required_float(
+            "opening.weights.result_from_opening_positions"
         )
 
-        self.weakness_loss_threshold = self._required_float(
-            hparams, "game_analysis.weakness_loss_threshold"
+        self.time_pressure_seconds = self.hparams.required_float(
+            "time_management.time_pressure_seconds"
         )
-        self.improvement_delta = self._required_float(
-            hparams, "game_analysis.improvement_delta"
+        self.blunder_win_prob_loss = self.hparams.required_float(
+            "time_management.blunder_win_prob_loss"
+        )
+        self.critical_underthinking_seconds = self.hparams.required_float(
+            "time_management.critical_underthinking_seconds"
+        )
+        self.simple_overthinking_seconds = self.hparams.required_float(
+            "time_management.simple_overthinking_seconds"
+        )
+        self.opponent_error_win_prob_loss = self.hparams.required_float(
+            "time_management.opponent_error_win_prob_loss"
+        )
+        self.time_weight_time_trouble = self.hparams.required_float(
+            "time_management.weights.time_trouble"
+        )
+        self.time_weight_blunders_in_time_pressure = self.hparams.required_float(
+            "time_management.weights.blunders_in_time_pressure"
+        )
+        self.time_weight_bad_time_allocation = self.hparams.required_float(
+            "time_management.weights.bad_time_allocation"
         )
 
-        self.winning_eval_cp = self._required_float(
-            hparams, "advantage_capitalization.winning_eval_cp"
+        self.weakness_loss_threshold = self.hparams.required_float(
+            "game_analysis.weakness_loss_threshold"
         )
-        self.clearly_winning_eval_cp = self._required_float(
-            hparams, "advantage_capitalization.clearly_winning_eval_cp"
+        self.improvement_delta = self.hparams.required_float(
+            "game_analysis.improvement_delta"
         )
-        self.advantage_weight_conversion_rate = self._required_float(
-            hparams,
+
+        self.winning_eval_cp = self.hparams.required_float(
+            "advantage_capitalization.winning_eval_cp"
+        )
+        self.clearly_winning_eval_cp = self.hparams.required_float(
+            "advantage_capitalization.clearly_winning_eval_cp"
+        )
+        self.advantage_weight_conversion_rate = self.hparams.required_float(
             "advantage_capitalization.weights.conversion_rate_from_winning_positions",
         )
-        self.advantage_weight_eval_preservation = self._required_float(
-            hparams, "advantage_capitalization.weights.eval_preservation_when_ahead"
+        self.advantage_weight_eval_preservation = self.hparams.required_float(
+            "advantage_capitalization.weights.eval_preservation_when_ahead"
         )
-        self.advantage_weight_low_blunder_rate = self._required_float(
-            hparams, "advantage_capitalization.weights.low_blunder_rate_when_ahead"
-        )
-
-        self.worse_eval_cp = self._required_float(
-            hparams, "resourcefulness.worse_eval_cp"
-        )
-        self.lost_eval_cp = self._required_float(
-            hparams, "resourcefulness.lost_eval_cp"
-        )
-        self.resourcefulness_weight_save_rate = self._required_float(
-            hparams, "resourcefulness.weights.save_rate_from_bad_positions"
-        )
-        self.resourcefulness_weight_eval_recovery = self._required_float(
-            hparams, "resourcefulness.weights.eval_recovery_after_disadvantage"
-        )
-        self.resourcefulness_weight_low_collapse_rate = self._required_float(
-            hparams, "resourcefulness.weights.low_collapse_rate_when_worse"
+        self.advantage_weight_low_blunder_rate = self.hparams.required_float(
+            "advantage_capitalization.weights.low_blunder_rate_when_ahead"
         )
 
-        self.result_score_win = self._required_float(hparams, "result_scores.win")
-        self.result_score_draw = self._required_float(hparams, "result_scores.draw")
-        self.result_score_loss = self._required_float(hparams, "result_scores.loss")
+        self.worse_eval_cp = self.hparams.required_float(
+            "resourcefulness.worse_eval_cp"
+        )
+        self.lost_eval_cp = self.hparams.required_float(
+            "resourcefulness.lost_eval_cp"
+        )
+        self.resourcefulness_weight_save_rate = self.hparams.required_float(
+            "resourcefulness.weights.save_rate_from_bad_positions"
+        )
+        self.resourcefulness_weight_eval_recovery = self.hparams.required_float(
+            "resourcefulness.weights.eval_recovery_after_disadvantage"
+        )
+        self.resourcefulness_weight_low_collapse_rate = self.hparams.required_float(
+            "resourcefulness.weights.low_collapse_rate_when_worse"
+        )
+
+        self.result_score_win = self.player_games.result_score_win
+        self.result_score_draw = self.player_games.result_score_draw
+        self.result_score_loss = self.player_games.result_score_loss
 
     def compute(
         self,
@@ -212,9 +213,7 @@ class GlobalStatisticsTransformer:
         username: str,
     ) -> GlobalStatistics:
         username_key = self._username_key(username)
-        target_games = [
-            game for game in games if self._target_color(game, username_key) is not None
-        ]
+        target_games = self.player_games.target_games(games, username_key)
         target_moves = [
             move
             for game in target_games
@@ -945,74 +944,21 @@ class GlobalStatisticsTransformer:
         return float(len(target_moves) - start)
 
     def _target_moves(self, game: EnrichedGame, username_key: str) -> list[EnrichedMove]:
-        target_color = self._target_color(game, username_key)
-        if target_color is None:
-            return []
-
-        return [move for move in game.moves if move.player_color == target_color]
+        return self.player_games.target_moves(game, username_key)
 
     def _target_color(self, game: EnrichedGame, username_key: str) -> Optional[str]:
-        if self._username_key(game.white_username) == username_key:
-            return "white"
-        if self._username_key(game.black_username) == username_key:
-            return "black"
-
-        for move in game.moves:
-            if self._username_key(move.player_username) == username_key:
-                return move.player_color
-
-        return None
+        return self.player_games.target_color(game, username_key)
 
     def _target_result_score(
         self,
         game: EnrichedGame,
         username_key: str,
     ) -> Optional[float]:
-        target_color = self._target_color(game, username_key)
-        if target_color == "white":
-            return self._chesscom_result_score(game.white_result, game.result, "white")
-        if target_color == "black":
-            return self._chesscom_result_score(game.black_result, game.result, "black")
-        return None
-
-    def _chesscom_result_score(
-        self,
-        chesscom_result: Optional[str],
-        pgn_result: Optional[str],
-        color: str,
-    ) -> Optional[float]:
-        if chesscom_result == "win":
-            return self.result_score_win
-        if chesscom_result in {
-            "checkmated",
-            "resigned",
-            "timeout",
-            "abandoned",
-            "lose",
-        }:
-            return self.result_score_loss
-        if chesscom_result in {
-            "agreed",
-            "repetition",
-            "stalemate",
-            "insufficient",
-            "50move",
-            "timevsinsufficient",
-        }:
-            return self.result_score_draw
-
-        if pgn_result == "1/2-1/2":
-            return self.result_score_draw
-        if pgn_result == "1-0":
-            return self.result_score_win if color == "white" else self.result_score_loss
-        if pgn_result == "0-1":
-            return self.result_score_win if color == "black" else self.result_score_loss
-
-        return None
+        return self.player_games.target_result_score(game, username_key)
 
     @staticmethod
     def _username_key(username: Optional[str]) -> str:
-        return (username or "").strip().lower()
+        return username_key_value(username)
 
     @staticmethod
     def _sort_games_by_time(games: list[EnrichedGame]) -> list[EnrichedGame]:
@@ -1065,88 +1011,6 @@ class GlobalStatisticsTransformer:
     def _is_blunder(self, move: EnrichedMove) -> bool:
         loss = self._win_prob_loss(move)
         return loss is not None and loss >= self.blunder_win_prob_loss
-
-    @classmethod
-    def _load_simple_yaml(cls, path: Path) -> dict[str, Any]:
-        if not path.exists():
-            raise FileNotFoundError(f"Global statistics hparams file not found: {path}")
-
-        root: dict[str, Any] = {}
-        stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
-
-        for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            line_without_comment = raw_line.split("#", 1)[0].rstrip()
-            if not line_without_comment.strip():
-                continue
-
-            indent = len(line_without_comment) - len(line_without_comment.lstrip(" "))
-            if indent % 2 != 0:
-                raise ValueError(
-                    f"Invalid YAML indentation in {path}:{line_number}. Use 2 spaces."
-                )
-
-            stripped = line_without_comment.strip()
-            if ":" not in stripped:
-                raise ValueError(f"Invalid YAML line in {path}:{line_number}: {raw_line}")
-
-            key, raw_value = stripped.split(":", 1)
-            key = key.strip()
-            raw_value = raw_value.strip()
-            if not key:
-                raise ValueError(f"Empty YAML key in {path}:{line_number}")
-
-            while stack and indent <= stack[-1][0]:
-                stack.pop()
-            if not stack:
-                raise ValueError(f"Invalid YAML nesting in {path}:{line_number}")
-
-            parent = stack[-1][1]
-            if raw_value == "":
-                nested: dict[str, Any] = {}
-                parent[key] = nested
-                stack.append((indent, nested))
-            else:
-                parent[key] = cls._parse_yaml_scalar(raw_value, path, line_number)
-
-        return root
-
-    @staticmethod
-    def _parse_yaml_scalar(raw_value: str, path: Path, line_number: int) -> Any:
-        try:
-            if any(character in raw_value for character in [".", "e", "E"]):
-                return float(raw_value)
-            return int(raw_value)
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid scalar in {path}:{line_number}. "
-                "Only numeric hyperparameter values are supported."
-            ) from exc
-
-    @staticmethod
-    def _required_value(hparams: dict[str, Any], dotted_path: str) -> Any:
-        current: Any = hparams
-        for part in dotted_path.split("."):
-            if not isinstance(current, dict) or part not in current:
-                raise ValueError(f"Missing required hparam: {dotted_path}")
-            current = current[part]
-
-        return current
-
-    @classmethod
-    def _required_float(cls, hparams: dict[str, Any], dotted_path: str) -> float:
-        value = cls._required_value(hparams, dotted_path)
-        if not isinstance(value, (int, float)):
-            raise ValueError(f"Hparam must be numeric: {dotted_path}")
-
-        return float(value)
-
-    @classmethod
-    def _required_int(cls, hparams: dict[str, Any], dotted_path: str) -> int:
-        value = cls._required_value(hparams, dotted_path)
-        if not isinstance(value, int):
-            raise ValueError(f"Hparam must be an integer: {dotted_path}")
-
-        return value
 
     @staticmethod
     def _percentile(values: list[float], percentile: float) -> Optional[float]:

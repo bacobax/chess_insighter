@@ -25,6 +25,7 @@ from utils.position_feature_extractor import (
     analyse_position_safe,
     extract_position_features,
 )
+from utils.statistics_shared import DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH
 
 
 DEFAULT_PLAYER_VECTOR_CACHE = ".cache/player_vectors.json"
@@ -451,11 +452,12 @@ def build_cached_vector(
     player_name: str,
     enriched_games: list[EnrichedGame],
     metadata: dict[str, Any],
+    hparams_path: str | Path = DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH,
 ) -> CachedPlayerVector:
-    samples, castling_summaries = PlayerSampleBuilder().build(enriched_games, player_name)
+    samples, castling_summaries = PlayerSampleBuilder(hparams_path).build(enriched_games, player_name)
     if not samples:
         raise RuntimeError(f"No moves found for player {player_name!r}. Check player identity in source games.")
-    profile = PlayerFeatureAggregator().aggregate(samples, castling_summaries, player_name=player_name)
+    profile = PlayerFeatureAggregator(hparams_path).aggregate(samples, castling_summaries, player_name=player_name)
     vector = player_opening_vector(profile)
     metadata = {
         **metadata,

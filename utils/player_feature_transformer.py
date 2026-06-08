@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
+from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 import chess
@@ -18,6 +20,12 @@ from utils.opening_feature_transformer import (
     passed_pawns,
     pawn_structure_signature,
     semi_open_files,
+)
+from utils.statistics_shared import (
+    DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH,
+    PlayerGameSampler,
+    StatisticsHparams,
+    username_key_value,
 )
 
 
@@ -140,6 +148,90 @@ class PlayerProfile:
     confidence: dict[str, float]
 
 
+@dataclass(frozen=True)
+class PlayerFeatureHparams:
+    complexity_scale_percentile: float
+    win_probability_loss_normalization: float
+    centipawn_loss_normalization: float
+    king_safety_performance_threshold: float
+    material_imbalance_threshold: float
+    advantage_win_probability_move_threshold: float
+    advantage_win_probability_game_threshold: float
+    advantage_blunder_win_probability_loss: float
+    advantage_centipawn_threshold: float
+    advantage_weight_accuracy: float
+    advantage_weight_conversion_rate: float
+    advantage_weight_low_blunder_rate: float
+    resourcefulness_win_probability_move_threshold: float
+    resourcefulness_win_probability_game_threshold: float
+    resourcefulness_recovery_delta: float
+    resourcefulness_centipawn_threshold: float
+    resourcefulness_weight_defensive_accuracy: float
+    resourcefulness_weight_recovery_rate: float
+    resourcefulness_weight_save_rate: float
+    endgame_winning_win_probability_threshold: float
+    endgame_worse_win_probability_threshold: float
+    endgame_equal_win_probability_low: float
+    endgame_equal_win_probability_high: float
+    endgame_weight_accuracy: float
+    endgame_weight_conversion_rate: float
+    endgame_weight_save_rate: float
+    endgame_weight_equal_hold_rate: float
+    diversity_entropy_weight: float
+    diversity_top_share_weight: float
+    pawn_structure_weights: dict[str, float]
+
+    @classmethod
+    def from_hparams(cls, hparams: StatisticsHparams) -> PlayerFeatureHparams:
+        return cls(
+            complexity_scale_percentile=hparams.required_float("player_profile.complexity_scale_percentile"),
+            win_probability_loss_normalization=hparams.required_float("player_profile.loss_normalization.win_probability_loss"),
+            centipawn_loss_normalization=hparams.required_float("player_profile.loss_normalization.centipawn_loss"),
+            king_safety_performance_threshold=hparams.required_float("player_profile.king_safety_performance_threshold"),
+            material_imbalance_threshold=hparams.required_float("player_profile.material_imbalance_threshold"),
+            advantage_win_probability_move_threshold=hparams.required_float("player_profile.advantage.win_probability_move_threshold"),
+            advantage_win_probability_game_threshold=hparams.required_float("player_profile.advantage.win_probability_game_threshold"),
+            advantage_blunder_win_probability_loss=hparams.required_float("player_profile.advantage.blunder_win_probability_loss"),
+            advantage_centipawn_threshold=hparams.required_float("player_profile.advantage.centipawn_threshold"),
+            advantage_weight_accuracy=hparams.required_float("player_profile.advantage.weights.accuracy_while_better"),
+            advantage_weight_conversion_rate=hparams.required_float("player_profile.advantage.weights.conversion_rate"),
+            advantage_weight_low_blunder_rate=hparams.required_float("player_profile.advantage.weights.low_blunder_rate"),
+            resourcefulness_win_probability_move_threshold=hparams.required_float("player_profile.resourcefulness.win_probability_move_threshold"),
+            resourcefulness_win_probability_game_threshold=hparams.required_float("player_profile.resourcefulness.win_probability_game_threshold"),
+            resourcefulness_recovery_delta=hparams.required_float("player_profile.resourcefulness.recovery_delta"),
+            resourcefulness_centipawn_threshold=hparams.required_float("player_profile.resourcefulness.centipawn_threshold"),
+            resourcefulness_weight_defensive_accuracy=hparams.required_float("player_profile.resourcefulness.weights.defensive_accuracy"),
+            resourcefulness_weight_recovery_rate=hparams.required_float("player_profile.resourcefulness.weights.recovery_rate"),
+            resourcefulness_weight_save_rate=hparams.required_float("player_profile.resourcefulness.weights.save_rate"),
+            endgame_winning_win_probability_threshold=hparams.required_float("player_profile.endgame.winning_win_probability_threshold"),
+            endgame_worse_win_probability_threshold=hparams.required_float("player_profile.endgame.worse_win_probability_threshold"),
+            endgame_equal_win_probability_low=hparams.required_float("player_profile.endgame.equal_win_probability_low"),
+            endgame_equal_win_probability_high=hparams.required_float("player_profile.endgame.equal_win_probability_high"),
+            endgame_weight_accuracy=hparams.required_float("player_profile.endgame.weights.endgame_accuracy"),
+            endgame_weight_conversion_rate=hparams.required_float("player_profile.endgame.weights.conversion_rate"),
+            endgame_weight_save_rate=hparams.required_float("player_profile.endgame.weights.save_rate"),
+            endgame_weight_equal_hold_rate=hparams.required_float("player_profile.endgame.weights.equal_endgame_hold_rate"),
+            diversity_entropy_weight=hparams.required_float("player_profile.diversity.entropy_weight"),
+            diversity_top_share_weight=hparams.required_float("player_profile.diversity.top_share_weight"),
+            pawn_structure_weights={
+                key: hparams.required_float(f"player_profile.pawn_structure.weights.{key}")
+                for key in [
+                    "isolated_pawn_exposure",
+                    "doubled_pawn_exposure",
+                    "backward_pawn_exposure",
+                    "passed_pawn_exposure",
+                    "semi_open_file_exposure",
+                    "open_center_exposure",
+                ]
+            },
+        )
+
+
+@lru_cache(maxsize=None)
+def _default_player_hparams(path: str = str(DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH)) -> PlayerFeatureHparams:
+    return PlayerFeatureHparams.from_hparams(StatisticsHparams(path))
+
+
 def mean_bool(values: Iterable[Optional[bool]]) -> Optional[float]:
     items = [value for value in values if value is not None]
     if not items:
@@ -154,12 +246,32 @@ def safe_mean(values: Iterable[Optional[float]]) -> Optional[float]:
     return sum(items) / len(items)
 
 
-def normalize_loss_wp(mean_wp_loss: float) -> float:
-    return clamp01(1.0 - min(max(0.0, mean_wp_loss) / 0.25, 1.0))
+def normalize_loss_wp(
+    mean_wp_loss: float,
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> float:
+    hparams = hparams or _default_player_hparams()
+    return clamp01(
+        1.0
+        - min(
+            max(0.0, mean_wp_loss) / hparams.win_probability_loss_normalization,
+            1.0,
+        )
+    )
 
 
-def normalize_loss_cp(mean_cp_loss: float) -> float:
-    return clamp01(1.0 - min(max(0.0, mean_cp_loss) / 300.0, 1.0))
+def normalize_loss_cp(
+    mean_cp_loss: float,
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> float:
+    hparams = hparams or _default_player_hparams()
+    return clamp01(
+        1.0
+        - min(
+            max(0.0, mean_cp_loss) / hparams.centipawn_loss_normalization,
+            1.0,
+        )
+    )
 
 
 def weighted_mean_available(
@@ -190,23 +302,30 @@ def player_opening_vector(profile: PlayerProfile) -> dict[str, Optional[float]]:
 
 
 class PlayerSampleBuilder:
+    def __init__(
+        self,
+        hparams_path: str | Path = DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH,
+    ):
+        self.hparams = StatisticsHparams(hparams_path)
+        self.player_games = PlayerGameSampler(self.hparams)
+
     def build(
         self,
         games: list[EnrichedGame],
         player_name: str,
     ) -> tuple[list[PlayerMoveSample], list[GameCastlingSummary]]:
-        username_key = _username_key(player_name)
+        username_key = username_key_value(player_name)
         samples: list[PlayerMoveSample] = []
         castling_summaries: list[GameCastlingSummary] = []
 
         for index, game in enumerate(games):
-            player_color_name = self._target_color(game, username_key)
+            player_color_name = self.player_games.target_color(game, username_key)
             if player_color_name is None:
                 continue
 
-            game_id = self._game_id(game, index)
+            game_id = self.player_games.game_id(game, index)
             player_color = color_from_name(player_color_name)
-            player_score = self._target_result_score(game, player_color_name)
+            player_score = self.player_games.result_score_for_color(game, player_color_name)
             castling_summaries.append(self._castling_summary(game, game_id, player_color))
 
             for move_index, move in enumerate(game.moves):
@@ -246,38 +365,6 @@ class PlayerSampleBuilder:
         return samples, castling_summaries
 
     @staticmethod
-    def _game_id(game: EnrichedGame, index: int) -> str:
-        return game.uuid or game.url or f"game-{index + 1}"
-
-    @staticmethod
-    def _target_color(game: EnrichedGame, username_key: str) -> Optional[str]:
-        if _username_key(game.white_username) == username_key:
-            return "white"
-        if _username_key(game.black_username) == username_key:
-            return "black"
-        for move in game.moves:
-            if _username_key(move.player_username) == username_key:
-                return move.player_color
-        return None
-
-    @staticmethod
-    def _target_result_score(game: EnrichedGame, color_name: str) -> Optional[float]:
-        chesscom_result = game.white_result if color_name == "white" else game.black_result
-        if chesscom_result == "win":
-            return 1.0
-        if chesscom_result in {"checkmated", "resigned", "timeout", "abandoned", "lose"}:
-            return 0.0
-        if chesscom_result in {"agreed", "repetition", "stalemate", "insufficient", "50move", "timevsinsufficient"}:
-            return 0.5
-        if game.result == "1/2-1/2":
-            return 0.5
-        if game.result == "1-0":
-            return 1.0 if color_name == "white" else 0.0
-        if game.result == "0-1":
-            return 1.0 if color_name == "black" else 0.0
-        return None
-
-    @staticmethod
     def _castling_summary(
         game: EnrichedGame,
         game_id: str,
@@ -310,6 +397,12 @@ class PlayerSampleBuilder:
 
 
 class PlayerFeatureAggregator:
+    def __init__(
+        self,
+        hparams_path: str | Path = DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH,
+    ):
+        self.hparams = PlayerFeatureHparams.from_hparams(StatisticsHparams(hparams_path))
+
     def aggregate(
         self,
         samples: list[PlayerMoveSample],
@@ -337,7 +430,7 @@ class PlayerFeatureAggregator:
                 ]
                 if raw_complexity is not None
             ],
-            95,
+            self.hparams.complexity_scale_percentile,
         )
 
         style_vector = self._style_vector(
@@ -417,10 +510,16 @@ class PlayerFeatureAggregator:
             for sample in middlegame_with_after
         ]
 
-        opening_diversity, opening_white, opening_black, opening_distributions = opening_diversities(samples)
-        structure_diversity, _structure_distribution = structure_diversity_from_samples(middlegame_samples)
-        pawn_subfeatures = pawn_structure_subfeatures(middlegame_samples)
-        material_subfeatures = material_imbalance_subfeatures(middlegame_samples)
+        opening_diversity, opening_white, opening_black, opening_distributions = opening_diversities(
+            samples,
+            self.hparams,
+        )
+        structure_diversity, _structure_distribution = structure_diversity_from_samples(
+            middlegame_samples,
+            self.hparams,
+        )
+        pawn_subfeatures = pawn_structure_subfeatures(middlegame_samples, self.hparams)
+        material_subfeatures = material_imbalance_subfeatures(middlegame_samples, self.hparams)
 
         total_games = len({sample.game_id for sample in samples})
         endgame_games = {
@@ -517,28 +616,31 @@ class PlayerFeatureAggregator:
         king_risk_samples = [
             sample
             for sample in middlegame_samples
-            if (get_player_king_safety(sample.descriptor_before, sample.player_color) or 0.0) >= 0.65
+            if (get_player_king_safety(sample.descriptor_before, sample.player_color) or 0.0)
+            >= self.hparams.king_safety_performance_threshold
         ]
         material_samples = [
-            sample for sample in middlegame_samples if has_material_imbalance(sample.descriptor_before)
+            sample
+            for sample in middlegame_samples
+            if has_material_imbalance(sample.descriptor_before, self.hparams)
         ]
         endgame_samples = [
             sample for sample in samples if descriptor_phase(sample.descriptor_before) == "endgame"
         ]
 
-        pawn_comfort_values = pawn_structure_comfort_values(middlegame_samples)
+        pawn_comfort_values = pawn_structure_comfort_values(middlegame_samples, self.hparams)
         pawn_structure_comfort = safe_mean(pawn_comfort_values.values())
-        advantage, advantage_count = advantage_capitalization(samples)
-        resource, resource_count = resourcefulness(samples)
+        advantage, advantage_count = advantage_capitalization(samples, self.hparams)
+        resource, resource_count = resourcefulness(samples, self.hparams)
 
         skill_vector = {
-            "tactical_performance": performance_score(tactical_samples),
-            "quiet_position_performance": performance_score(quiet_samples),
-            "complexity_performance": performance_score(complex_samples),
-            "king_safety_performance": performance_score(king_risk_samples),
+            "tactical_performance": performance_score(tactical_samples, self.hparams),
+            "quiet_position_performance": performance_score(quiet_samples, self.hparams),
+            "complexity_performance": performance_score(complex_samples, self.hparams),
+            "king_safety_performance": performance_score(king_risk_samples, self.hparams),
             "pawn_structure_comfort": pawn_structure_comfort,
-            "material_imbalance_comfort": performance_score(material_samples),
-            "endgame_performance": endgame_performance(samples, endgame_samples),
+            "material_imbalance_comfort": performance_score(material_samples, self.hparams),
+            "endgame_performance": endgame_performance(samples, endgame_samples, self.hparams),
             "advantage_capitalization": advantage,
             "resourcefulness": resource,
         }
@@ -557,16 +659,22 @@ class PlayerFeatureAggregator:
         }
         return skill_vector, counts
 
-    @staticmethod
     def _subfeatures(
+        self,
         samples: list[PlayerMoveSample],
         middlegame_samples: list[PlayerMoveSample],
         castling_summaries: list[GameCastlingSummary],
     ) -> dict[str, Any]:
-        opening_diversity, opening_white, opening_black, opening_distributions = opening_diversities(samples)
-        structure_diversity, structure_distribution = structure_diversity_from_samples(middlegame_samples)
-        pawn_subfeatures = pawn_structure_subfeatures(middlegame_samples)
-        material_subfeatures = material_imbalance_subfeatures(middlegame_samples)
+        opening_diversity, opening_white, opening_black, opening_distributions = opening_diversities(
+            samples,
+            self.hparams,
+        )
+        structure_diversity, structure_distribution = structure_diversity_from_samples(
+            middlegame_samples,
+            self.hparams,
+        )
+        pawn_subfeatures = pawn_structure_subfeatures(middlegame_samples, self.hparams)
+        material_subfeatures = material_imbalance_subfeatures(middlegame_samples, self.hparams)
         return {
             "opening_diversity": opening_diversity,
             "opening_diversity_white": opening_white,
@@ -577,7 +685,7 @@ class PlayerFeatureAggregator:
             "structure_diversity": structure_diversity,
             "structure_distribution": structure_distribution,
             "pawn_structure": pawn_subfeatures,
-            "pawn_structure_comfort": pawn_structure_comfort_values(middlegame_samples),
+            "pawn_structure_comfort": pawn_structure_comfort_values(middlegame_samples, self.hparams),
             "material_imbalance": material_subfeatures,
             "castling_summaries": castling_summaries,
             "sample_counts": {
@@ -828,9 +936,13 @@ def get_player_pawn_structure(descriptor: Any, player_color: chess.Color) -> Opt
     }
 
 
-def has_material_imbalance(descriptor: Any) -> Optional[bool]:
+def has_material_imbalance(
+    descriptor: Any,
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> Optional[bool]:
+    hparams = hparams or _default_player_hparams()
     score = material_imbalance_value(descriptor)
-    return score is not None and score > 0.05
+    return score is not None and score > hparams.material_imbalance_threshold
 
 
 def material_imbalance_value(descriptor: Any) -> Optional[float]:
@@ -862,7 +974,11 @@ def get_player_material_imbalance_details(descriptor: Any, player_color: chess.C
     }
 
 
-def pawn_structure_subfeatures(samples: list[PlayerMoveSample]) -> dict[str, Optional[float]]:
+def pawn_structure_subfeatures(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> dict[str, Optional[float]]:
+    hparams = hparams or _default_player_hparams()
     keys = [
         "isolated_pawn",
         "doubled_pawn",
@@ -905,21 +1021,20 @@ def pawn_structure_subfeatures(samples: list[PlayerMoveSample]) -> dict[str, Opt
             if value is not None
         ]
     )
-    weights = {
-        "isolated_pawn_exposure": 0.20,
-        "doubled_pawn_exposure": 0.15,
-        "backward_pawn_exposure": 0.15,
-        "passed_pawn_exposure": 0.20,
-        "semi_open_file_exposure": 0.15,
-        "open_center_exposure": 0.15,
-    }
     result = {**exposures, **choices, **creation}
     result["structural_damage_rate"] = structural_damage_rate
-    result["pawn_structure_sharpness"] = weighted_mean_available(result, weights)
+    result["pawn_structure_sharpness"] = weighted_mean_available(
+        result,
+        hparams.pawn_structure_weights,
+    )
     return result
 
 
-def pawn_structure_comfort_values(samples: list[PlayerMoveSample]) -> dict[str, Optional[float]]:
+def pawn_structure_comfort_values(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> dict[str, Optional[float]]:
+    hparams = hparams or _default_player_hparams()
     comfort: dict[str, Optional[float]] = {}
     for key in ["isolated_pawn", "doubled_pawn", "passed_pawn", "closed_center", "open_center"]:
         comfort[f"{key}_comfort"] = performance_score(
@@ -927,25 +1042,35 @@ def pawn_structure_comfort_values(samples: list[PlayerMoveSample]) -> dict[str, 
                 sample
                 for sample in samples
                 if truthy_structure(sample.descriptor_before, sample.player_color, key)
-            ]
+            ],
+            hparams,
         )
     return comfort
 
 
-def material_imbalance_subfeatures(samples: list[PlayerMoveSample]) -> dict[str, Optional[float]]:
+def material_imbalance_subfeatures(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> dict[str, Optional[float]]:
+    hparams = hparams or _default_player_hparams()
     with_after = [sample for sample in samples if sample.descriptor_after is not None]
-    before = [has_material_imbalance(sample.descriptor_before) for sample in samples]
-    after = [has_material_imbalance(sample.descriptor_after) for sample in with_after]
+    before = [has_material_imbalance(sample.descriptor_before, hparams) for sample in samples]
+    after = [has_material_imbalance(sample.descriptor_after, hparams) for sample in with_after]
     result: dict[str, Optional[float]] = {
         "material_imbalance_preference": mean_bool(before),
         "material_imbalance_choice": mean_bool(after),
         "material_imbalance_creation_rate": transition_rate(
             with_after,
-            lambda sample: not has_material_imbalance(sample.descriptor_before),
-            lambda sample: has_material_imbalance(sample.descriptor_after),
+            lambda sample: not has_material_imbalance(sample.descriptor_before, hparams),
+            lambda sample: has_material_imbalance(sample.descriptor_after, hparams),
         ),
         "material_imbalance_comfort": performance_score(
-            [sample for sample in samples if has_material_imbalance(sample.descriptor_before)]
+            [
+                sample
+                for sample in samples
+                if has_material_imbalance(sample.descriptor_before, hparams)
+            ],
+            hparams,
         ),
     }
     for key in ["bishop_pair", "exchange_down", "exchange_up", "queenless_middlegame"]:
@@ -954,17 +1079,21 @@ def material_imbalance_subfeatures(samples: list[PlayerMoveSample]) -> dict[str,
             for sample in samples
             if get_player_material_imbalance_details(sample.descriptor_before, sample.player_color).get(key)
         ]
-        result[f"{key}_comfort"] = performance_score(feature_samples)
+        result[f"{key}_comfort"] = performance_score(feature_samples, hparams)
     return result
 
 
-def performance_score(samples: list[PlayerMoveSample]) -> Optional[float]:
+def performance_score(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> Optional[float]:
+    hparams = hparams or _default_player_hparams()
     wp_losses = [max(0.0, float(sample.wp_loss)) for sample in samples if sample.wp_loss is not None]
     if wp_losses:
-        return normalize_loss_wp(sum(wp_losses) / len(wp_losses))
+        return normalize_loss_wp(sum(wp_losses) / len(wp_losses), hparams)
     cp_losses = [max(0.0, float(sample.cp_loss)) for sample in samples if sample.cp_loss is not None]
     if cp_losses:
-        return normalize_loss_cp(sum(cp_losses) / len(cp_losses))
+        return normalize_loss_cp(sum(cp_losses) / len(cp_losses), hparams)
     return None
 
 
@@ -972,16 +1101,31 @@ def loss_sample_count(samples: list[PlayerMoveSample]) -> int:
     return sum(1 for sample in samples if sample.wp_loss is not None or sample.cp_loss is not None)
 
 
-def advantage_capitalization(samples: list[PlayerMoveSample]) -> tuple[Optional[float], int]:
-    wp_samples = [sample for sample in samples if sample.player_wp_before is not None and sample.player_wp_before >= 0.65]
+def advantage_capitalization(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> tuple[Optional[float], int]:
+    hparams = hparams or _default_player_hparams()
+    wp_samples = [
+        sample
+        for sample in samples
+        if sample.player_wp_before is not None
+        and sample.player_wp_before >= hparams.advantage_win_probability_move_threshold
+    ]
     if wp_samples:
-        accuracy = performance_score(wp_samples)
+        accuracy = performance_score(wp_samples, hparams)
         blunder_rate = mean_bool(
-            sample.wp_loss is not None and sample.wp_loss >= 0.20 for sample in wp_samples
+            sample.wp_loss is not None
+            and sample.wp_loss >= hparams.advantage_blunder_win_probability_loss
+            for sample in wp_samples
         )
         conversion_rate = game_rate(
             samples,
-            lambda game_samples: any((sample.player_wp_before or 0.0) >= 0.70 for sample in game_samples),
+            lambda game_samples: any(
+                (sample.player_wp_before or 0.0)
+                >= hparams.advantage_win_probability_game_threshold
+                for sample in game_samples
+            ),
             lambda game_samples: (game_samples[0].player_score if game_samples else None) == 1.0,
         )
         score = weighted_mean_available(
@@ -991,32 +1135,51 @@ def advantage_capitalization(samples: list[PlayerMoveSample]) -> tuple[Optional[
                 "low_blunder_rate": None if blunder_rate is None else 1.0 - blunder_rate,
             },
             {
-                "accuracy_while_better": 0.45,
-                "conversion_rate": 0.35,
-                "low_blunder_rate": 0.20,
+                "accuracy_while_better": hparams.advantage_weight_accuracy,
+                "conversion_rate": hparams.advantage_weight_conversion_rate,
+                "low_blunder_rate": hparams.advantage_weight_low_blunder_rate,
             },
         )
         return score, len(wp_samples)
 
-    cp_samples = [sample for sample in samples if sample.player_cp_before is not None and sample.player_cp_before >= 200]
+    cp_samples = [
+        sample
+        for sample in samples
+        if sample.player_cp_before is not None
+        and sample.player_cp_before >= hparams.advantage_centipawn_threshold
+    ]
     if not cp_samples:
         return None, 0
-    return performance_score(cp_samples), len(cp_samples)
+    return performance_score(cp_samples, hparams), len(cp_samples)
 
 
-def resourcefulness(samples: list[PlayerMoveSample]) -> tuple[Optional[float], int]:
-    wp_samples = [sample for sample in samples if sample.player_wp_before is not None and sample.player_wp_before <= 0.35]
+def resourcefulness(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> tuple[Optional[float], int]:
+    hparams = hparams or _default_player_hparams()
+    wp_samples = [
+        sample
+        for sample in samples
+        if sample.player_wp_before is not None
+        and sample.player_wp_before <= hparams.resourcefulness_win_probability_move_threshold
+    ]
     if wp_samples:
-        defensive_accuracy = performance_score(wp_samples)
+        defensive_accuracy = performance_score(wp_samples, hparams)
         recovery_rate = mean_bool(
             sample.player_wp_after is not None
             and sample.player_wp_before is not None
-            and sample.player_wp_after - sample.player_wp_before >= 0.05
+            and sample.player_wp_after - sample.player_wp_before
+            >= hparams.resourcefulness_recovery_delta
             for sample in wp_samples
         )
         save_rate = game_rate(
             samples,
-            lambda game_samples: any((sample.player_wp_before or 1.0) <= 0.30 for sample in game_samples),
+            lambda game_samples: any(
+                (sample.player_wp_before or 1.0)
+                <= hparams.resourcefulness_win_probability_game_threshold
+                for sample in game_samples
+            ),
             lambda game_samples: (game_samples[0].player_score if game_samples else None) is not None
             and (game_samples[0].player_score or 0.0) >= 0.5,
         )
@@ -1027,24 +1190,31 @@ def resourcefulness(samples: list[PlayerMoveSample]) -> tuple[Optional[float], i
                 "save_rate": save_rate,
             },
             {
-                "defensive_accuracy": 0.40,
-                "recovery_rate": 0.30,
-                "save_rate": 0.30,
+                "defensive_accuracy": hparams.resourcefulness_weight_defensive_accuracy,
+                "recovery_rate": hparams.resourcefulness_weight_recovery_rate,
+                "save_rate": hparams.resourcefulness_weight_save_rate,
             },
         )
         return score, len(wp_samples)
 
-    cp_samples = [sample for sample in samples if sample.player_cp_before is not None and sample.player_cp_before <= -200]
+    cp_samples = [
+        sample
+        for sample in samples
+        if sample.player_cp_before is not None
+        and sample.player_cp_before <= hparams.resourcefulness_centipawn_threshold
+    ]
     if not cp_samples:
         return None, 0
-    return performance_score(cp_samples), len(cp_samples)
+    return performance_score(cp_samples, hparams), len(cp_samples)
 
 
 def endgame_performance(
     all_samples: list[PlayerMoveSample],
     endgame_samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
 ) -> Optional[float]:
-    endgame_accuracy = performance_score(endgame_samples)
+    hparams = hparams or _default_player_hparams()
+    endgame_accuracy = performance_score(endgame_samples, hparams)
     if endgame_accuracy is None:
         return None
     first_endgame_by_game: dict[str, PlayerMoveSample] = {}
@@ -1056,18 +1226,24 @@ def endgame_performance(
     conversion_rate = safe_mean(
         1.0 if sample.player_score == 1.0 else 0.0
         for sample in first_endgame_by_game.values()
-        if sample.player_wp_before is not None and sample.player_wp_before >= 0.65 and sample.player_score is not None
+        if sample.player_wp_before is not None
+        and sample.player_wp_before >= hparams.endgame_winning_win_probability_threshold
+        and sample.player_score is not None
     )
     save_rate = safe_mean(
         1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
         for sample in first_endgame_by_game.values()
-        if sample.player_wp_before is not None and sample.player_wp_before <= 0.35 and sample.player_score is not None
+        if sample.player_wp_before is not None
+        and sample.player_wp_before <= hparams.endgame_worse_win_probability_threshold
+        and sample.player_score is not None
     )
     equal_hold_rate = safe_mean(
         1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
         for sample in first_endgame_by_game.values()
         if sample.player_wp_before is not None
-        and 0.45 <= sample.player_wp_before <= 0.55
+        and hparams.endgame_equal_win_probability_low
+        <= sample.player_wp_before
+        <= hparams.endgame_equal_win_probability_high
         and sample.player_score is not None
     )
     return weighted_mean_available(
@@ -1078,17 +1254,19 @@ def endgame_performance(
             "equal_endgame_hold_rate": equal_hold_rate,
         },
         {
-            "endgame_accuracy": 0.45,
-            "conversion_rate": 0.25,
-            "save_rate": 0.20,
-            "equal_endgame_hold_rate": 0.10,
+            "endgame_accuracy": hparams.endgame_weight_accuracy,
+            "conversion_rate": hparams.endgame_weight_conversion_rate,
+            "save_rate": hparams.endgame_weight_save_rate,
+            "equal_endgame_hold_rate": hparams.endgame_weight_equal_hold_rate,
         },
     )
 
 
 def opening_diversities(
     samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
 ) -> tuple[Optional[float], Optional[float], Optional[float], dict[str, dict[str, int]]]:
+    hparams = hparams or _default_player_hparams()
     all_game_samples = unique_game_samples(samples)
     white_game_samples = [sample for sample in all_game_samples if sample.player_color == chess.WHITE]
     black_game_samples = [sample for sample in all_game_samples if sample.player_color == chess.BLACK]
@@ -1096,9 +1274,9 @@ def opening_diversities(
     white_distribution = label_distribution(opening_label(sample) for sample in white_game_samples)
     black_distribution = label_distribution(opening_label(sample) for sample in black_game_samples)
     return (
-        diversity_score(all_distribution),
-        diversity_score(white_distribution),
-        diversity_score(black_distribution),
+        diversity_score(all_distribution, hparams),
+        diversity_score(white_distribution, hparams),
+        diversity_score(black_distribution, hparams),
         {
             "all": all_distribution,
             "white": white_distribution,
@@ -1107,7 +1285,11 @@ def opening_diversities(
     )
 
 
-def structure_diversity_from_samples(samples: list[PlayerMoveSample]) -> tuple[Optional[float], dict[str, int]]:
+def structure_diversity_from_samples(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> tuple[Optional[float], dict[str, int]]:
+    hparams = hparams or _default_player_hparams()
     by_game: dict[str, list[str]] = {}
     for sample in samples:
         label = structure_label(sample.descriptor_before)
@@ -1115,16 +1297,23 @@ def structure_diversity_from_samples(samples: list[PlayerMoveSample]) -> tuple[O
             by_game.setdefault(sample.game_id, []).append(label)
     main_structures = [mode(labels) for labels in by_game.values() if labels]
     distribution = label_distribution(main_structures)
-    return diversity_score(distribution), distribution
+    return diversity_score(distribution, hparams), distribution
 
 
-def diversity_score(distribution: dict[str, int]) -> Optional[float]:
+def diversity_score(
+    distribution: dict[str, int],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> Optional[float]:
+    hparams = hparams or _default_player_hparams()
     total = sum(distribution.values())
     if total == 0:
         return None
     top_share = max(distribution.values()) / total
     entropy = normalized_entropy(distribution)
-    return clamp01(0.70 * entropy + 0.30 * (1.0 - top_share))
+    return clamp01(
+        hparams.diversity_entropy_weight * entropy
+        + hparams.diversity_top_share_weight * (1.0 - top_share)
+    )
 
 
 def normalized_entropy(distribution: dict[str, int]) -> float:

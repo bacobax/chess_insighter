@@ -48,3 +48,50 @@ result_scores:
   win: 1.0
   draw: 0.5
   loss: 0.0
+
+player_profile:
+  complexity_scale_percentile: 95
+  loss_normalization:
+    win_probability_loss: 0.25
+    centipawn_loss: 300
+  king_safety_performance_threshold: 0.65
+  material_imbalance_threshold: 0.05
+  advantage:
+    win_probability_move_threshold: 0.65
+    win_probability_game_threshold: 0.70
+    blunder_win_probability_loss: 0.20
+    centipawn_threshold: 200
+    weights:
+      accuracy_while_better: 0.45
+      conversion_rate: 0.35
+      low_blunder_rate: 0.20
+  resourcefulness:
+    win_probability_move_threshold: 0.35
+    win_probability_game_threshold: 0.30
+    recovery_delta: 0.05
+    centipawn_threshold: -200
+    weights:
+      defensive_accuracy: 0.40
+      recovery_rate: 0.30
+      save_rate: 0.30
+  endgame:
+    winning_win_probability_threshold: 0.65
+    worse_win_probability_threshold: 0.35
+    equal_win_probability_low: 0.45
+    equal_win_probability_high: 0.55
+    weights:
+      endgame_accuracy: 0.45
+      conversion_rate: 0.25
+      save_rate: 0.20
+      equal_endgame_hold_rate: 0.10
+  diversity:
+    entropy_weight: 0.70
+    top_share_weight: 0.30
+  pawn_structure:
+    weights:
+      isolated_pawn_exposure: 0.20
+      doubled_pawn_exposure: 0.15
+      backward_pawn_exposure: 0.15
+      passed_pawn_exposure: 0.20
+      semi_open_file_exposure: 0.15
+      open_center_exposure: 0.15

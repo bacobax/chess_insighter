@@ -167,13 +167,19 @@ def test_opening_score_uses_exact_book_flag_post_opening_stability_and_result():
         ]
     )
 
-    stats = make_transformer().compute([game], username="alice")
+    transformer = make_transformer()
+    stats = transformer.compute([game], username="alice")
 
     opening = stats.openings_score
     assert math.isclose(opening.book_accuracy, 2 / 3)
     assert math.isclose(opening.eval_stability_after_opening, 0.90)
     assert opening.result_from_opening_positions == 1.0
-    assert math.isclose(opening.score, 0.4 * (2 / 3) + 0.4 * 0.90 + 0.2 * 1.0)
+    assert math.isclose(
+        opening.score,
+        transformer.opening_weight_book_accuracy * (2 / 3)
+        + transformer.opening_weight_eval_stability_after_opening * 0.90
+        + transformer.opening_weight_result_from_opening_positions * 1.0,
+    )
 
 
 def test_time_management_penalties_handle_pressure_blunders_and_allocation():
@@ -322,7 +328,7 @@ def test_scores_are_none_without_required_samples():
 
 def test_missing_hparam_raises_instead_of_using_default():
     text = HPARAMS_PATH.read_text(encoding="utf-8")
-    text = text.replace("    book_accuracy: 0.4\n", "", 1)
+    text = text.replace("    book_accuracy: 0.15\n", "", 1)
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as file:
         file.write(text)
         temp_path = file.name
