@@ -98,6 +98,7 @@ class ReportBuildRequest(GameFilters):
     engine_depth: int = Field(default=10, ge=1, le=30)
     use_engine: bool = True
     refresh_cache: bool = False
+    target_color: Literal["white", "black", "both"] = "both"
 
     @field_validator("username")
     @classmethod
@@ -132,12 +133,30 @@ class OpeningFeatureSet(BaseModel):
 class OpeningMatch(BaseModel):
     opening_name: str
     similarity_score: float | None
+    weighted_cosine_score: float | None = None
+    dot_product_score: float | None = None
+    match_mode: Literal["cosine", "dot_product"] = "cosine"
+    structure_distribution_similarity: float | None = None
+    target_color: Literal["white", "black", "both"] | None = None
     eco_values: str | None
     line_count: int | None
     representative_pgn: str | None
     representative_uci: str | None
     fen: str | None
     used_features: list[str]
+
+
+class OpeningMatchRequest(BaseModel):
+    cache_hash: str
+    match_mode: Literal["cosine", "dot_product"] = "cosine"
+    target_color: Literal["white", "black", "both"] = "both"
+    limit: int = Field(default=15, ge=1, le=50)
+
+
+class OpeningMatchResponse(BaseModel):
+    top_opening_matches: list[OpeningMatch]
+    match_mode: Literal["cosine", "dot_product"]
+    target_color: Literal["white", "black", "both"]
 
 
 class ReportCharts(BaseModel):

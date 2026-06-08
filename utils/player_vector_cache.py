@@ -29,6 +29,7 @@ from utils.statistics_shared import DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH
 
 
 DEFAULT_PLAYER_VECTOR_CACHE = ".cache/player_vectors.json"
+FEATURE_MODEL_VERSION = "player_opening_match_v2"
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ def chesscom_cache_key(
         "time_classes": None if time_classes is None else sorted({item.strip().lower() for item in time_classes}),
         "rated_filter": rated_filter,
         "engine_depth": int(engine_depth),
+        "feature_model_version": FEATURE_MODEL_VERSION,
     }
 
 
@@ -126,6 +128,7 @@ def pgn_cache_key(
         "mtime_ns": stat.st_mtime_ns,
         "player_name": player_name.strip().lower(),
         "engine_depth": int(engine_depth),
+        "feature_model_version": FEATURE_MODEL_VERSION,
     }
 
 
@@ -408,6 +411,7 @@ def heuristic_enrich_single_game(
                 tactical_position=features["tactical_density"] >= 0.55,
                 quiet_middlegame=phase == "middlegame" and features["quiet_position_density"] >= 0.60,
                 complexity=features["middlegame_complexity"],
+                absolute_complexity=features["middlegame_complexity"],
                 number_of_legal_moves=chess.Board(fen_before).legal_moves.count(),
                 eval_volatility_among_top_engine_lines=engine_info.eval_volatility,
                 forcing_line_depth=engine_info.forcing_line_depth,

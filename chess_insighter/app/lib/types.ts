@@ -66,6 +66,11 @@ export type OpeningFeatureSet = {
 export type OpeningMatch = {
   opening_name: string;
   similarity_score: number | null;
+  weighted_cosine_score: number | null;
+  dot_product_score: number | null;
+  match_mode: "cosine" | "dot_product";
+  structure_distribution_similarity: number | null;
+  target_color: "white" | "black" | "both" | null;
   eco_values: string | null;
   line_count: number | null;
   representative_pgn: string | null;
@@ -73,6 +78,8 @@ export type OpeningMatch = {
   fen: string | null;
   used_features: string[];
 };
+
+export type OpeningMatchMode = "cosine" | "dot_product";
 
 export type ReportCharts = {
   skill_profile: MetricPoint[];
@@ -101,12 +108,26 @@ export type ReportBuildRequest = {
   engine_depth: number;
   use_engine: boolean;
   refresh_cache: boolean;
+  target_color: "white" | "black" | "both";
   time_classes?: string[] | null;
   rated_filter?: boolean | null;
   since_year?: number | null;
   since_month?: number | null;
   until_year?: number | null;
   until_month?: number | null;
+};
+
+export type OpeningMatchRequest = {
+  cache_hash: string;
+  match_mode: OpeningMatchMode;
+  target_color: "white" | "black" | "both";
+  limit?: number;
+};
+
+export type OpeningMatchResponse = {
+  top_opening_matches: OpeningMatch[];
+  match_mode: OpeningMatchMode;
+  target_color: "white" | "black" | "both";
 };
 
 export type ReportBuildResponse = {

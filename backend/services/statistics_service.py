@@ -32,6 +32,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         max_games=request.max_games,
         engine_depth=request.engine_depth,
         use_engine=request.use_engine,
+        target_color=request.target_color,
     )
     cache_hash = stable_hash(key)
     cache = ReportCache()
@@ -70,7 +71,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
     bundle = PlayerStatisticsBuilder(hparams_path).build(enriched_games, player_name=request.username)
     bundle_json = serializable(bundle)
     stats = bundle.global_statistics
-    opening_charts = build_opening_charts(bundle)
+    opening_charts = build_opening_charts(bundle, target_color=request.target_color)
 
     metadata = {
         "username": request.username,

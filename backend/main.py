@@ -11,12 +11,15 @@ from backend.models import (
     GamesQueryRequest,
     GamesQueryResponse,
     HealthResponse,
+    OpeningMatchRequest,
+    OpeningMatchResponse,
     ReportBuildRequest,
     ReportBuildResponse,
 )
 from backend.services.cache_service import ReportCache
 from backend.services.chesscom_service import ChessComServiceError, UnknownChessComUser, query_games, summarize_games
 from backend.services.hparams_service import load_hparams
+from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
 from backend.settings import settings
 
@@ -84,6 +87,25 @@ async def games_query(request: GamesQueryRequest) -> GamesQueryResponse:
 @app.post("/api/report/build", response_model=ReportBuildResponse)
 async def report_build(request: ReportBuildRequest) -> ReportBuildResponse:
     return await run_in_threadpool(build_report, request)
+
+
+@app.post("/api/openings/matches", response_model=OpeningMatchResponse)
+async def opening_matches(request: OpeningMatchRequest) -> OpeningMatchResponse:
+    try:
+        matches = await run_in_threadpool(
+            top_opening_matches_from_cached_report,
+            request.cache_hash,
+            match_mode=request.match_mode,
+            target_color=request.target_color,
+            limit=request.limit,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return OpeningMatchResponse(
+        top_opening_matches=matches,
+        match_mode=request.match_mode,
+        target_color=request.target_color,
+    )
 
 
 @app.get("/api/report/cache/{cache_hash}", response_model=ReportBuildResponse)

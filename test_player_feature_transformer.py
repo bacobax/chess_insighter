@@ -35,6 +35,10 @@ def desc(
     is_check: bool = False,
     is_promotion: bool = False,
     move_is_threat: bool = False,
+    best_move_cp_gain: int | None = None,
+    forcing_line_depth: int = 0,
+    engine_top_move_is_forcing: bool = False,
+    top_engine_moves=None,
 ):
     return SimpleNamespace(
         phase=phase,
@@ -47,6 +51,10 @@ def desc(
         is_check=is_check,
         is_promotion=is_promotion,
         move_is_threat=move_is_threat,
+        best_move_cp_gain=best_move_cp_gain,
+        forcing_line_depth=forcing_line_depth,
+        engine_top_move_is_forcing=engine_top_move_is_forcing,
+        top_engine_moves=[] if top_engine_moves is None else top_engine_moves,
         move_number=12,
     )
 
@@ -199,8 +207,8 @@ def test_structure_diversity_entropy_uses_main_middlegame_structure_per_game():
 
 def test_performance_uses_wp_loss_then_cp_loss_fallback():
     samples = [
-        sample("g1", desc(tactical=True), desc(), wp_loss=0.05, cp_loss=250),
-        sample("g1", desc(tactical=True), desc(), wp_loss=0.10, cp_loss=250),
+        sample("g1", desc(tactical=True, best_move_cp_gain=150), desc(), wp_loss=0.05, cp_loss=250),
+        sample("g1", desc(tactical=True, forcing_line_depth=2), desc(), wp_loss=0.10, cp_loss=250),
         sample(
             "g1",
             desc(quiet=True),
@@ -214,8 +222,15 @@ def test_performance_uses_wp_loss_then_cp_loss_fallback():
 
     skill = aggregate(samples).skill_vector
 
-    assert math.isclose(skill["tactical_performance"], 1.0 - 0.075 / 0.25)
-    assert math.isclose(skill["quiet_position_performance"], 0.5)
+    tactical_performance = math.exp(-0.075 / 0.08)
+    tactical_difficulty_adjustment = 0.75 + 0.25 * ((0.55 * (150 / 300)) + (0.45 * (2 / 4))) / 2
+    expected_tactical = (
+        0.40 * tactical_performance
+        + 0.30 * 0.5
+        + 0.10 * tactical_difficulty_adjustment
+    ) / (0.40 + 0.30 + 0.10)
+    assert math.isclose(skill["tactical_performance"], expected_tactical)
+    assert math.isclose(skill["quiet_position_performance"], math.exp(-150 / 35))
 
 
 def test_confidence_scoring():
@@ -223,7 +238,7 @@ def test_confidence_scoring():
     assert sample_confidence(100, 100) == 1.0
     assert sample_confidence(200, 100) == 1.0
 
-    profile = aggregate([sample("g1", desc(tactical=True), desc(), wp_loss=0.0)])
+    profile = aggregate([sample("g1", desc(tactical=True, best_move_cp_gain=150), desc(), wp_loss=0.0)])
 
     assert math.isclose(profile.confidence["tactical_performance"], 1 / 300)
     assert math.isclose(profile.confidence["tactical_position_choice"], 1 / 300)
@@ -285,7 +300,23 @@ def test_player_profile_output_and_opening_vector_mapping():
     assert profile.moves_analyzed == 1
     assert vector["tactical_density"] == profile.style_vector["tactical_position_choice"]
     assert vector["quiet_position_density"] == profile.style_vector["quiet_choice"]
+    assert vector["middlegame_complexity"] == profile.style_vector["absolute_complexity_choice"]
+    assert "structure_diversity" not in vector
     assert profile.subfeatures["matcher_vector"] == vector
+
+
+def test_absolute_and_relative_complexity_fields_are_both_exposed():
+    profile = aggregate(
+        [
+            sample("g1", desc(complexity=50), desc(complexity=80)),
+            sample("g1", desc(complexity=100), desc(complexity=120)),
+            sample("g1", desc(complexity=150), desc(complexity=200)),
+        ]
+    )
+
+    assert math.isclose(profile.style_vector["absolute_complexity_exposure"], (0.5 + 1.0 + 1.0) / 3)
+    assert math.isclose(profile.style_vector["absolute_complexity_choice"], (0.8 + 1.0 + 1.0) / 3)
+    assert profile.style_vector["relative_complexity_choice"] == profile.style_vector["complexity_choice"]
 
 
 def test_sample_builder_creates_samples_and_castling_summary_from_enriched_game():

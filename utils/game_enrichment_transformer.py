@@ -40,6 +40,7 @@ class EnginePositionInfo:
 
     number_of_legal_moves: int
     complexity: Optional[float]
+    absolute_complexity: Optional[float]
 
     engine_top_move_is_forcing: bool
 
@@ -99,6 +100,7 @@ class EnrichedMove:
     in_opening_book: bool
     opening_eco: Optional[str]
     opening_name: Optional[str]
+    absolute_complexity: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -401,6 +403,7 @@ class GameEnrichmentTransformer:
                 tactical_position=tactical_position,
                 quiet_middlegame=quiet_middlegame,
                 complexity=engine_info_before.complexity,
+                absolute_complexity=engine_info_before.absolute_complexity,
                 number_of_legal_moves=engine_info_before.number_of_legal_moves,
                 eval_volatility_among_top_engine_lines=(
                     engine_info_before.eval_volatility_among_top_engine_lines
@@ -501,6 +504,7 @@ class GameEnrichmentTransformer:
                 forcing_line_depth=0,
                 number_of_legal_moves=number_of_legal_moves,
                 complexity=None,
+                absolute_complexity=None,
                 engine_top_move_is_forcing=False,
             )
 
@@ -559,6 +563,13 @@ class GameEnrichmentTransformer:
             forcing_line_depth=forcing_line_depth,
             low_gap_between_top_moves=low_gap,
         )
+        absolute_complexity = self._compute_absolute_complexity(
+            board=board,
+            number_of_legal_moves=number_of_legal_moves,
+            eval_volatility_among_top_engine_lines=eval_volatility,
+            forcing_line_depth=forcing_line_depth,
+            low_gap_between_top_moves=low_gap,
+        )
 
         return EnginePositionInfo(
             eval_cp=eval_cp,
@@ -570,6 +581,7 @@ class GameEnrichmentTransformer:
             forcing_line_depth=forcing_line_depth,
             number_of_legal_moves=number_of_legal_moves,
             complexity=complexity,
+            absolute_complexity=absolute_complexity,
             engine_top_move_is_forcing=engine_top_move_is_forcing,
         )
 
@@ -759,6 +771,42 @@ class GameEnrichmentTransformer:
             + float(eval_volatility_among_top_engine_lines)
             + float(forcing_line_depth)
             + float(low_gap_between_top_moves)
+        )
+
+    def _compute_absolute_complexity(
+        self,
+        *,
+        board: chess.Board,
+        number_of_legal_moves: int,
+        eval_volatility_among_top_engine_lines: Optional[float],
+        forcing_line_depth: int,
+        low_gap_between_top_moves: Optional[float],
+    ) -> Optional[float]:
+        if (
+            eval_volatility_among_top_engine_lines is None
+            or low_gap_between_top_moves is None
+        ):
+            return None
+        legal_move_complexity = min(1.0, number_of_legal_moves / 60.0)
+        engine_ambiguity = min(1.0, max(0.0, low_gap_between_top_moves) / 100.0)
+        eval_volatility = min(1.0, max(0.0, eval_volatility_among_top_engine_lines) / 300.0)
+        forcing_depth = min(1.0, forcing_line_depth / 4.0)
+        tactical_options = sum(
+            1
+            for move in board.legal_moves
+            if board.is_capture(move) or board.gives_check(move)
+        )
+        tactical_options_score = min(1.0, tactical_options / 12.0)
+        return max(
+            0.0,
+            min(
+                1.0,
+                0.25 * legal_move_complexity
+                + 0.25 * engine_ambiguity
+                + 0.20 * eval_volatility
+                + 0.20 * forcing_depth
+                + 0.10 * tactical_options_score,
+            ),
         )
 
     # -----------------------------------------------------------------

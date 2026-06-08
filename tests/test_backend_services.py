@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from backend.services.cache_service import stable_hash
 from backend.services.chesscom_service import summarize_game
-from backend.services.openings_service import find_opening_family_row, uci_to_fen
+from backend.services.openings_service import (
+    structure_distribution_similarity,
+    top_opening_matches,
+    top_opening_matches_from_cached_report,
+    uci_to_fen,
+    weighted_dot_product_similarity,
+    weighted_cosine_similarity,
+    find_opening_family_row,
+)
 from backend.settings import settings
 from utils.statistics_shared import StatisticsHparams
 
@@ -47,3 +55,49 @@ def test_opening_family_lookup_and_uci_to_fen():
     fen = uci_to_fen("g1h3")
     assert fen is not None
     assert " b " in fen
+
+
+def test_weighted_cosine_and_structure_similarity_helpers():
+    score, used = weighted_cosine_similarity(
+        {"tactical_density": 1.0, "quiet_position_density": 0.0},
+        {"tactical_density": 1.0, "quiet_position_density": 1.0},
+        {"tactical_density": 1.0, "quiet_position_density": 0.5},
+    )
+
+    assert used == ["tactical_density", "quiet_position_density"]
+    assert score is not None and 0.0 < score < 1.0
+
+    profile = type("Profile", (), {"subfeatures": {"structure_distribution": {"isolani": 2}}})()
+    assert structure_distribution_similarity(
+        profile,
+        {"structure_distribution": {"isolani": 1, "hanging-pawns": 1}},
+    ) == 0.5
+
+    dot, dot_used = weighted_dot_product_similarity(
+        {"tactical_density": 1.0, "quiet_position_density": 0.5},
+        {"tactical_density": 0.25, "quiet_position_density": 1.0},
+        {"tactical_density": 2.0, "quiet_position_density": 0.5},
+    )
+    assert dot_used == ["tactical_density", "quiet_position_density"]
+    assert dot == 0.75
+
+
+def test_top_opening_matches_accepts_target_color_both_without_distribution():
+    matches = top_opening_matches(
+        {"tactical_density": 1.0},
+        limit=1,
+        target_color="both",
+    )
+
+    assert len(matches) == 1
+    assert matches[0].target_color == "both"
+    assert matches[0].weighted_cosine_score == matches[0].similarity_score
+
+    dot_matches = top_opening_matches(
+        {"tactical_density": 1.0},
+        limit=1,
+        target_color="both",
+        match_mode="dot_product",
+    )
+    assert dot_matches[0].match_mode == "dot_product"
+    assert dot_matches[0].dot_product_score == dot_matches[0].similarity_score

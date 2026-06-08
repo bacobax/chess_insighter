@@ -440,10 +440,10 @@ These values say how large a mistake must be before performance gets minimum cre
 ### `win_probability_loss`
 
 ```yaml
-win_probability_loss: 0.25
+win_probability_loss: 0.08
 ```
 
-With `0.25`, losing 25 percentage points of win probability is treated as a very bad move for performance scoring.
+With `0.08`, losing 8 percentage points of win probability is treated as a meaningful move-level error for skill-specific scoring.
 
 Raising it makes mistakes look less severe.
 
@@ -462,6 +462,22 @@ With `300`, losing about three pawns of evaluation is treated as a very bad move
 Raising it makes centipawn mistakes look less severe.
 
 Lowering it makes centipawn mistakes look more severe.
+
+### Skill-specific centipawn scales
+
+```yaml
+tactical_cp_loss: 80
+calculation_cp_loss: 90
+quiet_cp_loss: 35
+complex_cp_loss: 100
+endgame_cp_loss: 60
+```
+
+These scales are used by the player-profile skill scores instead of one generic centipawn-loss scale. Lower values make the corresponding skill score stricter.
+
+## `player_profile.tactics`, `player_profile.calculation`, and `player_profile.middlegame_strategy`
+
+These sections define the stricter tactical/calculation test-position thresholds and the weights used to combine skill submetrics. Tactics and calculation use engine top-move, forcing-depth, and loss-performance signals when available; middlegame strategy combines quiet-position performance, pawn-structure comfort, king-safety performance, advantage capitalization, and absolute complexity control.
 
 ## `player_profile.king_safety_performance_threshold`
 

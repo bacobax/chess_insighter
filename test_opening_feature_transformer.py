@@ -8,9 +8,14 @@ import chess
 import chess.engine
 
 from utils.opening_feature_transformer import (
+    MATCHER_COLUMNS_V2,
     OpeningLine,
     aggregate_by_normalized_name,
     aggregate_line_features,
+    decode_distribution_csv,
+    encode_distribution_csv,
+    histogram_intersection,
+    normalize_distribution,
     castling_opportunity_score,
     compute_line_features,
     compute_opening_groups,
@@ -210,6 +215,29 @@ def test_family_aggregation_combines_variations_and_diversity():
     assert opening_family_name("Sicilian Defense: Najdorf Variation") == "Sicilian Defense"
     assert by_name["Sicilian Defense"].line_count == 2
     assert by_name["Sicilian Defense"].structure_diversity > 0.0
+    assert by_name["Sicilian Defense"].final_structure_entropy == by_name["Sicilian Defense"].structure_diversity
+    assert by_name["Sicilian Defense"].structure_distribution == {
+        "open-center": 1,
+        "dragon-structure": 1,
+    }
+
+
+def test_v2_vector_excludes_structure_diversity_and_distribution_csv_round_trips():
+    group = aggregate_line_features(
+        [
+            _feature("A", tactical_density=1.0, structure_signature="isolani"),
+            _feature("A", tactical_density=0.5, structure_signature="isolani"),
+        ]
+    )
+
+    assert "structure_diversity" not in MATCHER_COLUMNS_V2
+    assert len(group.vector_v2()) == len(MATCHER_COLUMNS_V2)
+    assert len(group.vector()) == len(MATCHER_COLUMNS_V2) + 1
+    assert decode_distribution_csv(encode_distribution_csv(group.structure_distribution)) == {"isolani": 2}
+    assert histogram_intersection(
+        normalize_distribution({"isolani": 2}),
+        normalize_distribution({"isolani": 1, "hanging-pawns": 1}),
+    ) == 0.5
 
 
 def test_gt_matching_uses_alias_and_eco_range():

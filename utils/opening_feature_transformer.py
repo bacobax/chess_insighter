@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import csv
+import json
 import math
 import re
 import unicodedata
@@ -20,7 +21,7 @@ except ImportError:  # pragma: no cover - exercised only when tqdm is absent.
 
 DEFAULT_STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 
-VECTOR_COLUMNS = [
+MATCHER_COLUMNS_V2 = [
     "tactical_density",
     "quiet_position_density",
     "king_safety_risk",
@@ -30,6 +31,15 @@ VECTOR_COLUMNS = [
     "pawn_structure_sharpness",
     "material_imbalance",
     "endgame_likelihood_proxy",
+]
+
+REPORT_METADATA_COLUMNS = [
+    "final_structure_entropy",
+    "structure_diversity",
+]
+
+VECTOR_COLUMNS = [
+    *MATCHER_COLUMNS_V2,
     "structure_diversity",
 ]
 
@@ -96,9 +106,14 @@ class OpeningGroupFeatureVector:
     material_imbalance: float
     endgame_likelihood_proxy: float
     structure_diversity: float
+    final_structure_entropy: float = 0.0
+    structure_distribution: dict[str, int] = field(default_factory=dict)
 
     def vector(self) -> list[float]:
         return [float(getattr(self, column)) for column in VECTOR_COLUMNS]
+
+    def vector_v2(self) -> list[float]:
+        return [float(getattr(self, column)) for column in MATCHER_COLUMNS_V2]
 
 
 def load_opening_lines(dataset_path: str | Path) -> list[OpeningLine]:
@@ -846,6 +861,22 @@ def position_complexity(board: chess.Board, engine_info: EnginePositionInfo) -> 
     )
 
 
+def absolute_position_complexity(board: chess.Board, engine_info: EnginePositionInfo) -> float:
+    legal_move_complexity = min(1.0, board.legal_moves.count() / 60.0)
+    engine_ambiguity = engine_info.low_gap_between_top_moves
+    eval_volatility = min(1.0, engine_info.eval_volatility / 300.0)
+    forcing_depth = min(1.0, engine_info.forcing_line_depth / 4.0)
+    tactical_options = legal_captures_count(board) + legal_checks_count(board)
+    tactical_options_score = min(1.0, tactical_options / 12.0)
+    return clamp01(
+        0.25 * legal_move_complexity
+        + 0.25 * engine_ambiguity
+        + 0.20 * eval_volatility
+        + 0.20 * forcing_depth
+        + 0.10 * tactical_options_score
+    )
+
+
 def compute_line_features(
     line: OpeningLine,
     engine: Any,
@@ -877,7 +908,7 @@ def compute_line_features(
 
     complexity_boards = boards[-4:] if len(boards) >= 4 else boards
     complexity_infos = position_infos[-len(complexity_boards):]
-    complexity = mean(position_complexity(board, info) for board, info in zip(complexity_boards, complexity_infos))
+    complexity = mean(absolute_position_complexity(board, info) for board, info in zip(complexity_boards, complexity_infos))
     final_eval_volatility = position_infos[-1].eval_volatility if position_infos else 0.0
 
     return LineFeatureVector(
@@ -904,6 +935,8 @@ def aggregate_line_features(features: Iterable[LineFeatureVector], *, opening_na
         raise ValueError("Cannot aggregate an empty feature list")
     name = opening_name or items[0].opening_name
     signatures = [item.structure_signature for item in items]
+    distribution = structure_signature_distribution(signatures)
+    entropy = round_float(signature_entropy(signatures))
     return OpeningGroupFeatureVector(
         opening_name=name,
         line_count=len(items),
@@ -919,7 +952,9 @@ def aggregate_line_features(features: Iterable[LineFeatureVector], *, opening_na
         pawn_structure_sharpness=avg_attr(items, "pawn_structure_sharpness"),
         material_imbalance=avg_attr(items, "material_imbalance"),
         endgame_likelihood_proxy=avg_attr(items, "endgame_likelihood_proxy"),
-        structure_diversity=round_float(signature_entropy(signatures)),
+        structure_diversity=entropy,
+        final_structure_entropy=entropy,
+        structure_distribution=distribution,
     )
 
 
@@ -980,13 +1015,17 @@ def write_group_features(path: str | Path, groups: list[OpeningGroupFeatureVecto
         "eco_values",
         "representative_pgn",
         "representative_uci",
-        *VECTOR_COLUMNS,
+        *MATCHER_COLUMNS_V2,
+        "final_structure_entropy",
+        "structure_diversity",
+        "structure_distribution",
     ]
     with output.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
         for group in groups:
-            row = {column: getattr(group, column) for column in columns}
+            row = {column: getattr(group, column) for column in columns if column != "structure_distribution"}
+            row["structure_distribution"] = encode_distribution_csv(group.structure_distribution)
             writer.writerow(row)
 
 
@@ -1072,7 +1111,7 @@ def cap_lines_per_gt_row(lines: list[OpeningLine], max_lines_per_group: Optional
 
 
 def gt_vector(row: dict[str, str]) -> list[float]:
-    return [float(row[column]) for column in VECTOR_COLUMNS]
+    return [float(row[column]) for column in MATCHER_COLUMNS_V2]
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -1086,7 +1125,7 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
 
 def similarity_matrix(gt_rows: list[dict[str, str]], computed_groups: list[OpeningGroupFeatureVector]) -> list[list[float]]:
     return [
-        [round_float(cosine_similarity(gt_vector(row), group.vector())) for group in computed_groups]
+        [round_float(cosine_similarity(gt_vector(row), group.vector_v2())) for group in computed_groups]
         for row in gt_rows
     ]
 
@@ -1158,6 +1197,51 @@ def progress_iter(
 
 def avg_attr(items: list[Any], attr: str) -> float:
     return round_float(sum(float(getattr(item, attr)) for item in items) / len(items))
+
+
+def structure_signature_distribution(signatures: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for signature in signatures:
+        if not signature:
+            continue
+        counts[signature] = counts.get(signature, 0) + 1
+    return counts
+
+
+def normalize_distribution(counts: dict[str, int]) -> dict[str, float]:
+    total = sum(counts.values())
+    if total <= 0:
+        return {}
+    return {key: value / total for key, value in counts.items()}
+
+
+def histogram_intersection(a: dict[str, float], b: dict[str, float]) -> float:
+    keys = set(a) | set(b)
+    return sum(min(a.get(key, 0.0), b.get(key, 0.0)) for key in keys)
+
+
+def encode_distribution_csv(counts: dict[str, int]) -> str:
+    return json.dumps(counts, sort_keys=True, separators=(",", ":"))
+
+
+def decode_distribution_csv(value: str | None) -> dict[str, int]:
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    result: dict[str, int] = {}
+    for key, count in decoded.items():
+        try:
+            int_count = int(count)
+        except (TypeError, ValueError):
+            continue
+        if int_count > 0:
+            result[str(key)] = int_count
+    return result
 
 
 def signature_entropy(signatures: list[str]) -> float:

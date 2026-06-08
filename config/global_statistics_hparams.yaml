@@ -52,10 +52,38 @@ result_scores:
 player_profile:
   complexity_scale_percentile: 95
   loss_normalization:
-    win_probability_loss: 0.25
+    win_probability_loss: 0.08
     centipawn_loss: 300
+    tactical_cp_loss: 80
+    calculation_cp_loss: 90
+    quiet_cp_loss: 35
+    complex_cp_loss: 100
+    endgame_cp_loss: 60
   king_safety_performance_threshold: 0.65
   material_imbalance_threshold: 0.05
+  tactics:
+    test_cp_gain_threshold: 120
+    test_forcing_depth_threshold: 2
+    weights:
+      tactical_accuracy: 0.40
+      missed_tactic_avoidance: 0.30
+      top_n_match_rate: 0.20
+      difficulty_adjustment: 0.10
+  calculation:
+    cp_gain_threshold: 150
+    forcing_depth_threshold: 2
+    weights:
+      top_1_match_rate: 0.35
+      top_3_match_rate: 0.25
+      loss_performance: 0.25
+      forcing_sequence_preservation: 0.15
+  middlegame_strategy:
+    weights:
+      quiet_position_performance: 0.25
+      pawn_structure_comfort: 0.20
+      king_safety_performance: 0.20
+      advantage_capitalization: 0.20
+      absolute_complexity_control: 0.15
   advantage:
     win_probability_move_threshold: 0.65
     win_probability_game_threshold: 0.70

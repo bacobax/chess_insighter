@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
-import { buildReport } from "~/lib/api";
-import type { Hparams, ReportBuildResponse } from "~/lib/types";
+import { buildReport, rematchOpenings } from "~/lib/api";
+import type { Hparams, OpeningMatch, OpeningMatchMode, ReportBuildResponse } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 import { OpeningBoardPreview } from "./opening-board-preview";
 import { ReportConfigForm } from "./report-config-form";
@@ -15,6 +15,7 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
   const [maxGames, setMaxGames] = useState(20);
   const [timeClass, setTimeClass] = useState<string>("all");
   const [ratedFilter, setRatedFilter] = useState<string>("all");
+  const [targetColor, setTargetColor] = useState<"white" | "black" | "both">("both");
   const [sinceYear, setSinceYear] = useState<number | "">("");
   const [sinceMonth, setSinceMonth] = useState<number | "">("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -36,6 +37,7 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
         engine_depth: engineDepth,
         use_engine: useEngine,
         refresh_cache: refreshCache,
+        target_color: targetColor,
         time_classes: timeClass === "all" ? null : [timeClass],
         rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
         since_year: sinceYear === "" ? null : sinceYear,
@@ -58,7 +60,7 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
           <CardDescription>Configure the analysis run and build a cached player report.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <label className="text-sm">
               <span className="mb-1 block text-slate-600">Max games</span>
               <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={500} value={maxGames} onChange={(event) => setMaxGames(Number(event.target.value))} />
@@ -79,6 +81,14 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
                 <option value="all">All</option>
                 <option value="rated">Rated</option>
                 <option value="unrated">Unrated</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600">Target color</span>
+              <select className="h-10 w-full rounded-md border px-3 bg-white" value={targetColor} onChange={(e) => setTargetColor(e.target.value as "white" | "black" | "both")}>
+                <option value="both">Both</option>
+                <option value="white">White</option>
+                <option value="black">Black</option>
               </select>
             </label>
             <label className="text-sm">
@@ -186,17 +196,64 @@ function OpeningCharacteristics({ report }: { report: ReportBuildResponse }) {
 }
 
 function TopOpeningMatches({ report }: { report: ReportBuildResponse }) {
+  const initialMatches = report.report.charts.top_opening_matches;
+  const [matches, setMatches] = useState<OpeningMatch[]>(initialMatches);
+  const [matchMode, setMatchMode] = useState<OpeningMatchMode>(initialMatches[0]?.match_mode ?? "cosine");
+  const [rematching, setRematching] = useState(false);
+  const [rematchError, setRematchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMatches(initialMatches);
+    setMatchMode(initialMatches[0]?.match_mode ?? "cosine");
+    setRematchError(null);
+  }, [report.cache_hash]);
+
+  async function changeMatchMode(nextMode: OpeningMatchMode) {
+    setMatchMode(nextMode);
+    setRematching(true);
+    setRematchError(null);
+    try {
+      const response = await rematchOpenings({
+        cache_hash: report.cache_hash,
+        match_mode: nextMode,
+        target_color: matches[0]?.target_color ?? "both",
+        limit: matches.length || 15,
+      });
+      setMatches(response.top_opening_matches);
+      setMatchMode(response.match_mode);
+    } catch (err) {
+      setRematchError(err instanceof Error ? err.message : "Could not update opening matches.");
+    } finally {
+      setRematching(false);
+    }
+  }
+
   return (
     <Card>
-      <CardHeader><CardTitle>Top K Opening Matches</CardTitle></CardHeader>
-      <CardContent className="grid gap-4">
-        {report.report.charts.top_opening_matches.map((match) => (
-          <div key={match.opening_name} className="grid gap-4 rounded-md border p-3 sm:grid-cols-[96px_1fr]">
+      <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+        <CardTitle>Top K Opening Matches</CardTitle>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <span>Match type</span>
+          <select
+            className="h-9 rounded-md border px-2 text-sm"
+            value={matchMode}
+            disabled={rematching}
+            onChange={(event) => changeMatchMode(event.target.value as OpeningMatchMode)}
+          >
+            <option value="cosine">Cosine similarity</option>
+            <option value="dot_product">Dot product</option>
+          </select>
+        </label>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rematchError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rematchError}</div> : null}
+        {matches.map((match) => (
+          <div key={match.opening_name} className="grid max-w-2xl gap-3 rounded-md border p-3 sm:grid-cols-[80px_minmax(0,1fr)]">
             <OpeningBoardPreview fen={match.fen} />
-            <div>
-              <div className="font-semibold">{match.opening_name}</div>
-              <div className="mt-1 text-sm text-slate-500">similarity {formatNumber(match.similarity_score, 3)} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
-              <div className="mt-2 text-xs text-slate-500">{match.representative_pgn ?? "No representative line"}</div>
+            <div className="min-w-0">
+              <div className="truncate font-semibold" title={match.opening_name}>{match.opening_name}</div>
+              <div className="mt-1 text-sm text-slate-500">{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
+              <div className="mt-2 line-clamp-2 text-xs text-slate-500">{match.representative_pgn ?? "No representative line"}</div>
             </div>
           </div>
         ))}

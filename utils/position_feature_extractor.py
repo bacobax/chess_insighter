@@ -9,6 +9,7 @@ import numpy as np
 from utils.opening_feature_transformer import (
     EnginePositionInfo,
     analyse_position,
+    absolute_position_complexity,
     castling_opportunity_score,
     castling_side,
     clamp01,
@@ -17,7 +18,6 @@ from utils.opening_feature_transformer import (
     material_imbalance_score,
     pawn_structure_sharpness,
     pawn_structure_signature,
-    position_complexity,
     preferred_castling_side,
     quiet_position_score,
     signature_entropy,
@@ -26,7 +26,6 @@ from utils.opening_feature_transformer import (
 
 
 FEATURES = [
-    "structure_diversity",
     "material_imbalance",
     "quiet_position_density",
     "tactical_density",
@@ -114,14 +113,14 @@ def extract_position_features(
 
     # A single board cannot know historical structure entropy. Use the current
     # pawn signature's non-starting sharpness as a robust one-position proxy.
-    structure_diversity = signature_entropy([pawn_structure_signature(chess.Board()), pawn_structure_signature(board)])
+    structure_entropy = signature_entropy([pawn_structure_signature(chess.Board()), pawn_structure_signature(board)])
 
     features = {
-        "structure_diversity": structure_diversity,
+        "structure_entropy": structure_entropy,
         "material_imbalance": material_imbalance_score(board, engine_info),
         "quiet_position_density": quiet,
         "tactical_density": tactical,
-        "middlegame_complexity": position_complexity(board, engine_info),
+        "middlegame_complexity": absolute_position_complexity(board, engine_info),
         "endgame_likelihood_proxy": endgame_likelihood_proxy(
             board,
             tactical_density=tactical,

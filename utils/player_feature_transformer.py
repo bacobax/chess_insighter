@@ -10,6 +10,7 @@ import chess
 
 from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
 from utils.opening_feature_transformer import (
+    MATCHER_COLUMNS_V2,
     castling_side,
     center_state_scores,
     doubled_pawns,
@@ -42,6 +43,13 @@ STYLE_VECTOR_V1 = {
     "complexity_choice",
     "complexity_delta",
     "high_complexity_choice_rate",
+    "absolute_complexity_exposure",
+    "absolute_complexity_choice",
+    "absolute_complexity_delta",
+    "relative_complexity_exposure",
+    "relative_complexity_choice",
+    "relative_complexity_delta",
+    "high_relative_complexity_choice_rate",
     "king_safety_risk_tolerance",
     "king_risk_delta",
     "early_castling_tendency",
@@ -55,11 +63,15 @@ STYLE_VECTOR_V1 = {
     "opening_diversity_white",
     "opening_diversity_black",
     "structure_diversity",
+    "dominant_structure_entropy",
+    "dominant_structure_diversity_score",
 }
 
 
 SKILL_VECTOR_V1 = {
     "tactical_performance",
+    "calculation_performance",
+    "middlegame_strategy",
     "quiet_position_performance",
     "complexity_performance",
     "king_safety_performance",
@@ -78,6 +90,8 @@ CONFIDENCE_TARGETS = {
     "structure_diversity": 50,
     "endgame_performance": 30,
     "tactical_performance": 300,
+    "calculation_performance": 150,
+    "middlegame_strategy": 200,
     "quiet_position_performance": 300,
     "complexity_performance": 200,
     "king_safety_performance": 100,
@@ -88,18 +102,19 @@ CONFIDENCE_TARGETS = {
 }
 
 
-PLAYER_TO_OPENING_MAP = {
+PLAYER_TO_OPENING_MAP_V2 = {
     "tactical_density": "tactical_position_choice",
     "quiet_position_density": "quiet_choice",
     "king_safety_risk": "king_safety_risk_tolerance",
     "early_castling_tendency": "early_castling_tendency",
     "opposite_side_castling_tendency": "opposite_side_castling_tendency",
-    "middlegame_complexity": "complexity_choice",
+    "middlegame_complexity": "absolute_complexity_choice",
     "pawn_structure_sharpness": "pawn_structure_sharpness",
     "material_imbalance": "material_imbalance_preference",
     "endgame_likelihood_proxy": "endgame_frequency",
-    "structure_diversity": "structure_diversity",
 }
+
+PLAYER_TO_OPENING_MAP = PLAYER_TO_OPENING_MAP_V2
 
 
 @dataclass(frozen=True)
@@ -149,10 +164,42 @@ class PlayerProfile:
 
 
 @dataclass(frozen=True)
+class SkillScore:
+    score: Optional[float]
+    performance: Optional[float]
+    difficulty: Optional[float]
+    sample_count: int
+    confidence: float
+    submetrics: dict[str, Optional[float]]
+
+
+@dataclass(frozen=True)
 class PlayerFeatureHparams:
     complexity_scale_percentile: float
     win_probability_loss_normalization: float
     centipawn_loss_normalization: float
+    tactical_cp_loss_normalization: float
+    calculation_cp_loss_normalization: float
+    quiet_cp_loss_normalization: float
+    complex_cp_loss_normalization: float
+    endgame_cp_loss_normalization: float
+    tactical_test_cp_gain_threshold: float
+    tactical_test_forcing_depth_threshold: float
+    calculation_cp_gain_threshold: float
+    calculation_forcing_depth_threshold: float
+    tactical_weight_accuracy: float
+    tactical_weight_missed_tactic_avoidance: float
+    tactical_weight_top_n_match_rate: float
+    tactical_weight_difficulty_adjustment: float
+    calculation_weight_top_1_match_rate: float
+    calculation_weight_top_3_match_rate: float
+    calculation_weight_loss_performance: float
+    calculation_weight_forcing_sequence_preservation: float
+    middlegame_weight_quiet_position_performance: float
+    middlegame_weight_pawn_structure_comfort: float
+    middlegame_weight_king_safety_performance: float
+    middlegame_weight_advantage_capitalization: float
+    middlegame_weight_absolute_complexity_control: float
     king_safety_performance_threshold: float
     material_imbalance_threshold: float
     advantage_win_probability_move_threshold: float
@@ -187,6 +234,28 @@ class PlayerFeatureHparams:
             complexity_scale_percentile=hparams.required_float("player_profile.complexity_scale_percentile"),
             win_probability_loss_normalization=hparams.required_float("player_profile.loss_normalization.win_probability_loss"),
             centipawn_loss_normalization=hparams.required_float("player_profile.loss_normalization.centipawn_loss"),
+            tactical_cp_loss_normalization=hparams.required_float("player_profile.loss_normalization.tactical_cp_loss"),
+            calculation_cp_loss_normalization=hparams.required_float("player_profile.loss_normalization.calculation_cp_loss"),
+            quiet_cp_loss_normalization=hparams.required_float("player_profile.loss_normalization.quiet_cp_loss"),
+            complex_cp_loss_normalization=hparams.required_float("player_profile.loss_normalization.complex_cp_loss"),
+            endgame_cp_loss_normalization=hparams.required_float("player_profile.loss_normalization.endgame_cp_loss"),
+            tactical_test_cp_gain_threshold=hparams.required_float("player_profile.tactics.test_cp_gain_threshold"),
+            tactical_test_forcing_depth_threshold=hparams.required_float("player_profile.tactics.test_forcing_depth_threshold"),
+            calculation_cp_gain_threshold=hparams.required_float("player_profile.calculation.cp_gain_threshold"),
+            calculation_forcing_depth_threshold=hparams.required_float("player_profile.calculation.forcing_depth_threshold"),
+            tactical_weight_accuracy=hparams.required_float("player_profile.tactics.weights.tactical_accuracy"),
+            tactical_weight_missed_tactic_avoidance=hparams.required_float("player_profile.tactics.weights.missed_tactic_avoidance"),
+            tactical_weight_top_n_match_rate=hparams.required_float("player_profile.tactics.weights.top_n_match_rate"),
+            tactical_weight_difficulty_adjustment=hparams.required_float("player_profile.tactics.weights.difficulty_adjustment"),
+            calculation_weight_top_1_match_rate=hparams.required_float("player_profile.calculation.weights.top_1_match_rate"),
+            calculation_weight_top_3_match_rate=hparams.required_float("player_profile.calculation.weights.top_3_match_rate"),
+            calculation_weight_loss_performance=hparams.required_float("player_profile.calculation.weights.loss_performance"),
+            calculation_weight_forcing_sequence_preservation=hparams.required_float("player_profile.calculation.weights.forcing_sequence_preservation"),
+            middlegame_weight_quiet_position_performance=hparams.required_float("player_profile.middlegame_strategy.weights.quiet_position_performance"),
+            middlegame_weight_pawn_structure_comfort=hparams.required_float("player_profile.middlegame_strategy.weights.pawn_structure_comfort"),
+            middlegame_weight_king_safety_performance=hparams.required_float("player_profile.middlegame_strategy.weights.king_safety_performance"),
+            middlegame_weight_advantage_capitalization=hparams.required_float("player_profile.middlegame_strategy.weights.advantage_capitalization"),
+            middlegame_weight_absolute_complexity_control=hparams.required_float("player_profile.middlegame_strategy.weights.absolute_complexity_control"),
             king_safety_performance_threshold=hparams.required_float("player_profile.king_safety_performance_threshold"),
             material_imbalance_threshold=hparams.required_float("player_profile.material_imbalance_threshold"),
             advantage_win_probability_move_threshold=hparams.required_float("player_profile.advantage.win_probability_move_threshold"),
@@ -297,7 +366,8 @@ def sample_confidence(n: int, target: int) -> float:
 def player_opening_vector(profile: PlayerProfile) -> dict[str, Optional[float]]:
     return {
         opening_field: profile.style_vector.get(player_field)
-        for opening_field, player_field in PLAYER_TO_OPENING_MAP.items()
+        for opening_field, player_field in PLAYER_TO_OPENING_MAP_V2.items()
+        if opening_field in MATCHER_COLUMNS_V2
     }
 
 
@@ -440,7 +510,7 @@ class PlayerFeatureAggregator:
             castling_summaries,
             complexity_scale,
         )
-        skill_vector, skill_counts = self._skill_vector(
+        skill_vector, skill_counts, skill_scores = self._skill_vector(
             samples,
             middlegame_samples,
             complexity_scale,
@@ -450,9 +520,10 @@ class PlayerFeatureAggregator:
         subfeatures["complexity_scale_p95"] = complexity_scale
         subfeatures["matcher_vector"] = {
             opening_field: style_vector.get(player_field)
-            for opening_field, player_field in PLAYER_TO_OPENING_MAP.items()
+            for opening_field, player_field in PLAYER_TO_OPENING_MAP_V2.items()
         }
         subfeatures["skill_sample_counts"] = skill_counts
+        subfeatures["skill_scores"] = skill_scores
 
         confidence = PlayerConfidenceEstimator().estimate(
             samples=samples,
@@ -489,12 +560,20 @@ class PlayerFeatureAggregator:
         before_quiet = [descriptor_quiet(sample.descriptor_before) for sample in middlegame_samples]
         after_quiet = [descriptor_quiet(sample.descriptor_after) for sample in middlegame_with_after]
 
-        before_complexities = [
+        before_relative_complexities = [
             descriptor_complexity(sample.descriptor_before, complexity_scale)
             for sample in middlegame_samples
         ]
-        after_complexities = [
+        after_relative_complexities = [
             descriptor_complexity(sample.descriptor_after, complexity_scale)
+            for sample in middlegame_with_after
+        ]
+        before_absolute_complexities = [
+            descriptor_absolute_complexity(sample.descriptor_before)
+            for sample in middlegame_samples
+        ]
+        after_absolute_complexities = [
+            descriptor_absolute_complexity(sample.descriptor_after)
             for sample in middlegame_with_after
         ]
 
@@ -514,7 +593,7 @@ class PlayerFeatureAggregator:
             samples,
             self.hparams,
         )
-        structure_diversity, _structure_distribution = structure_diversity_from_samples(
+        structure_summary = structure_summary_from_samples(
             middlegame_samples,
             self.hparams,
         )
@@ -530,6 +609,34 @@ class PlayerFeatureAggregator:
         endgame_moves = [
             sample for sample in samples if descriptor_phase(sample.descriptor_before) == "endgame"
         ]
+
+        relative_complexity_exposure = safe_mean(before_relative_complexities)
+        relative_complexity_choice = safe_mean(after_relative_complexities)
+        relative_complexity_delta = safe_mean(
+            difference(
+                descriptor_complexity(sample.descriptor_after, complexity_scale),
+                descriptor_complexity(sample.descriptor_before, complexity_scale),
+            )
+            for sample in middlegame_with_after
+        )
+        high_relative_complexity_choice_rate = mean_bool(
+            (
+                None
+                if raw_value is None or complexity_scale is None
+                else raw_value >= complexity_scale
+            )
+            for sample in middlegame_with_after
+            for raw_value in [descriptor_complexity_raw(sample.descriptor_after)]
+        ) if middlegame_with_after else None
+        absolute_complexity_exposure = safe_mean(before_absolute_complexities)
+        absolute_complexity_choice = safe_mean(after_absolute_complexities)
+        absolute_complexity_delta = safe_mean(
+            difference(
+                descriptor_absolute_complexity(sample.descriptor_after),
+                descriptor_absolute_complexity(sample.descriptor_before),
+            )
+            for sample in middlegame_with_after
+        )
 
         return {
             "tactical_exposure": mean_bool(before_tactical),
@@ -552,24 +659,17 @@ class PlayerFeatureAggregator:
                 lambda sample: not descriptor_quiet(sample.descriptor_before),
                 lambda sample: descriptor_quiet(sample.descriptor_after),
             ),
-            "complexity_exposure": safe_mean(before_complexities),
-            "complexity_choice": safe_mean(after_complexities),
-            "complexity_delta": safe_mean(
-                difference(
-                    descriptor_complexity(sample.descriptor_after, complexity_scale),
-                    descriptor_complexity(sample.descriptor_before, complexity_scale),
-                )
-                for sample in middlegame_with_after
-            ),
-            "high_complexity_choice_rate": mean_bool(
-                (
-                    None
-                    if raw_value is None or complexity_scale is None
-                    else raw_value >= complexity_scale
-                )
-                for sample in middlegame_with_after
-                for raw_value in [descriptor_complexity_raw(sample.descriptor_after)]
-            ) if middlegame_with_after else None,
+            "complexity_exposure": relative_complexity_exposure,
+            "complexity_choice": relative_complexity_choice,
+            "complexity_delta": relative_complexity_delta,
+            "high_complexity_choice_rate": high_relative_complexity_choice_rate,
+            "absolute_complexity_exposure": absolute_complexity_exposure,
+            "absolute_complexity_choice": absolute_complexity_choice,
+            "absolute_complexity_delta": absolute_complexity_delta,
+            "relative_complexity_exposure": relative_complexity_exposure,
+            "relative_complexity_choice": relative_complexity_choice,
+            "relative_complexity_delta": relative_complexity_delta,
+            "high_relative_complexity_choice_rate": high_relative_complexity_choice_rate,
             "king_safety_risk_tolerance": safe_mean(before_king_risks),
             "king_risk_delta": safe_mean(risk_deltas),
             "early_castling_tendency": safe_mean(
@@ -592,7 +692,9 @@ class PlayerFeatureAggregator:
             "opening_diversity": opening_diversity,
             "opening_diversity_white": opening_white,
             "opening_diversity_black": opening_black,
-            "structure_diversity": structure_diversity,
+            "structure_diversity": structure_summary["dominant_structure_diversity_score"],
+            "dominant_structure_entropy": structure_summary["dominant_structure_entropy"],
+            "dominant_structure_diversity_score": structure_summary["dominant_structure_diversity_score"],
         }
 
     def _skill_vector(
@@ -600,9 +702,12 @@ class PlayerFeatureAggregator:
         samples: list[PlayerMoveSample],
         middlegame_samples: list[PlayerMoveSample],
         complexity_scale: Optional[float],
-    ) -> tuple[dict[str, Optional[float]], dict[str, int]]:
+    ) -> tuple[dict[str, Optional[float]], dict[str, int], dict[str, SkillScore]]:
         tactical_samples = [
-            sample for sample in middlegame_samples if descriptor_tactical(sample.descriptor_before)
+            sample for sample in middlegame_samples if is_tactical_test_position(sample.descriptor_before, self.hparams)
+        ]
+        calculation_samples = [
+            sample for sample in middlegame_samples if is_calculation_test_position(sample.descriptor_before, self.hparams)
         ]
         quiet_samples = [
             sample for sample in middlegame_samples if descriptor_quiet(sample.descriptor_before)
@@ -632,20 +737,56 @@ class PlayerFeatureAggregator:
         pawn_structure_comfort = safe_mean(pawn_comfort_values.values())
         advantage, advantage_count = advantage_capitalization(samples, self.hparams)
         resource, resource_count = resourcefulness(samples, self.hparams)
+        tactical_score = tactical_skill_score(tactical_samples, self.hparams)
+        calculation_score = calculation_skill_score(calculation_samples, self.hparams)
+        quiet_performance = loss_performance(
+            quiet_samples,
+            cp_scale=self.hparams.quiet_cp_loss_normalization,
+            wp_scale=self.hparams.win_probability_loss_normalization,
+        )
+        complex_performance = loss_performance(
+            complex_samples,
+            cp_scale=self.hparams.complex_cp_loss_normalization,
+            wp_scale=self.hparams.win_probability_loss_normalization,
+        )
+        king_safety_performance = loss_performance(
+            king_risk_samples,
+            cp_scale=self.hparams.complex_cp_loss_normalization,
+            wp_scale=self.hparams.win_probability_loss_normalization,
+        )
+        material_performance = loss_performance(
+            material_samples,
+            cp_scale=self.hparams.complex_cp_loss_normalization,
+            wp_scale=self.hparams.win_probability_loss_normalization,
+        )
+        endgame_score = endgame_skill_score(samples, endgame_samples, self.hparams)
+        middlegame_score = middlegame_strategy_score(
+            quiet_position_performance=quiet_performance,
+            pawn_structure_comfort=pawn_structure_comfort,
+            king_safety_performance=king_safety_performance,
+            advantage_capitalization_score=advantage,
+            absolute_complexity_control=absolute_complexity_control(middlegame_samples),
+            hparams=self.hparams,
+            sample_count=len(middlegame_samples),
+        )
 
         skill_vector = {
-            "tactical_performance": performance_score(tactical_samples, self.hparams),
-            "quiet_position_performance": performance_score(quiet_samples, self.hparams),
-            "complexity_performance": performance_score(complex_samples, self.hparams),
-            "king_safety_performance": performance_score(king_risk_samples, self.hparams),
+            "tactical_performance": tactical_score.score,
+            "calculation_performance": calculation_score.score,
+            "middlegame_strategy": middlegame_score.score,
+            "quiet_position_performance": quiet_performance,
+            "complexity_performance": complex_performance,
+            "king_safety_performance": king_safety_performance,
             "pawn_structure_comfort": pawn_structure_comfort,
-            "material_imbalance_comfort": performance_score(material_samples, self.hparams),
-            "endgame_performance": endgame_performance(samples, endgame_samples, self.hparams),
+            "material_imbalance_comfort": material_performance,
+            "endgame_performance": endgame_score.score,
             "advantage_capitalization": advantage,
             "resourcefulness": resource,
         }
         counts = {
-            "tactical_performance": loss_sample_count(tactical_samples),
+            "tactical_performance": tactical_score.sample_count,
+            "calculation_performance": calculation_score.sample_count,
+            "middlegame_strategy": middlegame_score.sample_count,
             "quiet_position_performance": loss_sample_count(quiet_samples),
             "complexity_performance": loss_sample_count(complex_samples),
             "king_safety_performance": loss_sample_count(king_risk_samples),
@@ -653,11 +794,17 @@ class PlayerFeatureAggregator:
                 1 for sample in middlegame_samples if get_player_pawn_structure(sample.descriptor_before, sample.player_color)
             ),
             "material_imbalance_comfort": loss_sample_count(material_samples),
-            "endgame_performance": loss_sample_count(endgame_samples),
+            "endgame_performance": endgame_score.sample_count,
             "advantage_capitalization": advantage_count,
             "resourcefulness": resource_count,
         }
-        return skill_vector, counts
+        skill_scores = {
+            "tactical_performance": tactical_score,
+            "calculation_performance": calculation_score,
+            "middlegame_strategy": middlegame_score,
+            "endgame_performance": endgame_score,
+        }
+        return skill_vector, counts, skill_scores
 
     def _subfeatures(
         self,
@@ -669,7 +816,7 @@ class PlayerFeatureAggregator:
             samples,
             self.hparams,
         )
-        structure_diversity, structure_distribution = structure_diversity_from_samples(
+        structure_summary = structure_summary_from_samples(
             middlegame_samples,
             self.hparams,
         )
@@ -682,8 +829,10 @@ class PlayerFeatureAggregator:
             "opening_distribution": opening_distributions["all"],
             "opening_distribution_white": opening_distributions["white"],
             "opening_distribution_black": opening_distributions["black"],
-            "structure_diversity": structure_diversity,
-            "structure_distribution": structure_distribution,
+            "structure_diversity": structure_summary["dominant_structure_diversity_score"],
+            "dominant_structure_entropy": structure_summary["dominant_structure_entropy"],
+            "dominant_structure_diversity_score": structure_summary["dominant_structure_diversity_score"],
+            "structure_distribution": structure_summary["structure_distribution"],
             "pawn_structure": pawn_subfeatures,
             "pawn_structure_comfort": pawn_structure_comfort_values(middlegame_samples, self.hparams),
             "material_imbalance": material_subfeatures,
@@ -746,6 +895,40 @@ class PlayerConfidenceEstimator:
                 descriptor_complexity_raw(sample.descriptor_after)
                 for sample in middlegame_with_after
             ),
+            "absolute_complexity_exposure": count_available(
+                descriptor_absolute_complexity(sample.descriptor_before)
+                for sample in middlegame_samples
+            ),
+            "absolute_complexity_choice": count_available(
+                descriptor_absolute_complexity(sample.descriptor_after)
+                for sample in middlegame_with_after
+            ),
+            "absolute_complexity_delta": count_available(
+                difference(
+                    descriptor_absolute_complexity(sample.descriptor_after),
+                    descriptor_absolute_complexity(sample.descriptor_before),
+                )
+                for sample in middlegame_with_after
+            ),
+            "relative_complexity_exposure": count_available(
+                descriptor_complexity(sample.descriptor_before, complexity_scale)
+                for sample in middlegame_samples
+            ),
+            "relative_complexity_choice": count_available(
+                descriptor_complexity(sample.descriptor_after, complexity_scale)
+                for sample in middlegame_with_after
+            ),
+            "relative_complexity_delta": count_available(
+                difference(
+                    descriptor_complexity(sample.descriptor_after, complexity_scale),
+                    descriptor_complexity(sample.descriptor_before, complexity_scale),
+                )
+                for sample in middlegame_with_after
+            ),
+            "high_relative_complexity_choice_rate": count_available(
+                descriptor_complexity_raw(sample.descriptor_after)
+                for sample in middlegame_with_after
+            ),
             "king_safety_risk_tolerance": count_available(
                 get_player_king_safety(sample.descriptor_before, sample.player_color)
                 for sample in middlegame_samples
@@ -771,6 +954,8 @@ class PlayerConfidenceEstimator:
             "opening_diversity_white": sum(1 for sample in unique_game_samples(samples) if sample.player_color == chess.WHITE),
             "opening_diversity_black": sum(1 for sample in unique_game_samples(samples) if sample.player_color == chess.BLACK),
             "structure_diversity": structure_games,
+            "dominant_structure_entropy": structure_games,
+            "dominant_structure_diversity_score": structure_games,
         }
         style_targets = {
             "opening_diversity": CONFIDENCE_TARGETS["opening_diversity"],
@@ -787,6 +972,13 @@ class PlayerConfidenceEstimator:
             "complexity_choice": 200,
             "complexity_delta": 200,
             "high_complexity_choice_rate": 200,
+            "absolute_complexity_exposure": 200,
+            "absolute_complexity_choice": 200,
+            "absolute_complexity_delta": 200,
+            "relative_complexity_exposure": 200,
+            "relative_complexity_choice": 200,
+            "relative_complexity_delta": 200,
+            "high_relative_complexity_choice_rate": 200,
             "early_castling_tendency": 50,
             "opposite_side_castling_tendency": 50,
             "queenside_castling_tendency": 50,
@@ -856,6 +1048,20 @@ def descriptor_complexity_raw(descriptor: Any) -> Optional[float]:
     if raw is None:
         return None
     return float(raw)
+
+
+def descriptor_absolute_complexity(descriptor: Any) -> Optional[float]:
+    if descriptor is None:
+        return None
+    absolute = get_field(descriptor, "absolute_complexity")
+    if absolute is not None:
+        return clamp01(float(absolute))
+    raw = descriptor_complexity_raw(descriptor)
+    if raw is None:
+        return None
+    if 0.0 <= raw <= 1.0:
+        return clamp01(raw)
+    return clamp01(raw / 100.0)
 
 
 def normalize_complexity(value: float, scale: Optional[float] = None) -> float:
@@ -1083,6 +1289,315 @@ def material_imbalance_subfeatures(
     return result
 
 
+def normalize_loss_exp(mean_loss: float, scale: float) -> float:
+    if scale <= 0:
+        return 0.0
+    return clamp01(math.exp(-max(0.0, mean_loss) / scale))
+
+
+def loss_performance(
+    samples: list[PlayerMoveSample],
+    *,
+    cp_scale: float,
+    wp_scale: float,
+) -> Optional[float]:
+    wp_losses = [max(0.0, float(sample.wp_loss)) for sample in samples if sample.wp_loss is not None]
+    if wp_losses:
+        return normalize_loss_exp(sum(wp_losses) / len(wp_losses), wp_scale)
+    cp_losses = [max(0.0, float(sample.cp_loss)) for sample in samples if sample.cp_loss is not None]
+    if cp_losses:
+        return normalize_loss_exp(sum(cp_losses) / len(cp_losses), cp_scale)
+    return None
+
+
+def played_move_rank(sample: PlayerMoveSample) -> Optional[int]:
+    top_moves = get_field(sample.descriptor_before, "top_engine_moves") or get_field(sample.descriptor_before, "top_moves")
+    if not top_moves:
+        return None
+    for index, move_info in enumerate(top_moves, start=1):
+        move_uci = get_field(move_info, "move_uci")
+        if move_uci == sample.move_uci:
+            rank = get_field(move_info, "rank")
+            return int(rank) if rank is not None else index
+    return None
+
+
+def top_n_match_rate(samples: list[PlayerMoveSample], n: int) -> Optional[float]:
+    ranks = [played_move_rank(sample) for sample in samples]
+    available = [rank for rank in ranks if rank is not None]
+    if not available:
+        return None
+    return sum(1.0 for rank in available if rank <= n) / len(available)
+
+
+def is_tactical_test_position(
+    descriptor: Any,
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> bool:
+    hparams = hparams or _default_player_hparams()
+    return bool(
+        descriptor_tactical(descriptor)
+        and (
+            (get_field(descriptor, "best_move_cp_gain") or 0.0) >= hparams.tactical_test_cp_gain_threshold
+            or (get_field(descriptor, "forcing_line_depth") or 0) >= hparams.tactical_test_forcing_depth_threshold
+            or bool(get_field(descriptor, "move_is_threat"))
+            or bool(get_field(descriptor, "engine_top_move_is_forcing"))
+        )
+    )
+
+
+def is_calculation_test_position(
+    descriptor: Any,
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> bool:
+    hparams = hparams or _default_player_hparams()
+    return bool(
+        (get_field(descriptor, "forcing_line_depth") or 0) >= hparams.calculation_forcing_depth_threshold
+        or (get_field(descriptor, "best_move_cp_gain") or 0.0) >= hparams.calculation_cp_gain_threshold
+    )
+
+
+def tactical_skill_score(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> SkillScore:
+    hparams = hparams or _default_player_hparams()
+    sample_count = loss_sample_count(samples)
+    performance = loss_performance(
+        samples,
+        cp_scale=hparams.tactical_cp_loss_normalization,
+        wp_scale=hparams.win_probability_loss_normalization,
+    )
+    missed_rate = mean_bool(
+        is_significant_loss(sample, cp_threshold=hparams.tactical_cp_loss_normalization, wp_threshold=hparams.win_probability_loss_normalization)
+        for sample in samples
+    )
+    top_match = top_n_match_rate(samples, 3)
+    difficulty = safe_mean(
+        clamp01(
+            0.55 * min(1.0, float(get_field(sample.descriptor_before, "best_move_cp_gain") or 0.0) / 300.0)
+            + 0.45 * min(1.0, float(get_field(sample.descriptor_before, "forcing_line_depth") or 0.0) / 4.0)
+        )
+        for sample in samples
+    )
+    difficulty_adjustment = None if difficulty is None else clamp01(0.75 + 0.25 * difficulty)
+    score = weighted_mean_available(
+        {
+            "tactical_accuracy": performance,
+            "missed_tactic_avoidance": None if missed_rate is None else 1.0 - missed_rate,
+            "top_n_match_rate": top_match,
+            "difficulty_adjustment": difficulty_adjustment,
+        },
+        {
+            "tactical_accuracy": hparams.tactical_weight_accuracy,
+            "missed_tactic_avoidance": hparams.tactical_weight_missed_tactic_avoidance,
+            "top_n_match_rate": hparams.tactical_weight_top_n_match_rate,
+            "difficulty_adjustment": hparams.tactical_weight_difficulty_adjustment,
+        },
+    )
+    return SkillScore(
+        score=score,
+        performance=performance,
+        difficulty=difficulty,
+        sample_count=sample_count,
+        confidence=sample_confidence(sample_count, CONFIDENCE_TARGETS["tactical_performance"]) if score is not None else 0.0,
+        submetrics={
+            "tactical_accuracy": performance,
+            "missed_tactic_avoidance": None if missed_rate is None else 1.0 - missed_rate,
+            "top_n_match_rate": top_match,
+            "difficulty_adjustment": difficulty_adjustment,
+        },
+    )
+
+
+def calculation_skill_score(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> SkillScore:
+    hparams = hparams or _default_player_hparams()
+    sample_count = loss_sample_count(samples)
+    performance = loss_performance(
+        samples,
+        cp_scale=hparams.calculation_cp_loss_normalization,
+        wp_scale=hparams.win_probability_loss_normalization,
+    )
+    top_1 = top_n_match_rate(samples, 1)
+    top_3 = top_n_match_rate(samples, 3)
+    forcing_preservation = mean_bool(
+        None
+        if played_move_rank(sample) is None
+        else played_move_rank(sample) == 1 or (
+            played_move_rank(sample) <= 3
+            and bool(get_field(sample.descriptor_before, "engine_top_move_is_forcing"))
+        )
+        for sample in samples
+    )
+    difficulty = safe_mean(
+        clamp01(
+            0.50 * min(1.0, float(get_field(sample.descriptor_before, "best_move_cp_gain") or 0.0) / 350.0)
+            + 0.50 * min(1.0, float(get_field(sample.descriptor_before, "forcing_line_depth") or 0.0) / 5.0)
+        )
+        for sample in samples
+    )
+    score = weighted_mean_available(
+        {
+            "top_1_match_rate": top_1,
+            "top_3_match_rate": top_3,
+            "loss_performance": performance,
+            "forcing_sequence_preservation": forcing_preservation,
+        },
+        {
+            "top_1_match_rate": hparams.calculation_weight_top_1_match_rate,
+            "top_3_match_rate": hparams.calculation_weight_top_3_match_rate,
+            "loss_performance": hparams.calculation_weight_loss_performance,
+            "forcing_sequence_preservation": hparams.calculation_weight_forcing_sequence_preservation,
+        },
+    )
+    return SkillScore(
+        score=score,
+        performance=performance,
+        difficulty=difficulty,
+        sample_count=sample_count,
+        confidence=sample_confidence(sample_count, CONFIDENCE_TARGETS["calculation_performance"]) if score is not None else 0.0,
+        submetrics={
+            "top_1_match_rate": top_1,
+            "top_3_match_rate": top_3,
+            "loss_performance": performance,
+            "forcing_sequence_preservation": forcing_preservation,
+        },
+    )
+
+
+def middlegame_strategy_score(
+    *,
+    quiet_position_performance: Optional[float],
+    pawn_structure_comfort: Optional[float],
+    king_safety_performance: Optional[float],
+    advantage_capitalization_score: Optional[float],
+    absolute_complexity_control: Optional[float],
+    hparams: PlayerFeatureHparams,
+    sample_count: int,
+) -> SkillScore:
+    score = weighted_mean_available(
+        {
+            "quiet_position_performance": quiet_position_performance,
+            "pawn_structure_comfort": pawn_structure_comfort,
+            "king_safety_performance": king_safety_performance,
+            "advantage_capitalization": advantage_capitalization_score,
+            "absolute_complexity_control": absolute_complexity_control,
+        },
+        {
+            "quiet_position_performance": hparams.middlegame_weight_quiet_position_performance,
+            "pawn_structure_comfort": hparams.middlegame_weight_pawn_structure_comfort,
+            "king_safety_performance": hparams.middlegame_weight_king_safety_performance,
+            "advantage_capitalization": hparams.middlegame_weight_advantage_capitalization,
+            "absolute_complexity_control": hparams.middlegame_weight_absolute_complexity_control,
+        },
+    )
+    return SkillScore(
+        score=score,
+        performance=quiet_position_performance,
+        difficulty=None,
+        sample_count=sample_count,
+        confidence=sample_confidence(sample_count, CONFIDENCE_TARGETS["middlegame_strategy"]) if score is not None else 0.0,
+        submetrics={
+            "quiet_position_performance": quiet_position_performance,
+            "pawn_structure_comfort": pawn_structure_comfort,
+            "king_safety_performance": king_safety_performance,
+            "advantage_capitalization": advantage_capitalization_score,
+            "absolute_complexity_control": absolute_complexity_control,
+        },
+    )
+
+
+def endgame_skill_score(
+    all_samples: list[PlayerMoveSample],
+    endgame_samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> SkillScore:
+    hparams = hparams or _default_player_hparams()
+    endgame_accuracy = loss_performance(
+        endgame_samples,
+        cp_scale=hparams.endgame_cp_loss_normalization,
+        wp_scale=hparams.win_probability_loss_normalization,
+    )
+    first_endgame_by_game: dict[str, PlayerMoveSample] = {}
+    for sample in endgame_samples:
+        first_endgame_by_game.setdefault(sample.game_id, sample)
+    first_samples = list(first_endgame_by_game.values())
+    conversion_rate = safe_mean(
+        1.0 if sample.player_score == 1.0 else 0.0
+        for sample in first_samples
+        if sample.player_wp_before is not None
+        and sample.player_wp_before >= hparams.endgame_winning_win_probability_threshold
+        and sample.player_score is not None
+    )
+    save_rate = safe_mean(
+        1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
+        for sample in first_samples
+        if sample.player_wp_before is not None
+        and sample.player_wp_before <= hparams.endgame_worse_win_probability_threshold
+        and sample.player_score is not None
+    )
+    equal_hold_rate = safe_mean(
+        1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
+        for sample in first_samples
+        if sample.player_wp_before is not None
+        and hparams.endgame_equal_win_probability_low
+        <= sample.player_wp_before
+        <= hparams.endgame_equal_win_probability_high
+        and sample.player_score is not None
+    )
+    score = weighted_mean_available(
+        {
+            "conversion_rate_from_winning_endgames": conversion_rate,
+            "save_rate_from_worse_endgames": save_rate,
+            "hold_rate_from_equal_endgames": equal_hold_rate,
+            "endgame_move_accuracy": endgame_accuracy,
+        },
+        {
+            "conversion_rate_from_winning_endgames": hparams.endgame_weight_conversion_rate,
+            "save_rate_from_worse_endgames": hparams.endgame_weight_save_rate,
+            "hold_rate_from_equal_endgames": hparams.endgame_weight_equal_hold_rate,
+            "endgame_move_accuracy": hparams.endgame_weight_accuracy,
+        },
+    )
+    sample_count = max(loss_sample_count(endgame_samples), len(first_samples))
+    return SkillScore(
+        score=score,
+        performance=endgame_accuracy,
+        difficulty=None,
+        sample_count=sample_count,
+        confidence=sample_confidence(sample_count, CONFIDENCE_TARGETS["endgame_performance"]) if score is not None else 0.0,
+        submetrics={
+            "conversion_rate_from_winning_endgames": conversion_rate,
+            "save_rate_from_worse_endgames": save_rate,
+            "hold_rate_from_equal_endgames": equal_hold_rate,
+            "endgame_move_accuracy": endgame_accuracy,
+        },
+    )
+
+
+def absolute_complexity_control(samples: list[PlayerMoveSample]) -> Optional[float]:
+    deltas = [
+        abs(delta)
+        for sample in samples
+        for delta in [difference(descriptor_absolute_complexity(sample.descriptor_after), descriptor_absolute_complexity(sample.descriptor_before))]
+        if delta is not None
+    ]
+    if not deltas:
+        return None
+    return clamp01(1.0 - sum(deltas) / len(deltas))
+
+
+def is_significant_loss(sample: PlayerMoveSample, *, cp_threshold: float, wp_threshold: float) -> Optional[bool]:
+    if sample.wp_loss is not None:
+        return max(0.0, float(sample.wp_loss)) >= wp_threshold
+    if sample.cp_loss is not None:
+        return max(0.0, float(sample.cp_loss)) >= cp_threshold
+    return None
+
+
 def performance_score(
     samples: list[PlayerMoveSample],
     hparams: Optional[PlayerFeatureHparams] = None,
@@ -1213,53 +1728,7 @@ def endgame_performance(
     endgame_samples: list[PlayerMoveSample],
     hparams: Optional[PlayerFeatureHparams] = None,
 ) -> Optional[float]:
-    hparams = hparams or _default_player_hparams()
-    endgame_accuracy = performance_score(endgame_samples, hparams)
-    if endgame_accuracy is None:
-        return None
-    first_endgame_by_game: dict[str, PlayerMoveSample] = {}
-    for sample in endgame_samples:
-        first_endgame_by_game.setdefault(sample.game_id, sample)
-    if not first_endgame_by_game or all(sample.player_wp_before is None for sample in first_endgame_by_game.values()):
-        return endgame_accuracy
-
-    conversion_rate = safe_mean(
-        1.0 if sample.player_score == 1.0 else 0.0
-        for sample in first_endgame_by_game.values()
-        if sample.player_wp_before is not None
-        and sample.player_wp_before >= hparams.endgame_winning_win_probability_threshold
-        and sample.player_score is not None
-    )
-    save_rate = safe_mean(
-        1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
-        for sample in first_endgame_by_game.values()
-        if sample.player_wp_before is not None
-        and sample.player_wp_before <= hparams.endgame_worse_win_probability_threshold
-        and sample.player_score is not None
-    )
-    equal_hold_rate = safe_mean(
-        1.0 if sample.player_score is not None and sample.player_score >= 0.5 else 0.0
-        for sample in first_endgame_by_game.values()
-        if sample.player_wp_before is not None
-        and hparams.endgame_equal_win_probability_low
-        <= sample.player_wp_before
-        <= hparams.endgame_equal_win_probability_high
-        and sample.player_score is not None
-    )
-    return weighted_mean_available(
-        {
-            "endgame_accuracy": endgame_accuracy,
-            "conversion_rate": conversion_rate,
-            "save_rate": save_rate,
-            "equal_endgame_hold_rate": equal_hold_rate,
-        },
-        {
-            "endgame_accuracy": hparams.endgame_weight_accuracy,
-            "conversion_rate": hparams.endgame_weight_conversion_rate,
-            "save_rate": hparams.endgame_weight_save_rate,
-            "equal_endgame_hold_rate": hparams.endgame_weight_equal_hold_rate,
-        },
-    )
+    return endgame_skill_score(all_samples, endgame_samples, hparams).score
 
 
 def opening_diversities(
@@ -1289,6 +1758,14 @@ def structure_diversity_from_samples(
     samples: list[PlayerMoveSample],
     hparams: Optional[PlayerFeatureHparams] = None,
 ) -> tuple[Optional[float], dict[str, int]]:
+    summary = structure_summary_from_samples(samples, hparams)
+    return summary["dominant_structure_diversity_score"], summary["structure_distribution"]
+
+
+def structure_summary_from_samples(
+    samples: list[PlayerMoveSample],
+    hparams: Optional[PlayerFeatureHparams] = None,
+) -> dict[str, Any]:
     hparams = hparams or _default_player_hparams()
     by_game: dict[str, list[str]] = {}
     for sample in samples:
@@ -1297,7 +1774,11 @@ def structure_diversity_from_samples(
             by_game.setdefault(sample.game_id, []).append(label)
     main_structures = [mode(labels) for labels in by_game.values() if labels]
     distribution = label_distribution(main_structures)
-    return diversity_score(distribution, hparams), distribution
+    return {
+        "dominant_structure_entropy": normalized_entropy(distribution) if distribution else None,
+        "dominant_structure_diversity_score": diversity_score(distribution, hparams),
+        "structure_distribution": distribution,
+    }
 
 
 def diversity_score(

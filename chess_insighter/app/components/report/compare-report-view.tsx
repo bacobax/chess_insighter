@@ -25,7 +25,7 @@ export function CompareReportView({ username: initialUsername, defaultHparams }:
           </div>
         ) : null}
       </div>
-      <div className={compare && other.trim() ? "grid gap-6 xl:grid-cols-2" : ""}>
+      <div className={compare && other.trim() ? "grid gap-6 lg:grid-cols-2" : ""}>
         {primaryUsername.trim() ? <PlayerReport username={primaryUsername.trim()} defaultHparams={defaultHparams} /> : <div />}
         {compare && other.trim() ? <PlayerReport username={other.trim()} defaultHparams={defaultHparams} /> : null}
       </div>

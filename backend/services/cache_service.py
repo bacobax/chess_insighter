@@ -40,6 +40,7 @@ def report_cache_key(
     max_games: int,
     engine_depth: int,
     use_engine: bool,
+    target_color: str = "both",
 ) -> dict[str, Any]:
     return {
         "source": "chess.com",
@@ -49,6 +50,8 @@ def report_cache_key(
         "max_games": int(max_games),
         "engine_depth": int(engine_depth),
         "use_engine": bool(use_engine),
+        "target_color": target_color,
+        "feature_model_version": "player_opening_match_v2",
         "datasets": {
             "openings": dataset_identity(settings.openings_path),
             "opening_vectors": dataset_identity(settings.opening_vectors_path),

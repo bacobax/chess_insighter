@@ -25,6 +25,7 @@ class CountingTransformer(GameEnrichmentTransformer):
             forcing_line_depth=0,
             number_of_legal_moves=board.legal_moves.count(),
             complexity=float(board.legal_moves.count()),
+            absolute_complexity=0.0,
             engine_top_move_is_forcing=False,
         )
 

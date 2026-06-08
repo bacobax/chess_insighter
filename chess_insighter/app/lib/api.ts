@@ -1,4 +1,4 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, ReportBuildRequest, ReportBuildResponse } from "./types";
+import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, ReportBuildRequest, ReportBuildResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -37,6 +37,13 @@ export function queryGames(request: GamesQueryRequest) {
 
 export function buildReport(request: ReportBuildRequest) {
   return apiFetch<ReportBuildResponse>("/api/report/build", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function rematchOpenings(request: OpeningMatchRequest) {
+  return apiFetch<OpeningMatchResponse>("/api/openings/matches", {
     method: "POST",
     body: JSON.stringify(request),
   });
