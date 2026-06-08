@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
-from utils.statistics_shared import PlayerGameSampler, StatisticsHparams, username_key_value
+from utils.statistics_shared import PlayerGameSampler, StatisticsHparams, loss_to_skill_score_base2, username_key_value
 
 
 @dataclass(frozen=True)
@@ -171,6 +171,19 @@ class GlobalStatisticsTransformer:
             "game_analysis.improvement_delta"
         )
 
+        self.tactics_wp_loss_half_life = self._required_positive_float(
+            "skill_score_calibration.tactics_wp_loss_half_life"
+        )
+        self.calculation_wp_loss_half_life = self._required_positive_float(
+            "skill_score_calibration.calculation_wp_loss_half_life"
+        )
+        self.quiet_middlegame_wp_loss_half_life = self._required_positive_float(
+            "skill_score_calibration.quiet_middlegame_wp_loss_half_life"
+        )
+        self.endgame_wp_loss_half_life = self._required_positive_float(
+            "skill_score_calibration.endgame_wp_loss_half_life"
+        )
+
         self.winning_eval_cp = self.hparams.required_float(
             "advantage_capitalization.winning_eval_cp"
         )
@@ -244,6 +257,7 @@ class GlobalStatisticsTransformer:
                 username_key,
                 self.min_samples,
                 lambda move: "tactical" in move.position_type_tags,
+                wp_loss_half_life=self.tactics_wp_loss_half_life,
             ),
             calculation_score=self._loss_score(
                 target_games,
@@ -254,6 +268,7 @@ class GlobalStatisticsTransformer:
                     and move.complexity is not None
                     and move.complexity > complexity_p85
                 ),
+                wp_loss_half_life=self.calculation_wp_loss_half_life,
             ),
             openings_score=self._opening_statistics(
                 target_games,
@@ -265,12 +280,14 @@ class GlobalStatisticsTransformer:
                 username_key,
                 self.min_samples,
                 lambda move: move.quiet_middlegame,
+                wp_loss_half_life=self.quiet_middlegame_wp_loss_half_life,
             ),
             endgame_score=self._loss_score(
                 target_games,
                 username_key,
                 self.min_samples,
                 lambda move: move.phase == "endgame",
+                wp_loss_half_life=self.endgame_wp_loss_half_life,
             ),
             time_management_score=self._time_management_statistics(
                 target_games,
@@ -302,6 +319,8 @@ class GlobalStatisticsTransformer:
         username_key: str,
         min_samples: int,
         predicate: Callable[[EnrichedMove], bool],
+        *,
+        wp_loss_half_life: float,
     ) -> StatisticResult:
         game_losses: list[float] = []
         sample_count = 0
@@ -328,7 +347,7 @@ class GlobalStatisticsTransformer:
 
         average_loss = self._mean(game_losses)
         return StatisticResult(
-            score=self._clamp01(1.0 - average_loss),
+            score=loss_to_skill_score_base2(average_loss, wp_loss_half_life),
             average_loss=average_loss,
             sample_count=sample_count,
             game_count=len(game_losses),
@@ -1033,6 +1052,12 @@ class GlobalStatisticsTransformer:
     @staticmethod
     def _mean(values: list[float]) -> float:
         return sum(values) / len(values)
+
+    def _required_positive_float(self, dotted_path: str) -> float:
+        value = self.hparams.required_float(dotted_path)
+        if value <= 0:
+            raise ValueError(f"{dotted_path} must be positive")
+        return value
 
     def _safe_mean(self, values: list[float]) -> Optional[float]:
         if not values:

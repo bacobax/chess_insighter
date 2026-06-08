@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import shutil
 import unittest
 
@@ -8,10 +9,12 @@ import chess
 import chess.engine
 
 from utils.opening_feature_transformer import (
+    FEATURE_START_PLY,
     MATCHER_COLUMNS_V2,
     OpeningLine,
     aggregate_by_normalized_name,
     aggregate_line_features,
+    calibrate_opening_group_features,
     decode_distribution_csv,
     encode_distribution_csv,
     histogram_intersection,
@@ -20,7 +23,6 @@ from utils.opening_feature_transformer import (
     compute_line_features,
     compute_opening_groups,
     detect_castling_stats,
-    diagonal_report,
     doubled_pawns,
     endgame_likelihood_proxy,
     isolated_pawns,
@@ -29,8 +31,9 @@ from utils.opening_feature_transformer import (
     open_files,
     opening_family_name,
     passed_pawns,
+    sampled_position_pairs,
     semi_open_files,
-    similarity_matrix,
+    write_feature_distribution_diagnostics,
 )
 
 
@@ -121,6 +124,25 @@ def test_compute_line_features_with_fake_engine_and_aggregate():
     assert group.line_count == 1
     for value in group.vector():
         assert 0.0 <= value <= 1.0
+
+
+def test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallback():
+    boards, _moves = [], []
+    board = chess.Board()
+    boards.append(board.copy())
+    for uci in ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4"]:
+        board.push(chess.Move.from_uci(uci))
+        boards.append(board.copy())
+    infos = [
+        type("Info", (), {})()
+        for _board in boards
+    ]
+
+    sampled = sampled_position_pairs(boards, infos)  # type: ignore[arg-type]
+    short_sampled = sampled_position_pairs(boards[:3], infos[:3])  # type: ignore[arg-type]
+
+    assert sampled[0][0].ply() >= FEATURE_START_PLY
+    assert len(short_sampled) == 3
 
 
 def test_short_line_retained_castling_rights_gets_nonzero_opportunity():
@@ -242,6 +264,39 @@ def test_v2_vector_excludes_structure_diversity_and_distribution_csv_round_trips
     ) == 0.5
 
 
+def test_calibrate_opening_group_features_scales_matcher_columns_by_percentiles():
+    groups = [
+        aggregate_line_features([_feature("A", tactical_density=0.0, white_tactical_density=0.0)]),
+        aggregate_line_features([_feature("B", tactical_density=0.5, white_tactical_density=0.5)]),
+        aggregate_line_features([_feature("C", tactical_density=1.0, white_tactical_density=1.0)]),
+    ]
+
+    calibrated = calibrate_opening_group_features(groups)
+
+    assert calibrated[0].tactical_density == 0.0
+    assert calibrated[1].tactical_density == 0.5
+    assert calibrated[2].tactical_density == 1.0
+    assert calibrated[1].white_tactical_density == 0.5
+
+
+def test_feature_distribution_diagnostics_writes_grouped_pngs(tmp_path):
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        return
+
+    groups = [
+        aggregate_line_features([_feature("A", tactical_density=0.0, white_tactical_density=0.0)]),
+        aggregate_line_features([_feature("B", tactical_density=1.0, white_tactical_density=1.0)]),
+    ]
+    outputs = write_feature_distribution_diagnostics(groups, tmp_path)
+
+    assert tmp_path.joinpath("generalized", "tactical_density.png").exists()
+    assert tmp_path.joinpath("white", "tactical_density.png").exists()
+    assert tmp_path.joinpath("black", "tactical_density.png").exists()
+    assert len(outputs) == len(MATCHER_COLUMNS_V2) * 3
+
+
 def test_gt_matching_uses_alias_and_eco_range():
     lines = [
         OpeningLine("C60", "Ruy Lopez", "", "e2e4 e7e5 g1f3 b8c6 f1b5", ""),
@@ -255,56 +310,6 @@ def test_gt_matching_uses_alias_and_eco_range():
     )
 
     assert [line.name for line in matches] == ["Ruy Lopez"]
-
-
-def test_similarity_matrix_reports_diagonal_winners_for_identical_vectors():
-    gt_rows = [
-        {
-            "opening_name": "A",
-            "tactical_density": "1",
-            "quiet_position_density": "0",
-            "king_safety_risk": "0",
-            "early_castling_tendency": "0",
-            "opposite_side_castling_tendency": "0",
-            "middlegame_complexity": "0",
-            "pawn_structure_sharpness": "0",
-            "material_imbalance": "0",
-            "endgame_likelihood_proxy": "0",
-            "structure_diversity": "0",
-        },
-        {
-            "opening_name": "B",
-            "tactical_density": "0",
-            "quiet_position_density": "1",
-            "king_safety_risk": "0",
-            "early_castling_tendency": "0",
-            "opposite_side_castling_tendency": "0",
-            "middlegame_complexity": "0",
-            "pawn_structure_sharpness": "0",
-            "material_imbalance": "0",
-            "endgame_likelihood_proxy": "0",
-            "structure_diversity": "0",
-        },
-    ]
-    groups = [
-        aggregate_line_features(
-            [
-                _feature("A", tactical_density=1.0, quiet_position_density=0.0),
-            ]
-        ),
-        aggregate_line_features(
-            [
-                _feature("B", tactical_density=0.0, quiet_position_density=1.0),
-            ]
-        ),
-    ]
-
-    matrix = similarity_matrix(gt_rows, groups)
-    report = diagonal_report(gt_rows, matrix)
-
-    assert matrix[0][0] > matrix[0][1]
-    assert matrix[1][1] > matrix[1][0]
-    assert all(line.startswith("PASS") for line in report)
 
 
 def test_stockfish_smoke_when_available():
@@ -368,6 +373,9 @@ class OpeningFeatureTransformerTests(unittest.TestCase):
     def test_compute_line_features_with_fake_engine_and_aggregate(self):
         test_compute_line_features_with_fake_engine_and_aggregate()
 
+    def test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallback(self):
+        test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallback()
+
     def test_short_line_retained_castling_rights_gets_nonzero_opportunity(self):
         test_short_line_retained_castling_rights_gets_nonzero_opportunity()
 
@@ -386,8 +394,13 @@ class OpeningFeatureTransformerTests(unittest.TestCase):
     def test_gt_matching_uses_alias_and_eco_range(self):
         test_gt_matching_uses_alias_and_eco_range()
 
-    def test_similarity_matrix_reports_diagonal_winners_for_identical_vectors(self):
-        test_similarity_matrix_reports_diagonal_winners_for_identical_vectors()
+    def test_calibrate_opening_group_features_scales_matcher_columns_by_percentiles(self):
+        test_calibrate_opening_group_features_scales_matcher_columns_by_percentiles()
+
+    def test_feature_distribution_diagnostics_writes_grouped_pngs(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_feature_distribution_diagnostics_writes_grouped_pngs(Path(tmpdir))
 
     def test_stockfish_smoke_when_available(self):
         test_stockfish_smoke_when_available()

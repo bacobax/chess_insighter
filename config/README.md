@@ -413,6 +413,30 @@ Changing these values changes every metric that uses final results.
 
 For example, if you set `draw: 0.4`, draws become slightly worse than half credit. If you set `draw: 0.6`, draws become slightly better than half credit.
 
+## `skill_score_calibration`
+
+These values calibrate global report skill scores that are based on average win-probability loss.
+
+They use base-2 half-life normalization:
+
+```text
+score = 2 ** (-average_loss / half_life)
+```
+
+Half-life is the average win-probability loss that maps to score `0.5`. Every additional half-life of loss halves the score.
+
+```yaml
+skill_score_calibration:
+  tactics_wp_loss_half_life: 0.07
+  calculation_wp_loss_half_life: 0.06
+  quiet_middlegame_wp_loss_half_life: 0.045
+  endgame_wp_loss_half_life: 0.05
+```
+
+Raising a half-life makes losses less punitive for that skill.
+
+Lowering a half-life makes losses more punitive.
+
 ## `player_profile`
 
 This section controls the player style and skill profile used by `PlayerFeatureAggregator` and the opening matcher vector.

@@ -7,6 +7,7 @@ import unittest
 
 from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
 from utils.global_statistics_transformer import GlobalStatisticsTransformer
+from utils.statistics_shared import loss_to_skill_score_base2
 
 
 HPARAMS_PATH = Path("config/global_statistics_hparams.yaml")
@@ -119,6 +120,27 @@ def make_game(
     )
 
 
+def test_loss_to_skill_score_base2_half_life_calibration():
+    assert loss_to_skill_score_base2(0.0, 0.05) == 1.0
+    assert math.isclose(loss_to_skill_score_base2(0.05, 0.05), 0.5)
+    assert math.isclose(loss_to_skill_score_base2(0.10, 0.05), 0.25)
+    assert loss_to_skill_score_base2(None, 0.05) is None
+
+    try:
+        loss_to_skill_score_base2(0.05, 0.0)
+    except ValueError as exc:
+        assert "half_life must be positive" in str(exc)
+    else:
+        raise AssertionError("Expected invalid half_life to raise")
+
+
+def test_default_half_life_removes_old_low_loss_saturation():
+    score = loss_to_skill_score_base2(0.04, 0.045)
+
+    assert score is not None
+    assert score < 0.96
+
+
 def test_generic_loss_scores_filter_target_player_and_clamp_negative_losses():
     game = make_game(
         [
@@ -135,7 +157,7 @@ def test_generic_loss_scores_filter_target_player_and_clamp_negative_losses():
     assert stats.target_moves_count == 3
     assert stats.tactics_score.sample_count == 3
     assert math.isclose(stats.tactics_score.average_loss, 0.10)
-    assert math.isclose(stats.tactics_score.score, 0.90)
+    assert math.isclose(stats.tactics_score.score, 2 ** (-0.10 / 0.07))
 
 
 def test_complexity_percentiles_and_calculation_score_use_p85_threshold():
@@ -152,7 +174,7 @@ def test_complexity_percentiles_and_calculation_score_use_p85_threshold():
     assert math.isclose(stats.complexity_p90, 9.1)
     assert stats.calculation_score.sample_count == 2
     assert math.isclose(stats.calculation_score.average_loss, 0.20)
-    assert math.isclose(stats.calculation_score.score, 0.80)
+    assert math.isclose(stats.calculation_score.score, 2 ** (-0.20 / 0.06))
 
 
 def test_opening_score_uses_exact_book_flag_post_opening_stability_and_result():
@@ -341,7 +363,28 @@ def test_missing_hparam_raises_instead_of_using_default():
         raise AssertionError("Expected missing hparam to raise ValueError")
 
 
+def test_invalid_half_life_hparam_raises_config_error():
+    text = HPARAMS_PATH.read_text(encoding="utf-8")
+    text = text.replace("  tactics_wp_loss_half_life: 0.07\n", "  tactics_wp_loss_half_life: 0\n", 1)
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as file:
+        file.write(text)
+        temp_path = file.name
+
+    try:
+        GlobalStatisticsTransformer(temp_path)
+    except ValueError as exc:
+        assert "skill_score_calibration.tactics_wp_loss_half_life must be positive" in str(exc)
+    else:
+        raise AssertionError("Expected invalid half-life hparam to raise ValueError")
+
+
 class GlobalStatisticsTransformerTests(unittest.TestCase):
+    def test_loss_to_skill_score_base2_half_life_calibration(self):
+        test_loss_to_skill_score_base2_half_life_calibration()
+
+    def test_default_half_life_removes_old_low_loss_saturation(self):
+        test_default_half_life_removes_old_low_loss_saturation()
+
     def test_generic_loss_scores_filter_target_player_and_clamp_negative_losses(self):
         test_generic_loss_scores_filter_target_player_and_clamp_negative_losses()
 
@@ -365,3 +408,6 @@ class GlobalStatisticsTransformerTests(unittest.TestCase):
 
     def test_missing_hparam_raises_instead_of_using_default(self):
         test_missing_hparam_raises_instead_of_using_default()
+
+    def test_invalid_half_life_hparam_raises_config_error(self):
+        test_invalid_half_life_hparam_raises_config_error()

@@ -9,6 +9,21 @@ from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
 DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH = Path("config/global_statistics_hparams.yaml")
 
 
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def loss_to_skill_score_base2(
+    average_loss: float | None,
+    half_life: float,
+) -> float | None:
+    if average_loss is None:
+        return None
+    if half_life <= 0:
+        raise ValueError("half_life must be positive")
+    return clamp01(2 ** (-max(0.0, average_loss) / half_life))
+
+
 class StatisticsHparams:
     def __init__(self, path: str | Path = DEFAULT_GLOBAL_STATISTICS_HPARAMS_PATH):
         self.path = Path(path)

@@ -37,6 +37,7 @@ function ConfigField({ name, value, path, onChange }: { name: string; value: Jso
       <label className="block text-sm">
         <span className="mb-1 block text-slate-600">{label(name)}</span>
         <Input type="number" value={value} step="any" onChange={(event) => onChange(path, Number(event.target.value))} />
+        {name.endsWith("_half_life") ? <span className="mt-1 block text-xs text-slate-500">Half-life = average win-probability loss that maps to score 0.5.</span> : null}
       </label>
     );
   }

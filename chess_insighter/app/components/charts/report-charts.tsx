@@ -24,7 +24,9 @@ import { formatNumber, formatPercent } from "~/lib/utils";
 const COLORS = ["#0f766e", "#2563eb", "#f97316", "#7c3aed", "#dc2626", "#0891b2", "#65a30d"];
 
 export function SkillRadarChart({ data }: { data: MetricPoint[] }) {
-  const chartData = data.map((item) => ({ subject: item.label, value: item.value ?? 0, missing: item.value == null }));
+  const chartData = data
+    .filter((item) => !(item.key === "game_analysis" && item.value == null))
+    .map((item) => ({ subject: item.label, value: item.value ?? 0, missing: item.value == null }));
   return (
     <Card>
       <CardHeader><CardTitle>Skill Profile</CardTitle></CardHeader>

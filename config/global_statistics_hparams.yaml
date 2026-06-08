@@ -28,6 +28,12 @@ game_analysis:
   weakness_loss_threshold: 0.08
   improvement_delta: 0.02
 
+skill_score_calibration:
+  tactics_wp_loss_half_life: 0.07
+  calculation_wp_loss_half_life: 0.06
+  quiet_middlegame_wp_loss_half_life: 0.045
+  endgame_wp_loss_half_life: 0.05
+
 advantage_capitalization:
   winning_eval_cp: 200
   clearly_winning_eval_cp: 500
