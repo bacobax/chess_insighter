@@ -349,6 +349,7 @@ def minimax(
     moves = ranked_legal_moves(board, config, engine=engine, engine_cache=engine_cache)
     if not moves:
         return minimax(
+            
             board,
             0,
             alpha,

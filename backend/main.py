@@ -13,12 +13,15 @@ from backend.models import (
     HealthResponse,
     OpeningMatchRequest,
     OpeningMatchResponse,
+    OpeningStudyTreeChildrenRequest,
+    OpeningStudyTreeChildrenResponse,
     ReportBuildRequest,
     ReportBuildResponse,
 )
 from backend.services.cache_service import ReportCache
 from backend.services.chesscom_service import ChessComServiceError, UnknownChessComUser, query_games, summarize_games
 from backend.services.hparams_service import load_hparams
+from backend.services.opening_study_service import opening_study_tree_children
 from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
 from backend.settings import settings
@@ -106,6 +109,12 @@ async def opening_matches(request: OpeningMatchRequest) -> OpeningMatchResponse:
         match_mode=request.match_mode,
         target_color=request.target_color,
     )
+
+
+@app.post("/api/opening-study-tree/children", response_model=OpeningStudyTreeChildrenResponse)
+async def opening_study_tree(request: OpeningStudyTreeChildrenRequest) -> OpeningStudyTreeChildrenResponse:
+    payload = await run_in_threadpool(opening_study_tree_children, request)
+    return OpeningStudyTreeChildrenResponse.model_validate(payload)
 
 
 @app.get("/api/report/cache/{cache_hash}", response_model=ReportBuildResponse)

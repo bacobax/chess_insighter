@@ -1,4 +1,4 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, ReportBuildRequest, ReportBuildResponse } from "./types";
+import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -47,4 +47,27 @@ export function rematchOpenings(request: OpeningMatchRequest) {
     method: "POST",
     body: JSON.stringify(request),
   });
+}
+
+/**
+ * Fetch the top-k child suggestion nodes for a single move prefix. The backend
+ * expands lazily, one level at a time; the returned nodes carry their own
+ * `prefixUci`, which the caller passes back to expand deeper.
+ *
+ * The backend does not assign node ids, so we derive a stable `id` from the
+ * full move prefix (which is unique per node within the tree).
+ */
+export async function fetchOpeningStudyChildren(
+  request: OpeningStudyTreeChildrenRequest,
+): Promise<OpeningStudyTreeChildrenResponse> {
+  const response = await apiFetch<OpeningStudyTreeChildrenResponse>("/api/opening-study-tree/children", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+  return {
+    ...response,
+    children: response.children.map(
+      (node): OpeningStudyTreeNode => ({ ...node, id: node.prefixUci.join("/") }),
+    ),
+  };
 }

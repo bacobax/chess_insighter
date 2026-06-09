@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { Link } from "react-router";
+import { ChevronDown, ChevronRight, Loader2, Network, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
@@ -120,17 +121,29 @@ export function PlayerReport({ username, defaultHparams }: { username: string; d
           {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         </CardContent>
       </Card>
-      {report ? <ReportDashboard report={report} /> : null}
+      {report ? <ReportDashboard report={report} username={username} /> : null}
     </div>
   );
 }
 
-function ReportDashboard({ report }: { report: ReportBuildResponse }) {
+function ReportDashboard({ report, username }: { report: ReportBuildResponse; username: string }) {
   const charts = report.report.charts;
+  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&cacheHash=${encodeURIComponent(report.cache_hash)}`;
   return (
     <div className="space-y-5">
-      <div className="rounded-md border bg-white p-4 text-sm text-slate-600">
-        Cache <span className="font-medium text-slate-950">{report.cache_hit ? "hit" : "miss"}</span> · hash <span className="font-mono text-xs">{report.cache_hash.slice(0, 12)}</span>
+      <div className="flex items-center justify-between rounded-md border bg-white p-4 text-sm text-slate-600">
+        <span>
+          Cache <span className="font-medium text-slate-950">{report.cache_hit ? "hit" : "miss"}</span>
+          {" · "}hash <span className="font-mono text-xs">{report.cache_hash.slice(0, 12)}</span>
+        </span>
+        <Link to={studyUrl}>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Network className="h-3.5 w-3.5" /> Opening Study Tree
+          </button>
+        </Link>
       </div>
       <SkillRadarChart data={charts.skill_profile} />
       <FavouriteOpeningsChart data={charts.favourite_openings} />
@@ -243,25 +256,26 @@ function TopOpeningMatches({ report, group, targetColor }: { report: ReportBuild
   const initialMatches = group.top_opening_matches;
   const [matches, setMatches] = useState<OpeningMatch[]>(initialMatches);
   const [matchMode, setMatchMode] = useState<OpeningMatchMode>(initialMatches[0]?.match_mode ?? "cosine");
+  const [topK, setTopK] = useState<number>(initialMatches.length || 3);
   const [rematching, setRematching] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
 
   useEffect(() => {
     setMatches(initialMatches);
     setMatchMode(initialMatches[0]?.match_mode ?? "cosine");
+    setTopK(initialMatches.length || 3);
     setRematchError(null);
   }, [report.cache_hash, targetColor]);
 
-  async function changeMatchMode(nextMode: OpeningMatchMode) {
-    setMatchMode(nextMode);
+  async function refresh(mode: OpeningMatchMode, k: number) {
     setRematching(true);
     setRematchError(null);
     try {
       const response = await rematchOpenings({
         cache_hash: report.cache_hash,
-        match_mode: nextMode,
+        match_mode: mode,
         target_color: targetColor,
-        limit: matches.length || 15,
+        limit: k,
       });
       setMatches(response.top_opening_matches);
       setMatchMode(response.match_mode);
@@ -272,32 +286,62 @@ function TopOpeningMatches({ report, group, targetColor }: { report: ReportBuild
     }
   }
 
+  async function changeMatchMode(nextMode: OpeningMatchMode) {
+    setMatchMode(nextMode);
+    await refresh(nextMode, topK);
+  }
+
+  async function changeTopK(k: number) {
+    const clamped = Math.min(50, Math.max(1, k));
+    setTopK(clamped);
+    await refresh(matchMode, clamped);
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-base font-semibold">Top K Opening Matches</h3>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <span>Match type</span>
-          <select
-            className="h-9 rounded-md border px-2 text-sm"
-            value={matchMode}
-            disabled={rematching}
-            onChange={(event) => changeMatchMode(event.target.value as OpeningMatchMode)}
-          >
-            <option value="cosine">Cosine similarity</option>
-            <option value="dot_product">Dot product</option>
-          </select>
-        </label>
+        <h3 className="text-base font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>Top Opening Matches</h3>
+        <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: "var(--ink-soft)" }}>
+          <label className="flex items-center gap-1.5">
+            <span>K</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={topK}
+              disabled={rematching}
+              className="h-8 w-16 rounded px-2 text-sm outline-none focus:ring-2"
+              style={{ backgroundColor: "var(--paper)", border: "1px solid var(--line)", color: "var(--ink)" }}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (val >= 1 && val <= 50) changeTopK(val);
+              }}
+            />
+          </label>
+          <label className="flex items-center gap-1.5">
+            <span>Mode</span>
+            <select
+              className="h-8 rounded px-2 text-sm outline-none"
+              style={{ backgroundColor: "var(--paper)", border: "1px solid var(--line)", color: "var(--ink)" }}
+              value={matchMode}
+              disabled={rematching}
+              onChange={(event) => changeMatchMode(event.target.value as OpeningMatchMode)}
+            >
+              <option value="cosine">Cosine</option>
+              <option value="dot_product">Dot product</option>
+            </select>
+          </label>
+        </div>
       </div>
       <div className="grid gap-3">
-        {rematchError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rematchError}</div> : null}
+        {rematchError ? <div className="rounded-md p-3 text-sm" style={{ border: "1px solid #e8c4b8", backgroundColor: "#f9ede9", color: "#7c3a2d" }}>{rematchError}</div> : null}
         {matches.map((match, index) => (
-          <div key={`${targetColor}-${match.opening_name}-${index}`} className="grid max-w-2xl gap-3 rounded-md border p-3 sm:grid-cols-[80px_minmax(0,1fr)]">
-            <OpeningBoardPreview fen={match.fen} />
+          <div key={`${targetColor}-${match.opening_name}-${index}`} className="grid max-w-2xl gap-3 rounded-md p-3 sm:grid-cols-[80px_minmax(0,1fr)]" style={{ border: "1px solid var(--line)" }}>
+            <OpeningBoardPreview fen={match.fen} label={match.opening_name} />
             <div className="min-w-0">
-              <div className="truncate font-semibold" title={match.opening_name}>{match.opening_name}</div>
-              <div className="mt-1 truncate text-sm text-slate-500" title={`ECO ${match.eco_values ?? "n/a"}`}>{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · {match.used_vector_color} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
-              <div className="mt-2 line-clamp-2 text-xs text-slate-500">{match.representative_pgn ?? "No representative line"}</div>
+              <div className="truncate font-semibold" style={{ color: "var(--ink)" }} title={match.opening_name}>{match.opening_name}</div>
+              <div className="mt-1 truncate text-sm" style={{ color: "var(--ink-soft)" }} title={`ECO ${match.eco_values ?? "n/a"}`}>{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · {match.used_vector_color} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
+              <div className="mt-2 line-clamp-2 text-xs" style={{ color: "var(--ink-faint)" }}>{match.representative_pgn ?? "No representative line"}</div>
             </div>
           </div>
         ))}

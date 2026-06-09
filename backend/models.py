@@ -160,6 +160,113 @@ class OpeningMatchResponse(BaseModel):
     target_color: Literal["white", "black", "both"]
 
 
+class OpeningStudyWeights(BaseModel):
+    player_style_match: float | None = Field(default=None, alias="playerStyleMatch")
+    aggressiveness: float | None = None
+    gambleness: float | None = None
+    systemness: float | None = None
+    memory_simplicity: float | None = Field(default=None, alias="memorySimplicity")
+
+    model_config = {"populate_by_name": True}
+
+    def to_weights(self) -> dict[str, float]:
+        mapping = {
+            "player_style_match": self.player_style_match,
+            "aggressiveness": self.aggressiveness,
+            "gambleness": self.gambleness,
+            "systemness": self.systemness,
+            "memory_simplicity": self.memory_simplicity,
+        }
+        return {key: float(value) for key, value in mapping.items() if value is not None}
+
+
+class OpeningStudyTreeChildrenRequest(BaseModel):
+    # Preferred: cache_hash from a previously built player report. The player
+    # vector is then loaded from the report cache, respecting the exact game
+    # filters (time class, rated, date range, max games) used in that report.
+    cache_hash: str | None = Field(default=None, alias="cacheHash")
+    # Fallback: resolve from the flat player_vectors.json by username. Ignores
+    # game filters — uses whichever vector was most recently cached.
+    username: str | None = None
+    player_vector_cache_path: str | None = Field(default=None, alias="playerVectorCachePath")
+    opening_vectors_path: str | None = Field(default=None, alias="openingVectorsPath")
+    target_color: Literal["white", "black"] = Field(alias="targetColor")
+    prefix_uci: list[str] = Field(default_factory=list, alias="prefixUci")
+    top_k: int = Field(default=4, ge=1, le=20, alias="topK")
+    opponent_top_k: int = Field(default=8, ge=1, le=30, alias="opponentTopK")
+    weights: OpeningStudyWeights | None = None
+    similarity_type: Literal["cosine", "dot_product"] = Field(default="cosine", alias="similarityType")
+    weighted_matching: bool = Field(default=True, alias="weightedMatching")
+    matcher_weights: dict[str, float] | None = Field(default=None, alias="matcherWeights")
+
+    model_config = {"populate_by_name": True}
+
+
+class OpeningStudyNodeStats(BaseModel):
+    playerStyleMatch: float
+    aggressiveness: float
+    gambleness: float
+    memoryComplexity: float
+    systemness: float
+
+
+class MetricComponent(BaseModel):
+    key: str
+    label: str
+    value: float
+    weight: float
+    rawValue: float | None = None
+    rawUnit: str | None = None
+
+
+class StyleMatchComponent(BaseModel):
+    key: str
+    label: str
+    playerValue: float
+    openingValue: float
+    weight: float
+
+
+class NodeBreakdown(BaseModel):
+    aggressiveness: list[MetricComponent] = Field(default_factory=list)
+    gambleness: list[MetricComponent] = Field(default_factory=list)
+    memoryComplexity: list[MetricComponent] = Field(default_factory=list)
+    systemness: list[MetricComponent] = Field(default_factory=list)
+    playerStyleMatch: list[StyleMatchComponent] = Field(default_factory=list)
+    openingFeatures: dict[str, float] = Field(default_factory=dict)
+
+
+class OpeningStudyTreeNodeModel(BaseModel):
+    moveUci: str
+    moveSan: str
+    fen: str
+    prefixUci: list[str]
+    compatibleLineCount: int
+    openingNames: list[str]
+    representativeUci: str | None = None
+    representativePgn: str | None = None
+    playerStyleMatch: float
+    aggressiveness: float
+    gambleness: float
+    memoryComplexity: float
+    systemness: float
+    studyScore: float
+    sideToMove: Literal["white", "black"]
+    targetColor: Literal["white", "black"]
+    isTargetMove: bool
+    boardPreviewFen: str
+    stats: OpeningStudyNodeStats
+    breakdown: NodeBreakdown = Field(default_factory=NodeBreakdown)
+
+
+class OpeningStudyTreeChildrenResponse(BaseModel):
+    targetColor: Literal["white", "black"]
+    prefixUci: list[str]
+    children: list[OpeningStudyTreeNodeModel]
+    vectorSource: str | None = None
+    playerVector: dict[str, float] | None = None
+
+
 class OpeningReportGroup(BaseModel):
     opening_characteristics: list[MetricPoint]
     top_opening_features: list[OpeningFeatureSet]

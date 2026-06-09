@@ -144,3 +144,112 @@ export type ReportBuildResponse = {
   normalized_hparams: Hparams;
   report: ReportPayload;
 };
+
+// ---------------------------------------------------------------------------
+// Opening Study Suggestion Tree
+// ---------------------------------------------------------------------------
+
+export type TargetColor = "white" | "black";
+export type StudySimilarityType = "cosine" | "dot_product";
+
+export type MatcherFeatureKey =
+  | "tactical_density"
+  | "quiet_position_density"
+  | "king_safety_risk"
+  | "early_castling_tendency"
+  | "opposite_side_castling_tendency"
+  | "middlegame_complexity"
+  | "pawn_structure_sharpness"
+  | "material_imbalance"
+  | "endgame_likelihood_proxy";
+
+export type OpeningStudyWeights = {
+  playerStyleMatch?: number;
+  aggressiveness?: number;
+  gambleness?: number;
+  systemness?: number;
+  memorySimplicity?: number;
+};
+
+export type OpeningStudyTreeChildrenRequest = {
+  /** Preferred source: hash from a /api/report/build response. Uses the
+   *  player vector computed from the exact games+filters of that report. */
+  cacheHash?: string;
+  /** Fallback: username lookup in the flat player_vectors.json cache.
+   *  Ignores game filters; uses whichever vector was cached most recently. */
+  username?: string;
+  playerVectorCachePath?: string;
+  openingVectorsPath?: string;
+  targetColor: TargetColor;
+  prefixUci: string[];
+  topK: number;
+  opponentTopK: number;
+  weights?: OpeningStudyWeights;
+  similarityType?: StudySimilarityType;
+  weightedMatching?: boolean;
+  matcherWeights?: Partial<Record<MatcherFeatureKey, number>>;
+};
+
+export type MetricComponent = {
+  key: string;
+  label: string;
+  value: number;
+  weight: number;
+  rawValue?: number;
+  rawUnit?: string;
+};
+
+export type StyleMatchComponent = {
+  key: string;
+  label: string;
+  playerValue: number;
+  openingValue: number;
+  weight: number;
+};
+
+export type NodeBreakdown = {
+  aggressiveness?: MetricComponent[];
+  gambleness?: MetricComponent[];
+  memoryComplexity?: MetricComponent[];
+  systemness?: MetricComponent[];
+  playerStyleMatch?: StyleMatchComponent[];
+  openingFeatures?: Record<string, number>;
+};
+
+export type OpeningStudyTreeNode = {
+  id: string;
+  moveUci: string;
+  moveSan: string;
+  fen: string;
+  prefixUci: string[];
+  compatibleLineCount: number;
+  openingNames: string[];
+  representativeUci?: string | null;
+  representativePgn?: string | null;
+  playerStyleMatch: number;
+  aggressiveness: number;
+  gambleness: number;
+  memoryComplexity: number;
+  systemness: number;
+  studyScore: number;
+  sideToMove: "white" | "black";
+  targetColor: TargetColor;
+  isTargetMove: boolean;
+  boardPreviewFen: string;
+  stats: {
+    playerStyleMatch: number;
+    aggressiveness: number;
+    gambleness: number;
+    memoryComplexity: number;
+    systemness: number;
+  };
+  breakdown?: NodeBreakdown;
+};
+
+export type OpeningStudyTreeChildrenResponse = {
+  targetColor: TargetColor;
+  prefixUci: string[];
+  children: OpeningStudyTreeNode[];
+  vectorSource?: string | null;
+  playerVector?: Record<string, number> | null;
+};

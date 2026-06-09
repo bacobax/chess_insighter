@@ -22,14 +22,24 @@ export function UsernameForm() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-10 text-slate-950">
-      <section className="mx-auto flex min-h-[80vh] max-w-2xl items-center">
+    <main className="min-h-screen px-4 py-10" style={{ color: "var(--ink)" }}>
+      <section className="mx-auto flex min-h-[80vh] max-w-lg items-center">
         <Card className="w-full">
-          <CardHeader>
-            <CardTitle className="text-2xl">Chess Insighter</CardTitle>
-            <CardDescription>Enter a Chess.com username to browse games and build a player report.</CardDescription>
+          <CardHeader className="pb-3">
+            <div className="mb-2 text-center text-sm tracking-widest uppercase" style={{ color: "var(--ink-faint)", letterSpacing: "0.2em" }}>
+              ♔ Analysis &amp; Insight ♔
+            </div>
+            <CardTitle className="text-center" style={{ fontFamily: "var(--font-display)", fontSize: "2rem", lineHeight: 1.1 }}>
+              Chess Insighter
+            </CardTitle>
+            <div className="mt-1 flex justify-center">
+              <div className="h-px w-24" style={{ backgroundColor: "var(--line)" }} />
+            </div>
           </CardHeader>
           <CardContent>
+            <CardDescription className="mb-4 text-center text-sm">
+              Enter a Chess.com username to browse games and build a player report.
+            </CardDescription>
             <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row">
               <Input
                 value={username}
@@ -45,7 +55,7 @@ export function UsernameForm() {
                 Continue
               </Button>
             </form>
-            {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+            {error ? <p className="mt-3 text-sm" style={{ color: "var(--accent)" }}>{error}</p> : null}
           </CardContent>
         </Card>
       </section>

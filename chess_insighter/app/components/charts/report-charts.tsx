@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type { MetricPoint, OpeningCount } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 
-const COLORS = ["#0f766e", "#2563eb", "#f97316", "#7c3aed", "#dc2626", "#0891b2", "#65a30d"];
+const COLORS = ["#7c3a2d", "#4a3728", "#8b6914", "#2d5016", "#b58863", "#6b5d4f", "#9a6b5a"];
 
 export function SkillRadarChart({ data }: { data: MetricPoint[] }) {
   const chartData = data
@@ -33,10 +33,10 @@ export function SkillRadarChart({ data }: { data: MetricPoint[] }) {
       <CardContent className="h-80">
         <ResponsiveContainer>
           <RadarChart data={chartData}>
-            <PolarGrid />
-            <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11 }} />
-            <PolarRadiusAxis domain={[0, 1]} tickFormatter={(value) => `${Number(value) * 100}`} />
-            <Radar dataKey="value" stroke="#2563eb" fill="#60a5fa" fillOpacity={0.35} />
+            <PolarGrid stroke="#c8b99a" />
+            <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: "#6b6358" }} />
+            <PolarRadiusAxis domain={[0, 1]} tickFormatter={(value) => `${Number(value) * 100}`} tick={{ fill: "#a89e8e", fontSize: 10 }} />
+            <Radar dataKey="value" stroke="#7c3a2d" fill="#b58863" fillOpacity={0.3} />
             <Tooltip formatter={(value) => formatPercent(Number(value))} />
           </RadarChart>
         </ResponsiveContainer>
@@ -59,11 +59,11 @@ export function FavouriteOpeningsChart({ data }: { data: OpeningCount[] }) {
           <TabsContent value="bar" className="h-80">
             <ResponsiveContainer>
               <BarChart data={barData} layout="vertical" margin={{ left: 32 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#dfd2bb" />
+                <XAxis type="number" allowDecimals={false} tick={{ fill: "#6b6358", fontSize: 11 }} />
+                <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: "#6b6358" }} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#0f766e" />
+                <Bar dataKey="count" fill="#7c3a2d" />
               </BarChart>
             </ResponsiveContainer>
           </TabsContent>
@@ -96,11 +96,11 @@ export function MetricBarChart({ title, data, percent = true }: { title: string;
       <CardContent className="h-72">
         <ResponsiveContainer>
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={70} />
-            <YAxis domain={percent ? [0, 1] : undefined} tickFormatter={(value) => percent ? `${Number(value) * 100}` : String(value)} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#dfd2bb" />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b6358" }} interval={0} angle={-20} textAnchor="end" height={70} />
+            <YAxis domain={percent ? [0, 1] : undefined} tickFormatter={(value) => percent ? `${Number(value) * 100}` : String(value)} tick={{ fill: "#6b6358", fontSize: 11 }} />
             <Tooltip formatter={(value, _name, props) => [percent ? formatPercent(Number(value)) : formatNumber(Number(value)), props.payload.directionLabel]} />
-            <Bar dataKey="displayValue" fill="#0f766e" />
+            <Bar dataKey="displayValue" fill="#7c3a2d" />
           </BarChart>
         </ResponsiveContainer>
       </CardContent>

@@ -16,7 +16,7 @@ export default function ReportPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950">
+    <main className="min-h-screen px-4 py-8" style={{ color: "var(--ink)" }}>
       <div className="mx-auto max-w-7xl space-y-5">
         <Link to={`/games/${encodeURIComponent(username)}`}>
           <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /> Games</Button>
