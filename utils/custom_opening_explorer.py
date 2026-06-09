@@ -222,7 +222,7 @@ def load_opening_vectors(
             "WARNING: position FEATURES and opening MATCHER_COLUMNS_V2 differ. "
             "Opening-match similarity assumes aligned calibrated feature spaces."
         )
-        
+
     if not path:
         return []
 
@@ -589,8 +589,8 @@ def suggest_moves(
             float("inf"),
             board.turn == config.target_color,
             config.target_color,
-            opening_vectors,
             player_vector,
+            opening_vectors,
             config,
             cache,
             engine=engine,
