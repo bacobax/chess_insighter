@@ -239,21 +239,33 @@ def _load_opening_rows(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
 
 @lru_cache(maxsize=8)
 def _load_all_lines(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
-    """Load all.tsv (3 700+ individual opening lines) and attach each line to its
-    family's feature vector.
+    """Load all.tsv and attach each line to its variation-level feature vector.
 
-    Using the full TSV instead of the 148 representative lines gives the
-    expansion algorithm many more distinct next-move candidates per position.
+    With the variation-level CSV (~3709 rows, one per named line), each TSV line
+    is matched first by exact variation name, then falls back to the family name
+    for backward compatibility with older family-level CSVs (148 rows).
 
     Each returned item has:
     - ``_uci_moves``: validated move list for this specific line
-    - ``_family``:    opening family name (TSV name before the first ``:``)
-    - ``_fv``:        reference to the family's feature-vector dict (for aggregation)
+    - ``_family``:    full variation name (used as deduplication key inside each
+                      next-move group — every distinct variation is counted once)
+    - ``_fv``:        reference to the variation's feature-vector dict
 
-    Families that have no corresponding feature vector are skipped.
+    Lines with no matching feature vector are skipped.
     """
     fv_rows = _load_opening_rows(opening_vectors_path)
-    fv_by_family: dict[str, dict[str, Any]] = {
+
+    # Primary index: by representative_uci (variation-level CSV).
+    # In the variation-level CSV each row's representative_uci == the anchor
+    # line's own UCI, so this is a 1-to-1 lookup with no collision.
+    fv_by_uci: dict[str, dict[str, Any]] = {
+        str(row.get("representative_uci") or "").strip(): row
+        for row in fv_rows
+        if row.get("representative_uci")
+    }
+    # Fallback index: by opening name (legacy family-level CSV or when UCI lookup
+    # misses due to normalisation differences).  Duplicate names keep last entry.
+    fv_by_name: dict[str, dict[str, Any]] = {
         str(row.get("opening_name") or ""): row for row in fv_rows
     }
 
@@ -273,12 +285,17 @@ def _load_all_lines(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
             continue
         name = str(tsv_row.get("name") or "").strip()
         family = name.split(":", 1)[0].strip()
-        fv = fv_by_family.get(family) or fv_by_family.get(name)
+        # 1) Exact UCI match — unambiguous even when names are duplicated.
+        # 2) Exact name match — handles legacy family-level CSV.
+        # 3) Family-name fallback — legacy CSV when the variation sub-name is absent.
+        fv = fv_by_uci.get(uci_str) or fv_by_name.get(name) or fv_by_name.get(family)
         if fv is None:
             continue
         enriched.append({
             "_uci_moves": uci_moves,
-            "_family": family,
+            # Use the full variation name as the deduplication key so every
+            # distinct variation contributes its own fv to the next-move group.
+            "_family": name,
             "_fv": fv,
         })
     return tuple(enriched)
@@ -639,30 +656,28 @@ def _color_name(turn: bool) -> str:
 
 def _compute_global_max_line(
     all_lines: Sequence[dict[str, Any]],
-    fv_by_family: dict[str, dict[str, Any]],
+    fv_by_family: dict[str, dict[str, Any]],  # kept for API compat, no longer used
 ) -> int:
-    """Max per-first-move line count across the full corpus.
+    """Max per-first-move TSV-line count across the full corpus.
 
     Used as a stable normalisation denominator so line_count_score has the same
     reference point at every tree depth (avoids the single-child = 100% artifact).
+
+    We count actual TSV lines (entries in all_lines) rather than summing the
+    ``line_count`` field from feature vectors.  Feature-vector rows carry subtree
+    sizes which overlap in the variation-level CSV, so summing them would inflate
+    the denominator and flatten every line_count_score toward zero.
     """
-    depth0_groups: dict[str, dict[str, dict[str, Any]]] = {}
+    depth0_counts: dict[str, int] = {}
     for line in all_lines:
         moves: list[str] = line["_uci_moves"]
         if not moves:
             continue
         fm = moves[0]
-        family: str = line.get("_family") or ""
-        fv: dict[str, Any] = line.get("_fv") or fv_by_family.get(family) or {}
-        if not fv:
-            continue
-        depth0_groups.setdefault(fm, {}).setdefault(family, fv)
-    if not depth0_groups:
+        depth0_counts[fm] = depth0_counts.get(fm, 0) + 1
+    if not depth0_counts:
         return 1
-    return max(
-        sum(int(fv.get("line_count") or 0) for fv in fvs.values())
-        for fvs in depth0_groups.values()
-    )
+    return max(depth0_counts.values())
 
 
 def _root_children_for_black(
@@ -689,7 +704,9 @@ def _root_children_for_black(
         board = base_board.copy()
         san = board.san(move)
         board.push(move)
-        line_count = sum(int(r.get("line_count") or 0) for r in grp)
+        # Count the number of variation rows matching this first move.  Summing the
+        # ``line_count`` field would over-count since variation subtrees overlap.
+        line_count = len(grp)
         if grp:
             aggregate = _aggregate_rows(grp)
             metrics = compute_node_metrics(
@@ -882,9 +899,12 @@ def get_opening_study_tree_children(
     if not groups:
         return []
 
-    # Aggregate line counts per group for memory-complexity normalisation.
+    # Count of TSV lines in the group (one per unique variation name).
+    # We count entries rather than summing fv["line_count"] because variation-level
+    # feature vectors carry subtree sizes that overlap — summing them inflates the
+    # count and would push memory_complexity artificially high.
     def _group_line_count(family_fvs: dict[str, dict[str, Any]]) -> int:
-        return sum(int(fv.get("line_count") or 0) for fv in family_fvs.values())
+        return len(family_fvs)
 
     max_line = global_max_line
 

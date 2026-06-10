@@ -1268,6 +1268,42 @@ def aggregate_by_normalized_name(features: Iterable[LineFeatureVector]) -> list[
     ]
 
 
+def aggregate_by_uci_prefix(features: list[LineFeatureVector]) -> list[OpeningGroupFeatureVector]:
+    """Build one feature-vector row per named variation, aggregated over its subtree.
+
+    Each row covers the anchor line **plus every line whose UCI starts with the
+    anchor's UCI**.  This means:
+    - ``line_count``            = number of lines in the subtree (≥ 1)
+    - ``structure_diversity``   = entropy over the subtree's final pawn structures
+    - matcher features          = reduced across the subtree (same reducers as family mode)
+    - ``representative_uci``    = the anchor line's own UCI (not the longest descendant)
+
+    Compared to ``aggregate_by_normalized_name`` (148 family rows), this produces
+    ~3709 variation rows so the study tree can distinguish e.g. Sicilian Najdorf vs
+    Dragon vs Scheveningen instead of collapsing them all to one "Sicilian Defense" row.
+    """
+    # Pre-tokenise once for O(n²) prefix comparisons.
+    uci_tokens: list[tuple[str, ...]] = tuple(
+        tuple(fv.uci.strip().split()) for fv in features
+    )
+
+    result: list[OpeningGroupFeatureVector] = []
+    for i, anchor_fv in enumerate(features):
+        anchor_tokens = uci_tokens[i]
+        anchor_len = len(anchor_tokens)
+        subtree = [
+            fv
+            for j, fv in enumerate(features)
+            if uci_tokens[j][:anchor_len] == anchor_tokens
+        ]
+        group = aggregate_line_features(subtree, opening_name=anchor_fv.opening_name)
+        # Override representative_uci/pgn to be the anchor line itself, not the
+        # longest descendant that aggregate_line_features would pick.
+        group = replace(group, representative_uci=anchor_fv.uci, representative_pgn=anchor_fv.pgn)
+        result.append(group)
+    return result
+
+
 def calibrate_opening_group_features(
     groups: list[OpeningGroupFeatureVector],
     *,
@@ -1510,7 +1546,17 @@ def compute_opening_groups(
     breadth_max_own: int = BREADTH_MAX_OWN,
     breadth_max_fanout: int = BREADTH_MAX_FANOUT,
     breadth_node_budget: int = BREADTH_NODE_BUDGET,
+    grouping: str = "variation",
 ) -> tuple[list[OpeningGroupFeatureVector], list[LineFeatureVector]]:
+    """Compute feature-vector groups from opening lines.
+
+    ``grouping`` controls the aggregation strategy:
+    - ``"variation"`` (default): one row per named line, aggregated over its subtree
+      via :func:`aggregate_by_uci_prefix`.  Produces ~3709 rows; the study tree can
+      distinguish individual variations (e.g. Sicilian Najdorf vs Dragon).
+    - ``"family"``: one row per opening family, aggregated via
+      :func:`aggregate_by_normalized_name`.  Produces 148 rows (legacy behaviour).
+    """
     selected = cap_lines_per_group(lines, max_lines_per_group)
     cache: dict[str, EnginePositionInfo] = {}
     limit = chess.engine.Limit(depth=engine_depth)
@@ -1519,7 +1565,10 @@ def compute_opening_groups(
             compute_line_features(line, engine, limit=limit, multipv=multipv, cache=cache)
             for line in progress_iter(selected, desc="Analyzing opening lines", enabled=show_progress)
         ]
-        groups = aggregate_by_normalized_name(line_features)
+        if grouping == "family":
+            groups = aggregate_by_normalized_name(line_features)
+        else:
+            groups = aggregate_by_uci_prefix(line_features)
         if compute_breadth:
             groups = compute_breadth_for_groups(
                 groups, engine,

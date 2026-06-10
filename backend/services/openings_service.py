@@ -189,7 +189,23 @@ def top_opening_matches(
                 used_features=used,
             )
         )
-    return sorted(matches, key=lambda item: item.similarity_score if item.similarity_score is not None else -1, reverse=True)[:limit]
+    sorted_matches = sorted(
+        matches,
+        key=lambda item: item.similarity_score if item.similarity_score is not None else -1,
+        reverse=True,
+    )
+    # Deduplicate by name: with the variation-level CSV (~3709 rows) multiple rows
+    # can share the same opening_name (same eco-book entry at different plies).
+    # Keep only the highest-scoring row per name.
+    seen_names: set[str] = set()
+    deduped: list[OpeningMatch] = []
+    for match in sorted_matches:
+        if match.opening_name not in seen_names:
+            seen_names.add(match.opening_name)
+            deduped.append(match)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 def top_opening_matches_from_cached_report(

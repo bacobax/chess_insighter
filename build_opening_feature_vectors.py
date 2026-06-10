@@ -106,6 +106,19 @@ def parse_args() -> argparse.Namespace:
         help="Per-(family, color) node limit to cap breadth-pass runtime.",
     )
 
+    parser.add_argument(
+        "--grouping",
+        choices=["variation", "family"],
+        default="variation",
+        help=(
+            "Aggregation strategy. "
+            "'variation' (default) emits one row per named opening line (~3709 rows), "
+            "aggregated over the line's subtree — gives the study tree distinct feature "
+            "vectors per variation. "
+            "'family' emits one row per opening family (148 rows, legacy behaviour)."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -129,6 +142,7 @@ def main() -> int:
         breadth_max_plies=args.breadth_max_plies,
         breadth_max_start_ply=args.breadth_max_start_ply,
         breadth_node_budget=args.breadth_node_budget,
+        grouping=args.grouping,
     )
 
     if args.calibration == "rank":
@@ -142,6 +156,7 @@ def main() -> int:
             max_lines_per_group=args.max_lines_per_group,
             show_progress=not args.no_progress,
             calibrate=True,
+            grouping=args.grouping,
         )
     else:
         calibrated_groups = raw_groups
