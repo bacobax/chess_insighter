@@ -30,7 +30,6 @@ BREADTH_MULTIPV = 6        # how many top moves to sample per position
 BREADTH_CP_THRESHOLD = 40  # cp gap from best; larger = more "reasonable" replies counted
 # With plies=4, fanout=3, own=2: worst-case unique nodes ≈ 3+6+18+36 = 63, well under budget.
 BREADTH_MAX_PLIES = 4      # extra plies to walk past the start position
-BREADTH_MAX_OWN = 2        # studied side: consider at most this many min-candidates
 BREADTH_MAX_FANOUT = 3     # opponent side: sum over at most this many reasonable replies
 BREADTH_NODE_BUDGET = 150  # per-(family, color) node cap; must be > 63 worst-case nodes
 MIDGAME_PLY = 24           # opening considered over by this half-move count (~move 12)
@@ -1343,7 +1342,6 @@ def worst_case_line_count(
     multipv: int,
     cp_threshold: int,
     plies_left: int,
-    max_own: int,
     max_fanout: int,
     cache: dict[str, EnginePositionInfo],
     memo: dict[tuple[str, int], int],
@@ -1407,16 +1405,16 @@ def worst_case_line_count(
 
     if board.turn == studied_color:
         # OR node: studied side picks the one move that minimises future burden.
-        candidates = reasonable[:max_own]
+        # All reasonable moves are considered — no cap on the studied side.
         child_vals: list[int] = []
-        for move in candidates:
+        for move in reasonable:
             child = board.copy()
             child.push(move)
             child_vals.append(
                 worst_case_line_count(
                     child, studied_color, engine,
                     limit=limit, multipv=multipv, cp_threshold=cp_threshold,
-                    plies_left=plies_left - 1, max_own=max_own, max_fanout=max_fanout,
+                    plies_left=plies_left - 1, max_fanout=max_fanout,
                     cache=cache, memo=memo, budget=budget,
                 )
             )
@@ -1431,7 +1429,7 @@ def worst_case_line_count(
             result += worst_case_line_count(
                 child, studied_color, engine,
                 limit=limit, multipv=multipv, cp_threshold=cp_threshold,
-                plies_left=plies_left - 1, max_own=max_own, max_fanout=max_fanout,
+                plies_left=plies_left - 1, max_fanout=max_fanout,
                 cache=cache, memo=memo, budget=budget,
             )
 
@@ -1448,7 +1446,6 @@ def compute_breadth_for_groups(
     breadth_cp_threshold: int = BREADTH_CP_THRESHOLD,
     breadth_max_plies: int = BREADTH_MAX_PLIES,
     breadth_max_start_ply: int = BREADTH_MAX_START_PLY,
-    breadth_max_own: int = BREADTH_MAX_OWN,
     breadth_max_fanout: int = BREADTH_MAX_FANOUT,
     breadth_node_budget: int = BREADTH_NODE_BUDGET,
     show_progress: bool = True,
@@ -1504,7 +1501,6 @@ def compute_breadth_for_groups(
                 multipv=breadth_multipv,
                 cp_threshold=breadth_cp_threshold,
                 plies_left=remaining,
-                max_own=breadth_max_own,
                 max_fanout=breadth_max_fanout,
                 cache=cache,
                 memo=memo,
@@ -1543,7 +1539,6 @@ def compute_opening_groups(
     breadth_cp_threshold: int = BREADTH_CP_THRESHOLD,
     breadth_max_plies: int = BREADTH_MAX_PLIES,
     breadth_max_start_ply: int = BREADTH_MAX_START_PLY,
-    breadth_max_own: int = BREADTH_MAX_OWN,
     breadth_max_fanout: int = BREADTH_MAX_FANOUT,
     breadth_node_budget: int = BREADTH_NODE_BUDGET,
     grouping: str = "variation",
@@ -1577,7 +1572,6 @@ def compute_opening_groups(
                 breadth_cp_threshold=breadth_cp_threshold,
                 breadth_max_plies=breadth_max_plies,
                 breadth_max_start_ply=breadth_max_start_ply,
-                breadth_max_own=breadth_max_own,
                 breadth_max_fanout=breadth_max_fanout,
                 breadth_node_budget=breadth_node_budget,
                 show_progress=show_progress,

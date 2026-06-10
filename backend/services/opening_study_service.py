@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+import chess.engine
 
 from backend.models import OpeningStudyTreeChildrenRequest
 from backend.services.cache_service import ReportCache
@@ -11,6 +14,8 @@ from utils.opening_study_tree import (
     get_opening_study_tree_children,
     load_player_vector_from_cache,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_opening_vectors_path(request: OpeningStudyTreeChildrenRequest) -> str:
@@ -59,6 +64,18 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
     player_vector, vector_source = _resolve_player_vector(request)
     weights = request.weights.to_weights() if request.weights is not None else None
 
+    # Open a Stockfish engine for beyond-book worst-case extension when available.
+    # The engine is opened per-request (not shared across requests) so each
+    # threadpool task owns its engine lifecycle and avoids concurrency issues.
+    engine = None
+    stockfish_path = settings.stockfish_path
+    if stockfish_path:
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not open Stockfish at %s: %s", stockfish_path, exc)
+            engine = None
+
     try:
         nodes = get_opening_study_tree_children(
             player_vector=player_vector,
@@ -71,9 +88,16 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
             similarity_type=request.similarity_type,
             weighted_matching=request.weighted_matching,
             matcher_weights=request.matcher_weights,
+            engine=engine,
         )
     except PlayerVectorFeatureMismatch as exc:
         raise ValueError(str(exc)) from exc
+    finally:
+        if engine is not None:
+            try:
+                engine.quit()
+            except Exception:  # noqa: BLE001
+                pass
 
     return {
         "targetColor": request.target_color,
