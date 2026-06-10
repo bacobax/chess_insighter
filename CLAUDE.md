@@ -91,6 +91,16 @@ UI primitives (`app/components/ui/`) are hand-rolled (Button, Card, Input, etc.)
 
 YAML file controlling all analysis thresholds and weights (centipawn cutoffs, complexity percentiles, result scores, etc.). Loaded once by `backend/services/hparams_service.py`. The config README (`config/README.md`) documents every knob.
 
+## After Every Change
+
+After completing any code change, always ask the user which of these three actions to take:
+
+1. **Commit** — draft a commit message and ask the user to confirm it before running `git commit`.
+2. **Branch + Commit** — ask the user which branch to base off of, suggest a new branch name, draft a commit message, and ask the user to confirm before creating the branch and committing.
+3. **Do nothing** — leave the working tree as-is.
+
+Never commit or create branches without explicit user approval.
+
 ## Feature Flags / Important Invariants
 
 - `opening_study_tree.py` is **additive**: it must not affect the existing opening explorer or report pipeline.
