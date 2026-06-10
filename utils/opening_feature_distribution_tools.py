@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 from utils.opening_feature_transformer import (
     BLACK_MATCHER_COLUMNS_V2,
+    BREADTH_COLUMNS,
     CALIBRATED_MATCHER_COLUMNS,
     MATCHER_COLUMNS_V2,
     SIDE_MATCHER_COLUMNS_V2,
@@ -17,6 +18,9 @@ from utils.opening_feature_transformer import (
     encode_distribution_csv,
     round_float,
 )
+
+# All columns that should be rank-calibrated: matcher columns + breadth columns.
+_ALL_CALIBRATED_COLUMNS: tuple[str, ...] = (*CALIBRATED_MATCHER_COLUMNS, *BREADTH_COLUMNS)
 
 
 FEATURE_GROUPS: dict[str, list[str]] = {
@@ -29,7 +33,7 @@ FEATURE_GROUPS: dict[str, list[str]] = {
 def rank_calibrate_opening_group_features(
     groups: list[OpeningGroupFeatureVector],
     *,
-    columns: Iterable[str] = CALIBRATED_MATCHER_COLUMNS,
+    columns: Iterable[str] = _ALL_CALIBRATED_COLUMNS,
 ) -> list[OpeningGroupFeatureVector]:
     """
     Empirical-rank calibration.
@@ -118,6 +122,12 @@ def write_group_features_with_raw(
         "raw_structure_diversity",
         "structure_diversity",
         "structure_distribution",
+        "raw_white_worst_line_count",
+        "white_worst_line_count",
+        "white_worst_line_count_raw_int",
+        "raw_black_worst_line_count",
+        "black_worst_line_count",
+        "black_worst_line_count_raw_int",
     ]
 
     with output.open("w", encoding="utf-8", newline="") as file:
@@ -138,6 +148,12 @@ def write_group_features_with_raw(
                 "structure_distribution": encode_distribution_csv(
                     calibrated_group.structure_distribution
                 ),
+                "raw_white_worst_line_count": raw_group.white_worst_line_count,
+                "white_worst_line_count": calibrated_group.white_worst_line_count,
+                "white_worst_line_count_raw_int": raw_group.white_worst_line_count_raw_int,
+                "raw_black_worst_line_count": raw_group.black_worst_line_count,
+                "black_worst_line_count": calibrated_group.black_worst_line_count,
+                "black_worst_line_count_raw_int": raw_group.black_worst_line_count_raw_int,
             }
 
             for column in matcher_columns:

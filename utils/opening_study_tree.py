@@ -65,6 +65,10 @@ DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
 # before any style-based recommendation kicks in.
 COMMON_WHITE_FIRST_MOVES: tuple[str, ...] = ("e2e4", "d2d4", "c2c4", "g1f3")
 
+# Coverage shrink: a family with ≥ COVERAGE_FULL catalogued lines is considered
+# fully evidenced; sparser families are blended toward the dataset median.
+COVERAGE_FULL: int = 12
+
 # Human-readable labels for feature keys (used in breakdown data).
 _FEATURE_LABELS: dict[str, str] = {
     "tactical_density": "Tactical density",
@@ -193,6 +197,12 @@ _AGG_FEATURES = [
     *(f"black_{c}" for c in MATCHER_COLUMNS_V2),
     "final_structure_entropy",
     "structure_diversity",
+    # Worst-case line counts: calibrated [0,1], None on legacy CSV.
+    "white_worst_line_count",
+    "black_worst_line_count",
+    # Raw integer counts (pre-log2), for human-readable display.
+    "white_worst_line_count_raw_int",
+    "black_worst_line_count_raw_int",
 ]
 
 
@@ -219,6 +229,10 @@ def _load_opening_rows(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
             row["final_structure_entropy"] = row.get("structure_diversity")
         row["line_count"] = _optional_int(raw.get("line_count")) or 0
         row["_uci_moves"] = _safe_uci_tokens(raw.get("representative_uci"))
+        row["white_worst_line_count"] = _optional_float(raw.get("white_worst_line_count"))
+        row["black_worst_line_count"] = _optional_float(raw.get("black_worst_line_count"))
+        row["white_worst_line_count_raw_int"] = _optional_int(raw.get("white_worst_line_count_raw_int"))
+        row["black_worst_line_count_raw_int"] = _optional_int(raw.get("black_worst_line_count_raw_int"))
         rows.append(row)
     return tuple(rows)
 
@@ -268,6 +282,35 @@ def _load_all_lines(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
             "_fv": fv,
         })
     return tuple(enriched)
+
+
+def _compute_global_priors(
+    fv_rows: Sequence[dict[str, Any]],
+) -> tuple[float, float]:
+    """Return (median_structure_diversity, median_final_structure_entropy) across all families.
+
+    Used as a Bayesian prior to shrink sparse-family structure signals toward the
+    dataset centre, preventing under-catalogued lines from scoring as "perfectly
+    systematic / zero memory cost" just because the book records only one line.
+    """
+    def _median(values: list[float]) -> float:
+        if not values:
+            return 0.5
+        n = len(values)
+        mid = n // 2
+        return (values[mid - 1] + values[mid]) / 2.0 if n % 2 == 0 else values[mid]
+
+    diversities = sorted(
+        float(row["structure_diversity"])
+        for row in fv_rows
+        if row.get("structure_diversity") is not None
+    )
+    entropies = sorted(
+        float(row["final_structure_entropy"])
+        for row in fv_rows
+        if row.get("final_structure_entropy") is not None
+    )
+    return _median(diversities), _median(entropies)
 
 
 def _safe_uci_tokens(uci_line: str | None) -> list[str]:
@@ -419,6 +462,8 @@ def compute_node_metrics(
     similarity_type: str = "cosine",
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
+    prior_diversity: float = 0.5,
+    prior_entropy: float = 0.5,
 ) -> dict[str, Any]:
     color_vector = opening_vector_for_color(aggregate, target_color)
 
@@ -458,17 +503,48 @@ def compute_node_metrics(
     structure_diversity = float(aggregate.get("structure_diversity") or 0.0)
     final_entropy = float(aggregate.get("final_structure_entropy") or 0.0)
 
+    # --- Coverage shrink (Part A) ---
+    # Trust the book's structure signal in proportion to how many lines are catalogued.
+    # Sparse families (lc=1) get blended toward the dataset median so they stop
+    # scoring as "zero entropy / zero diversity" i.e. "perfectly systematic + free memory".
+    coverage = clamp01(
+        math.log2(1.0 + max(compatible_line_count, 0))
+        / math.log2(1.0 + COVERAGE_FULL)
+    )
+    eff_diversity = coverage * structure_diversity + (1.0 - coverage) * prior_diversity
+    eff_entropy   = coverage * final_entropy       + (1.0 - coverage) * prior_entropy
+
     denom = math.log2(1 + max(max_line_count, 1))
     line_count_score = math.log2(1 + max(compatible_line_count, 0)) / denom if denom > 0 else 0.0
-    memory_complexity = clamp01(
-        0.55 * clamp01(line_count_score)
-        + 0.25 * structure_diversity
-        + 0.20 * final_entropy
-    )
+
+    # --- Worst-case line count (Part B/C) ---
+    # Calibrated [0,1]; None when the CSV pre-dates the breadth rebuild.
+    worst_key = "white_worst_line_count" if target_color == "white" else "black_worst_line_count"
+    worst_int_key = f"{target_color}_worst_line_count_raw_int"
+    worst_raw = aggregate.get(worst_key)
+    worst_val: float | None = clamp01(float(worst_raw)) if worst_raw is not None else None
+    worst_int_raw = aggregate.get(worst_int_key)
+    worst_int: int | None = int(round(worst_int_raw)) if worst_int_raw is not None else None
+
+    if worst_val is not None:
+        # Full formula: engine-measured branching dominates, book count corroborates.
+        memory_complexity = clamp01(
+            0.45 * worst_val
+            + 0.20 * clamp01(line_count_score)
+            + 0.20 * eff_diversity
+            + 0.15 * eff_entropy
+        )
+    else:
+        # Graceful fallback when the CSV hasn't been rebuilt yet (Part A still applies).
+        memory_complexity = clamp01(
+            0.55 * clamp01(line_count_score)
+            + 0.25 * eff_diversity
+            + 0.20 * eff_entropy
+        )
 
     systemness = clamp01(
-        0.65 * (1.0 - final_entropy)
-        + 0.35 * (1.0 - structure_diversity)
+        0.65 * (1.0 - eff_entropy)
+        + 0.35 * (1.0 - eff_diversity)
     )
 
     style = clamp01(style)
@@ -496,13 +572,19 @@ def compute_node_metrics(
             {"key": "middlegame_complexity", "label": "Complexity", "value": round(feat("middlegame_complexity"), 4), "weight": 0.25, "rawValue": round(feat("middlegame_complexity"), 4)},
         ],
         "memoryComplexity": [
-            {"key": "line_count_score", "label": "Line count", "value": round(clamp01(line_count_score), 4), "weight": 0.55, "rawValue": float(compatible_line_count), "rawUnit": "lines"},
-            {"key": "structure_diversity", "label": "Structure diversity", "value": round(structure_diversity, 4), "weight": 0.25, "rawValue": round(structure_diversity, 4)},
-            {"key": "final_structure_entropy", "label": "Position entropy", "value": round(final_entropy, 4), "weight": 0.20, "rawValue": round(final_entropy, 4)},
+            *(
+                [{"key": "worst_line_count", "label": "Worst-case lines", "value": round(worst_val, 4), "weight": 0.45, "rawValue": worst_int if worst_int is not None else round(worst_val, 4), "rawUnit": "lines"}]
+                if worst_val is not None else []
+            ),
+            {"key": "line_count_score", "label": "Line count", "value": round(clamp01(line_count_score), 4), "weight": 0.20 if worst_val is not None else 0.55, "rawValue": float(compatible_line_count), "rawUnit": "lines"},
+            {"key": "structure_diversity", "label": "Structure diversity", "value": round(eff_diversity, 4), "weight": 0.20 if worst_val is not None else 0.25, "rawValue": round(structure_diversity, 4)},
+            {"key": "final_structure_entropy", "label": "Position entropy", "value": round(eff_entropy, 4), "weight": 0.15 if worst_val is not None else 0.20, "rawValue": round(final_entropy, 4)},
+            {"key": "coverage", "label": "Evidence coverage", "value": round(coverage, 4), "weight": 0.0, "rawValue": float(compatible_line_count), "rawUnit": "lines"},
         ],
         "systemness": [
-            {"key": "final_structure_entropy_inv", "label": "1 − entropy", "value": round(clamp01(1.0 - final_entropy), 4), "weight": 0.65, "rawValue": round(final_entropy, 4), "rawUnit": "entropy"},
-            {"key": "structure_diversity_inv", "label": "1 − diversity", "value": round(clamp01(1.0 - structure_diversity), 4), "weight": 0.35, "rawValue": round(structure_diversity, 4), "rawUnit": "diversity"},
+            {"key": "final_structure_entropy_inv", "label": "1 − entropy", "value": round(clamp01(1.0 - eff_entropy), 4), "weight": 0.65, "rawValue": round(final_entropy, 4), "rawUnit": "entropy"},
+            {"key": "structure_diversity_inv", "label": "1 − diversity", "value": round(clamp01(1.0 - eff_diversity), 4), "weight": 0.35, "rawValue": round(structure_diversity, 4), "rawUnit": "diversity"},
+            {"key": "coverage", "label": "Evidence coverage", "value": round(coverage, 4), "weight": 0.0, "rawValue": float(compatible_line_count), "rawUnit": "lines"},
         ],
         "playerStyleMatch": [
             {
@@ -555,13 +637,44 @@ def _color_name(turn: bool) -> str:
     return "white" if turn == chess.WHITE else "black"
 
 
+def _compute_global_max_line(
+    all_lines: Sequence[dict[str, Any]],
+    fv_by_family: dict[str, dict[str, Any]],
+) -> int:
+    """Max per-first-move line count across the full corpus.
+
+    Used as a stable normalisation denominator so line_count_score has the same
+    reference point at every tree depth (avoids the single-child = 100% artifact).
+    """
+    depth0_groups: dict[str, dict[str, dict[str, Any]]] = {}
+    for line in all_lines:
+        moves: list[str] = line["_uci_moves"]
+        if not moves:
+            continue
+        fm = moves[0]
+        family: str = line.get("_family") or ""
+        fv: dict[str, Any] = line.get("_fv") or fv_by_family.get(family) or {}
+        if not fv:
+            continue
+        depth0_groups.setdefault(fm, {}).setdefault(family, fv)
+    if not depth0_groups:
+        return 1
+    return max(
+        sum(int(fv.get("line_count") or 0) for fv in fvs.values())
+        for fvs in depth0_groups.values()
+    )
+
+
 def _root_children_for_black(
     player_vector: dict[str, float],
     rows: Sequence[dict[str, Any]],
     weights: dict[str, float],
+    global_max_line: int,
     similarity_type: str = "cosine",
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
+    prior_diversity: float = 0.5,
+    prior_entropy: float = 0.5,
 ) -> list[OpeningStudyTreeNode]:
     """At the root, when studying Black, surface the common White first moves
     (conditional recommendation): Black's repertoire depends on White's choice."""
@@ -570,10 +683,7 @@ def _root_children_for_black(
     groups: dict[str, list[dict[str, Any]]] = {}
     for move in COMMON_WHITE_FIRST_MOVES:
         groups[move] = [row for row in rows if row["_uci_moves"][:1] == [move]]
-    max_line = max(
-        (sum(int(r.get("line_count") or 0) for r in grp) for grp in groups.values()),
-        default=1,
-    )
+    max_line = global_max_line
     for move_uci, grp in groups.items():
         move = chess.Move.from_uci(move_uci)
         board = base_board.copy()
@@ -587,6 +697,8 @@ def _root_children_for_black(
                 similarity_type=similarity_type,
                 weighted_matching=weighted_matching,
                 matcher_weights=matcher_weights,
+                prior_diversity=prior_diversity,
+                prior_entropy=prior_entropy,
             )
             best_row = max(grp, key=lambda r: int(r.get("line_count") or 0))
             names = _top_names(grp)
@@ -716,13 +828,26 @@ def get_opening_study_tree_children(
 
     board = _board_for_prefix(prefix)
 
+    # Load corpora once; both are @lru_cache so repeated calls are free.
+    all_lines = _load_all_lines(opening_vectors_path)
+    fv_rows = _load_opening_rows(opening_vectors_path)
+    fv_by_family: dict[str, dict[str, Any]] = {
+        str(row.get("opening_name") or ""): row for row in fv_rows
+    }
+    # Compute a stable normalisation ceiling from depth-0 groups so that the
+    # same line_count always maps to the same score regardless of tree depth.
+    global_max_line = _compute_global_max_line(all_lines, fv_by_family)
+    # Dataset-level priors for coverage shrink (see compute_node_metrics).
+    prior_diversity, prior_entropy = _compute_global_priors(fv_rows)
+
     if target == "black" and len(prefix) == 0:
-        fv_rows = _load_opening_rows(opening_vectors_path)
         nodes = _root_children_for_black(
-            player, fv_rows, weights,
+            player, fv_rows, weights, global_max_line,
             similarity_type=similarity_type,
             weighted_matching=weighted_matching,
             matcher_weights=matcher_weights,
+            prior_diversity=prior_diversity,
+            prior_entropy=prior_entropy,
         )
         return nodes[:opp_k] if opp_k < len(nodes) else nodes
 
@@ -735,11 +860,6 @@ def get_opening_study_tree_children(
     # whose lines pass through prefix + [next_move].  We collect family names
     # rather than raw rows so that families with many TSV lines don't dominate
     # the feature aggregation.
-    all_lines = _load_all_lines(opening_vectors_path)
-    fv_rows = _load_opening_rows(opening_vectors_path)
-    fv_by_family: dict[str, dict[str, Any]] = {
-        str(row.get("opening_name") or ""): row for row in fv_rows
-    }
 
     # next_move -> ordered list of unique families (first-seen order preserves
     # rough popularity since all.tsv is ordered by eco/name).
@@ -766,7 +886,7 @@ def get_opening_study_tree_children(
     def _group_line_count(family_fvs: dict[str, dict[str, Any]]) -> int:
         return sum(int(fv.get("line_count") or 0) for fv in family_fvs.values())
 
-    max_line = max(_group_line_count(fvs) for fvs in groups.values())
+    max_line = global_max_line
 
     nodes: list[OpeningStudyTreeNode] = []
     for next_move_uci, family_fvs in groups.items():
@@ -788,6 +908,8 @@ def get_opening_study_tree_children(
             similarity_type=similarity_type,
             weighted_matching=weighted_matching,
             matcher_weights=matcher_weights,
+            prior_diversity=prior_diversity,
+            prior_entropy=prior_entropy,
         )
         best_fv = max(fv_list, key=lambda r: int(r.get("line_count") or 0))
         names = [

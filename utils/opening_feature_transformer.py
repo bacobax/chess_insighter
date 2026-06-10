@@ -22,6 +22,24 @@ except ImportError:  # pragma: no cover - exercised only when tqdm is absent.
 DEFAULT_STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 FEATURE_START_PLY = 6
 
+# ---------------------------------------------------------------------------
+# Worst-case line count algorithm defaults
+# ---------------------------------------------------------------------------
+BREADTH_DEPTH = 8          # shallow engine depth used only for branching estimation
+BREADTH_MULTIPV = 6        # how many top moves to sample per position
+BREADTH_CP_THRESHOLD = 40  # cp gap from best; larger = more "reasonable" replies counted
+# With plies=4, fanout=3, own=2: worst-case unique nodes ≈ 3+6+18+36 = 63, well under budget.
+BREADTH_MAX_PLIES = 4      # extra plies to walk past the start position
+BREADTH_MAX_OWN = 2        # studied side: consider at most this many min-candidates
+BREADTH_MAX_FANOUT = 3     # opponent side: sum over at most this many reasonable replies
+BREADTH_NODE_BUDGET = 150  # per-(family, color) node cap; must be > 63 worst-case nodes
+MIDGAME_PLY = 24           # opening considered over by this half-move count (~move 12)
+# The representative_uci is the LONGEST line in each family and can be 30+ moves
+# deep.  By truncating to BREADTH_MAX_START_PLY we ensure every family starts the
+# walk from a comparably shallow "entry" position, giving a fair cross-family
+# comparison of memorisation burden.
+BREADTH_MAX_START_PLY = 8  # use only the first N moves of the representative line
+
 MATCHER_COLUMNS_V2 = [
     "tactical_density",
     "quiet_position_density",
@@ -53,6 +71,13 @@ REPORT_METADATA_COLUMNS = [
 VECTOR_COLUMNS = [
     *MATCHER_COLUMNS_V2,
     "structure_diversity",
+]
+
+# Extra columns written to the CSV that are NOT part of CALIBRATED_MATCHER_COLUMNS
+# but still need rank-calibration (non-matcher, per-colour breadth metrics).
+BREADTH_COLUMNS = [
+    "white_worst_line_count",
+    "black_worst_line_count",
 ]
 
 
@@ -156,6 +181,13 @@ class OpeningGroupFeatureVector:
     black_pawn_structure_sharpness: float = 0.0
     black_material_imbalance: float = 0.0
     black_endgame_likelihood_proxy: float = 0.0
+    # Worst-case memorisation burden (log2 of line count, calibrated to [0,1]).
+    # Computed by the bounded min-sum AND/OR tree; 0.0 when not yet available.
+    white_worst_line_count: float = 0.0
+    black_worst_line_count: float = 0.0
+    # Raw integer counts before log2 — shown directly to users ("~8 lines").
+    white_worst_line_count_raw_int: int = 0
+    black_worst_line_count_raw_int: int = 0
 
     def vector(self) -> list[float]:
         return [float(getattr(self, column)) for column in VECTOR_COLUMNS]
@@ -1266,6 +1298,200 @@ def calibrate_opening_group_features(
     return calibrated
 
 
+def worst_case_line_count(
+    board: chess.Board,
+    studied_color: chess.Color,
+    engine: Any,
+    *,
+    limit: chess.engine.Limit,
+    multipv: int,
+    cp_threshold: int,
+    plies_left: int,
+    max_own: int,
+    max_fanout: int,
+    cache: dict[str, EnginePositionInfo],
+    memo: dict[tuple[str, int], int],
+    budget: list[int],
+) -> int:
+    """Bounded min-sum AND/OR tree estimating worst-case memorisation burden.
+
+    Studied side to move (OR node): take the *minimum* over the player's reasonable
+    moves — they pick the single repertoire move that minimises downstream lines.
+    Opponent to move (AND node): *sum* over all opponent reasonable replies — the
+    player must be prepared for every one of them.
+
+    A move is "reasonable" when its eval stays within ``cp_threshold`` centipawns of
+    the best move (from the side-to-move perspective).
+
+    Returns a line count ≥ 1 (leaves and exhausted nodes always return 1).
+    """
+    if plies_left == 0 or board.is_game_over():
+        return 1
+
+    key = (board.fen(), plies_left)
+    if key in memo:
+        return memo[key]
+
+    if budget[0] <= 0:
+        return 1
+    budget[0] -= 1
+
+    info = analyse_position(engine, board, limit=limit, multipv=multipv, cache=cache)
+    if not info.top_moves:
+        memo[key] = 1
+        return 1
+
+    best_eval = info.top_moves[0].eval_cp
+    if best_eval is None:
+        memo[key] = 1
+        return 1
+
+    # eval_cp is always from White's POV.  Threshold comparison must respect whose
+    # turn it is: White wants high eval, Black wants low eval.
+    reasonable: list[chess.Move] = []
+    for top_move in info.top_moves:
+        if top_move.eval_cp is None or top_move.move_uci is None:
+            continue
+        if board.turn == chess.WHITE:
+            within = top_move.eval_cp >= best_eval - cp_threshold
+        else:
+            within = top_move.eval_cp <= best_eval + cp_threshold
+        if not within:
+            continue
+        try:
+            move = chess.Move.from_uci(top_move.move_uci)
+        except ValueError:
+            continue
+        if move in board.legal_moves:
+            reasonable.append(move)
+
+    if not reasonable:
+        memo[key] = 1
+        return 1
+
+    if board.turn == studied_color:
+        # OR node: studied side picks the one move that minimises future burden.
+        candidates = reasonable[:max_own]
+        child_vals: list[int] = []
+        for move in candidates:
+            child = board.copy()
+            child.push(move)
+            child_vals.append(
+                worst_case_line_count(
+                    child, studied_color, engine,
+                    limit=limit, multipv=multipv, cp_threshold=cp_threshold,
+                    plies_left=plies_left - 1, max_own=max_own, max_fanout=max_fanout,
+                    cache=cache, memo=memo, budget=budget,
+                )
+            )
+        result = min(child_vals)
+    else:
+        # AND node: must be prepared for every reasonable opponent reply.
+        candidates = reasonable[:max_fanout]
+        result = 0
+        for move in candidates:
+            child = board.copy()
+            child.push(move)
+            result += worst_case_line_count(
+                child, studied_color, engine,
+                limit=limit, multipv=multipv, cp_threshold=cp_threshold,
+                plies_left=plies_left - 1, max_own=max_own, max_fanout=max_fanout,
+                cache=cache, memo=memo, budget=budget,
+            )
+
+    memo[key] = result
+    return result
+
+
+def compute_breadth_for_groups(
+    groups: list[OpeningGroupFeatureVector],
+    engine: Any,
+    *,
+    breadth_depth: int = BREADTH_DEPTH,
+    breadth_multipv: int = BREADTH_MULTIPV,
+    breadth_cp_threshold: int = BREADTH_CP_THRESHOLD,
+    breadth_max_plies: int = BREADTH_MAX_PLIES,
+    breadth_max_start_ply: int = BREADTH_MAX_START_PLY,
+    breadth_max_own: int = BREADTH_MAX_OWN,
+    breadth_max_fanout: int = BREADTH_MAX_FANOUT,
+    breadth_node_budget: int = BREADTH_NODE_BUDGET,
+    show_progress: bool = True,
+) -> list[OpeningGroupFeatureVector]:
+    """Post-pass: fill ``white_worst_line_count`` and ``black_worst_line_count``.
+
+    For each opening family this replays the representative line, then runs the
+    bounded min-sum AND/OR tree forward from that position to the middlegame
+    horizon — once for White as the studied side, once for Black.  Raw values are
+    stored as ``log2(1 + worst_lines)`` so they calibrate stably.
+    """
+    limit = chess.engine.Limit(depth=breadth_depth)
+    cache: dict[str, EnginePositionInfo] = {}
+    updated: list[OpeningGroupFeatureVector] = []
+
+    for group in progress_iter(groups, desc="Computing opening breadth", enabled=show_progress):
+        uci_line = str(group.representative_uci or "").strip()
+
+        # The representative_uci is the LONGEST catalogued line in the family and can
+        # be 30+ plies deep (e.g. Ruy Lopez at ply 36, Italian Game at ply 27).
+        # Starting the walk from there would give remaining=max(0,MIDGAME_PLY-36)=0,
+        # trivially returning 1 for all rich openings.
+        # Fix: truncate to BREADTH_MAX_START_PLY so every family starts from a
+        # comparably shallow position and always gets a full BREADTH_MAX_PLIES walk.
+        all_tokens = uci_line.split() if uci_line else []
+        start_tokens = all_tokens[:breadth_max_start_ply]
+        truncated_uci = " ".join(start_tokens)
+
+        try:
+            if truncated_uci:
+                boards, _ = replay_boards(truncated_uci)
+                start_board = boards[-1]
+            else:
+                start_board = chess.Board()
+        except (ValueError, IndexError):
+            # Malformed representative line — keep zeros, don't crash.
+            updated.append(group)
+            continue
+
+        current_ply = len(start_tokens)
+        remaining = max(0, min(breadth_max_plies, MIDGAME_PLY - current_ply))
+
+        log2_values: dict[chess.Color, float] = {}
+        raw_int_values: dict[chess.Color, int] = {}
+        for studied_color in (chess.WHITE, chess.BLACK):
+            memo: dict[tuple[str, int], int] = {}
+            budget: list[int] = [breadth_node_budget]
+            raw_count = worst_case_line_count(
+                start_board.copy(),
+                studied_color,
+                engine,
+                limit=limit,
+                multipv=breadth_multipv,
+                cp_threshold=breadth_cp_threshold,
+                plies_left=remaining,
+                max_own=breadth_max_own,
+                max_fanout=breadth_max_fanout,
+                cache=cache,
+                memo=memo,
+                budget=budget,
+            )
+            raw_int_values[studied_color] = int(raw_count)
+            log2_values[studied_color] = math.log2(1.0 + float(raw_count))
+
+        # Do NOT use round_float here — it clamps to [0,1] and log2 values can exceed 1.
+        # Rank calibration in the build pipeline maps these raw log2 values to [0,1].
+        updated.append(
+            replace(
+                group,
+                white_worst_line_count=round(log2_values[chess.WHITE], 6),
+                black_worst_line_count=round(log2_values[chess.BLACK], 6),
+                white_worst_line_count_raw_int=raw_int_values[chess.WHITE],
+                black_worst_line_count_raw_int=raw_int_values[chess.BLACK],
+            )
+        )
+
+    return updated
+
+
 def compute_opening_groups(
     lines: list[OpeningLine],
     *,
@@ -1275,6 +1501,15 @@ def compute_opening_groups(
     max_lines_per_group: Optional[int] = None,
     show_progress: bool = True,
     calibrate: bool = True,
+    compute_breadth: bool = True,
+    breadth_depth: int = BREADTH_DEPTH,
+    breadth_multipv: int = BREADTH_MULTIPV,
+    breadth_cp_threshold: int = BREADTH_CP_THRESHOLD,
+    breadth_max_plies: int = BREADTH_MAX_PLIES,
+    breadth_max_start_ply: int = BREADTH_MAX_START_PLY,
+    breadth_max_own: int = BREADTH_MAX_OWN,
+    breadth_max_fanout: int = BREADTH_MAX_FANOUT,
+    breadth_node_budget: int = BREADTH_NODE_BUDGET,
 ) -> tuple[list[OpeningGroupFeatureVector], list[LineFeatureVector]]:
     selected = cap_lines_per_group(lines, max_lines_per_group)
     cache: dict[str, EnginePositionInfo] = {}
@@ -1284,7 +1519,20 @@ def compute_opening_groups(
             compute_line_features(line, engine, limit=limit, multipv=multipv, cache=cache)
             for line in progress_iter(selected, desc="Analyzing opening lines", enabled=show_progress)
         ]
-    groups = aggregate_by_normalized_name(line_features)
+        groups = aggregate_by_normalized_name(line_features)
+        if compute_breadth:
+            groups = compute_breadth_for_groups(
+                groups, engine,
+                breadth_depth=breadth_depth,
+                breadth_multipv=breadth_multipv,
+                breadth_cp_threshold=breadth_cp_threshold,
+                breadth_max_plies=breadth_max_plies,
+                breadth_max_start_ply=breadth_max_start_ply,
+                breadth_max_own=breadth_max_own,
+                breadth_max_fanout=breadth_max_fanout,
+                breadth_node_budget=breadth_node_budget,
+                show_progress=show_progress,
+            )
     if calibrate:
         groups = calibrate_opening_group_features(groups)
     return groups, line_features

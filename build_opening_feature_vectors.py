@@ -8,6 +8,12 @@ from utils.opening_feature_distribution_tools import (
     write_group_features_with_raw,
 )
 from utils.opening_feature_transformer import (
+    BREADTH_CP_THRESHOLD,
+    BREADTH_DEPTH,
+    BREADTH_MAX_PLIES,
+    BREADTH_MAX_START_PLY,
+    BREADTH_MULTIPV,
+    BREADTH_NODE_BUDGET,
     DEFAULT_STOCKFISH_PATH,
     compute_opening_groups,
     load_opening_lines,
@@ -54,6 +60,52 @@ def parse_args() -> argparse.Namespace:
         help="Optional cap for faster exploratory runs. Omit for full production output.",
     )
 
+    parser.add_argument(
+        "--no-breadth",
+        action="store_true",
+        help="Skip the worst-case line-count post-pass (faster; leaves breadth columns at 0).",
+    )
+    parser.add_argument(
+        "--breadth-depth",
+        type=int,
+        default=BREADTH_DEPTH,
+        help="Engine depth used for branching estimation during the breadth post-pass.",
+    )
+    parser.add_argument(
+        "--breadth-multipv",
+        type=int,
+        default=BREADTH_MULTIPV,
+        help="Number of top moves sampled per position during the breadth post-pass.",
+    )
+    parser.add_argument(
+        "--breadth-cp-threshold",
+        type=int,
+        default=BREADTH_CP_THRESHOLD,
+        help="CP gap from best move; moves within threshold count as 'reasonable'.",
+    )
+    parser.add_argument(
+        "--breadth-max-plies",
+        type=int,
+        default=BREADTH_MAX_PLIES,
+        help="Walk plies from the truncated start position (default 4; keep ≤6 for tractability).",
+    )
+    parser.add_argument(
+        "--breadth-max-start-ply",
+        type=int,
+        default=BREADTH_MAX_START_PLY,
+        help=(
+            "Truncate representative UCI to this many half-moves before starting the walk. "
+            "Prevents long lines (e.g. Ruy Lopez at ply 36) from yielding remaining=0. "
+            "Default 8 — all families get a full BREADTH_MAX_PLIES walk."
+        ),
+    )
+    parser.add_argument(
+        "--breadth-node-budget",
+        type=int,
+        default=BREADTH_NODE_BUDGET,
+        help="Per-(family, color) node limit to cap breadth-pass runtime.",
+    )
+
     return parser.parse_args()
 
 
@@ -70,6 +122,13 @@ def main() -> int:
         max_lines_per_group=args.max_lines_per_group,
         show_progress=not args.no_progress,
         calibrate=False,
+        compute_breadth=not args.no_breadth,
+        breadth_depth=args.breadth_depth,
+        breadth_multipv=args.breadth_multipv,
+        breadth_cp_threshold=args.breadth_cp_threshold,
+        breadth_max_plies=args.breadth_max_plies,
+        breadth_max_start_ply=args.breadth_max_start_ply,
+        breadth_node_budget=args.breadth_node_budget,
     )
 
     if args.calibration == "rank":
