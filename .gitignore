@@ -1,0 +1,15 @@
+# Local runtime/cache state
+.cache/
+.pytest_cache/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local scratch files
+TODO.md
+run_all.sh
+
+# OS/editor noise
+.DS_Store
+.vscode/
