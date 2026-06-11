@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from backend.models import ReportBuildRequest
+import pytest
+from fastapi import HTTPException
+
+from backend import main as api_main
+from backend.models import ReportBuildRequest, SaveReportRequest
 from backend.services import openings_service, statistics_service
 from backend.services.cache_service import stable_hash
 from backend.services.cache_service import report_cache_key
@@ -203,6 +207,30 @@ def test_report_cache_key_does_not_include_target_color():
     )
 
     assert "target_color" not in key
+
+
+def test_save_report_rejects_missing_cache_hash(monkeypatch):
+    calls = []
+
+    class FakeCache:
+        def get(self, _cache_hash):
+            return None
+
+    monkeypatch.setattr(api_main, "ReportCache", lambda: FakeCache())
+    monkeypatch.setattr(api_main, "save_report_entry", lambda **kwargs: calls.append(kwargs))
+
+    with pytest.raises(HTTPException) as exc_info:
+        api_main.save_report(
+            SaveReportRequest(
+                cache_hash="missing",
+                username="Alice",
+                games_analyzed=3,
+                request_params={"username": "Alice"},
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+    assert calls == []
 
 
 def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_path):

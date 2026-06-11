@@ -1,4 +1,4 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse, SavedReportsList } from "./types";
+import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse, SavedReportsList, SaveReportRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -49,6 +49,13 @@ export function getReportByHash(cacheHash: string) {
 
 export function getSavedReports() {
   return apiFetch<SavedReportsList>("/api/reports/saved");
+}
+
+export function saveReport(request: SaveReportRequest) {
+  return apiFetch<void>("/api/reports/saved", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }
 
 export function deleteSavedReport(cacheHash: string) {

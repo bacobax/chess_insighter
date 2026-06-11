@@ -9,8 +9,13 @@ import chess
 import chess.engine
 
 from utils.opening_feature_transformer import (
+    BREADTH_CP_THRESHOLD,
+    BREADTH_DEPTH,
+    BREADTH_MAX_FANOUT,
+    BREADTH_NODE_BUDGET,
     FEATURE_START_PLY,
     MATCHER_COLUMNS_V2,
+    MIDGAME_PLY,
     OpeningLine,
     aggregate_by_normalized_name,
     aggregate_line_features,
@@ -25,14 +30,17 @@ from utils.opening_feature_transformer import (
     detect_castling_stats,
     doubled_pawns,
     endgame_likelihood_proxy,
+    extend_boards_to_middlegame,
     isolated_pawns,
     material_imbalance_score,
     match_lines_for_gt_row,
     open_files,
     opening_family_name,
     passed_pawns,
+    replay_boards,
     sampled_position_pairs,
     semi_open_files,
+    worst_case_line_count,
     write_feature_distribution_diagnostics,
 )
 
@@ -60,6 +68,29 @@ class FakeEngine:
             if board.turn == chess.BLACK:
                 cp = -cp
             infos.append({"score": FakeScore(cp), "pv": [move]})
+        return infos if multipv != 1 else infos[0]
+
+
+class PracticalReplyFakeEngine:
+    def analyse(self, board, limit, multipv=1, root_moves=None):
+        preferred = ["e4f5", "e4e5", "b1c3", "d2d3", "g1h3", "f1c4"]
+        scores = {
+            "e4f5": 190,
+            "e4e5": 91,
+            "b1c3": 80,
+            "d2d3": 47,
+            "g1h3": 34,
+            "f1c4": 21,
+        }
+        legal_by_uci = {move.uci(): move for move in board.legal_moves}
+        ordered = [legal_by_uci[uci] for uci in preferred if uci in legal_by_uci]
+        ordered.extend(move for move in board.legal_moves if move not in ordered)
+        infos = [
+            {"score": FakeScore(scores.get(move.uci(), 0)), "pv": [move]}
+            for move in ordered[:multipv]
+        ]
+        if not infos:
+            return {"score": FakeScore(0), "pv": []}
         return infos if multipv != 1 else infos[0]
 
 
@@ -143,6 +174,59 @@ def test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallbac
 
     assert sampled[0][0].ply() >= FEATURE_START_PLY
     assert len(short_sampled) == 3
+
+
+def test_short_book_line_extends_to_middlegame_for_feature_sampling():
+    boards, moves = replay_boards("e2e4 f7f5")
+
+    extended_boards, extended_moves = extend_boards_to_middlegame(
+        boards,
+        moves,
+        FakeEngine(),
+        limit=chess.engine.Limit(depth=1),
+        multipv=3,
+        cache={},
+    )
+
+    assert boards[-1].ply() == 2
+    assert extended_boards[-1].ply() >= MIDGAME_PLY
+    assert len(extended_moves) > len(moves)
+
+
+def test_practical_reply_threshold_counts_duras_gambit_replies_for_black():
+    board = chess.Board()
+    for move_uci in ["e2e4", "f7f5"]:
+        board.push(chess.Move.from_uci(move_uci))
+
+    narrow = worst_case_line_count(
+        board.copy(),
+        chess.BLACK,
+        PracticalReplyFakeEngine(),
+        limit=chess.engine.Limit(depth=BREADTH_DEPTH),
+        multipv=6,
+        cp_threshold=40,
+        plies_left=1,
+        max_fanout=BREADTH_MAX_FANOUT,
+        cache={},
+        memo={},
+        budget=[BREADTH_NODE_BUDGET],
+    )
+    practical = worst_case_line_count(
+        board.copy(),
+        chess.BLACK,
+        PracticalReplyFakeEngine(),
+        limit=chess.engine.Limit(depth=BREADTH_DEPTH),
+        multipv=6,
+        cp_threshold=BREADTH_CP_THRESHOLD,
+        plies_left=1,
+        max_fanout=BREADTH_MAX_FANOUT,
+        cache={},
+        memo={},
+        budget=[BREADTH_NODE_BUDGET],
+    )
+
+    assert narrow == 1
+    assert practical == 3
 
 
 def test_short_line_retained_castling_rights_gets_nonzero_opportunity():
@@ -375,6 +459,12 @@ class OpeningFeatureTransformerTests(unittest.TestCase):
 
     def test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallback(self):
         test_sampled_position_pairs_skips_common_early_plies_with_short_line_fallback()
+
+    def test_short_book_line_extends_to_middlegame_for_feature_sampling(self):
+        test_short_book_line_extends_to_middlegame_for_feature_sampling()
+
+    def test_practical_reply_threshold_counts_duras_gambit_replies_for_black(self):
+        test_practical_reply_threshold_counts_duras_gambit_replies_for_black()
 
     def test_short_line_retained_castling_rights_gets_nonzero_opportunity(self):
         test_short_line_retained_castling_rights_gets_nonzero_opportunity()

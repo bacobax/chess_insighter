@@ -4,7 +4,6 @@ from typing import Any
 
 from backend.models import MetricPoint, ReportBuildRequest, ReportBuildResponse, ReportCharts, ReportPayload
 from backend.services.cache_service import ReportCache, report_cache_key, stable_hash, update_player_vector_cache
-from backend.services.saved_reports_service import save_report_entry
 from backend.services.chesscom_service import fetch_latest_games_for_report
 from backend.services.enrichment_service import enrich_games
 from backend.services.hparams_service import dump_simple_yaml, load_hparams, validate_numeric_hparams
@@ -106,12 +105,6 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
     )
     payload = response.model_dump()
     cache.set(cache_hash, payload)
-    save_report_entry(
-        cache_hash=cache_hash,
-        username=request.username.strip().lower(),
-        games_analyzed=len(raw_games),
-        request_params=request.model_dump(),
-    )
     update_player_vector_cache(
         cache_key=key,
         vector=bundle.matcher_ready_player_vector,

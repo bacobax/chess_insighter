@@ -5,6 +5,7 @@ import { Button } from "~/components/ui/button";
 import { queryGames } from "~/lib/api";
 import type { GameSummary } from "~/lib/types";
 import { GameCard } from "./game-card";
+import { PlayerStatsPanel } from "./player-stats-panel";
 
 export function InfiniteGamesScroller({ username }: { username: string }) {
   const [games, setGames] = useState<GameSummary[]>([]);
@@ -50,8 +51,8 @@ export function InfiniteGamesScroller({ username }: { username: string }) {
     <div className="space-y-5">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-normal">{username}'s latest games</h1>
-          <p className="mt-1 text-sm text-slate-500">Scroll to load more Chess.com games.</p>
+          <h1 className="text-2xl font-semibold tracking-normal" style={{ fontFamily: "var(--font-display)" }}>{username}</h1>
+          <p className="mt-1 text-sm text-slate-500">Chess.com games · scroll to load more.</p>
         </div>
         <Link to={`/report/${encodeURIComponent(username)}`}>
           <Button>
@@ -60,6 +61,7 @@ export function InfiniteGamesScroller({ username }: { username: string }) {
           </Button>
         </Link>
       </div>
+      <PlayerStatsPanel username={username} />
       {error ? <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}
       {!loading && games.length === 0 && !error ? <div className="rounded-md border bg-white p-8 text-center text-slate-500">No games found.</div> : null}
       <div className="grid gap-4 lg:grid-cols-2">

@@ -158,6 +158,13 @@ export type SavedReportsList = {
   entries: SavedReportEntry[];
 };
 
+export type SaveReportRequest = {
+  cache_hash: string;
+  username: string;
+  games_analyzed: number;
+  request_params: ReportBuildRequest;
+};
+
 // ---------------------------------------------------------------------------
 // Opening Study Suggestion Tree
 // ---------------------------------------------------------------------------

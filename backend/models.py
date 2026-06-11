@@ -312,3 +312,10 @@ class SavedReportEntry(BaseModel):
 
 class SavedReportsList(BaseModel):
     entries: list[SavedReportEntry]
+
+
+class SaveReportRequest(BaseModel):
+    cache_hash: str
+    username: str
+    games_analyzed: int
+    request_params: JsonObject

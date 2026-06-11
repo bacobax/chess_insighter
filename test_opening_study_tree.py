@@ -65,6 +65,28 @@ def test_black_responses_after_e4_are_target_moves(player_vector):
         assert node.prefix_uci[0] == "e2e4"
 
 
+def test_e4_expansion_uses_precomputed_worst_counts_without_engine(player_vector):
+    class ExplodingEngine:
+        def analyse(self, *args, **kwargs):
+            raise AssertionError("opening-study expansion must not call the engine")
+
+    nodes = get_opening_study_tree_children(
+        player_vector,
+        OPENING_VECTORS,
+        "black",
+        ["e2e4"],
+        20,
+        engine=ExplodingEngine(),
+    )
+    duras = next(node for node in nodes if node.move_uci == "f7f5")
+    worst_line = next(
+        item for item in duras.breakdown["memoryComplexity"]
+        if item["key"] == "worst_line_count"
+    )
+
+    assert worst_line["rawValue"] > 1
+
+
 def test_invalid_target_color_raises(player_vector):
     with pytest.raises(ValueError):
         get_opening_study_tree_children(player_vector, OPENING_VECTORS, "green", [], 4)
@@ -93,7 +115,7 @@ def test_node_serialization_has_camelcase_keys(player_vector):
 # ---------------------------------------------------------------------------
 
 import math
-from utils.opening_study_tree import COVERAGE_FULL, compute_node_metrics
+from utils.opening_study_tree import COVERAGE_FULL, _compute_global_priors, compute_node_metrics
 
 
 def _base_aggregate(
@@ -160,6 +182,35 @@ def test_sparse_family_no_longer_has_zero_memory_complexity():
     assert m["memory_complexity"] > 0.05, (
         f"Expected memory_complexity > 0.05 for 1-line family; got {m['memory_complexity']}"
     )
+
+
+def test_global_priors_ignore_one_line_zero_entropy_rows_when_richer_rows_exist():
+    rows = [
+        {"line_count": 1, "structure_diversity": 0.0, "final_structure_entropy": 0.0}
+        for _ in range(10)
+    ]
+    rows.extend(
+        [
+            {"line_count": 2, "structure_diversity": 0.2, "final_structure_entropy": 0.4},
+            {"line_count": 3, "structure_diversity": 0.4, "final_structure_entropy": 0.6},
+        ]
+    )
+
+    prior_diversity, prior_entropy = _compute_global_priors(rows)
+    metrics = compute_node_metrics(
+        _base_aggregate(lc=1, div=0.0, ent=0.0),
+        _PLAYER,
+        "black",
+        1,
+        381,
+        {},
+        prior_diversity=prior_diversity,
+        prior_entropy=prior_entropy,
+    )
+
+    assert prior_diversity == pytest.approx(0.3)
+    assert prior_entropy == pytest.approx(0.5)
+    assert metrics["systemness"] < 1.0
 
 
 def test_coverage_shrink_is_strictly_monotone():

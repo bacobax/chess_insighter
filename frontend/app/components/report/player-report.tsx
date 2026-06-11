@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { ChevronDown, ChevronRight, Loader2, Network, RefreshCw } from "lucide-react";
+import { Bookmark, BookmarkCheck, ChevronDown, ChevronRight, Loader2, Network, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
-import { buildReport, rematchOpenings } from "~/lib/api";
+import { buildReport, rematchOpenings, saveReport } from "~/lib/api";
 import type { Hparams, OpeningMatch, OpeningMatchMode, OpeningReportGroup, ReportBuildRequest, ReportBuildResponse } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 import { OpeningBoardPreview } from "./opening-board-preview";
@@ -27,6 +27,21 @@ export function PlayerReport({
   initialReport?: ReportBuildResponse;
   initialParams?: PlayerReportInitialParams;
 }) {
+  const initialBuildRequest: ReportBuildRequest | null =
+    initialReport && initialParams
+      ? {
+          username,
+          hparams: initialParams.hparams,
+          max_games: initialParams.max_games,
+          engine_depth: initialParams.engine_depth,
+          use_engine: initialParams.use_engine,
+          refresh_cache: false,
+          time_classes: initialParams.time_classes ?? null,
+          rated_filter: initialParams.rated_filter ?? null,
+          since_year: initialParams.since_year ?? null,
+          since_month: initialParams.since_month ?? null,
+        }
+      : null;
   const [hparams, setHparams] = useState<Hparams>(initialParams?.hparams ?? defaultHparams);
   const [maxGames, setMaxGames] = useState(initialParams?.max_games ?? 20);
   const [timeClass, setTimeClass] = useState<string>(
@@ -44,26 +59,29 @@ export function PlayerReport({
   const [useEngine, setUseEngine] = useState(initialParams?.use_engine ?? true);
   const [refreshCache, setRefreshCache] = useState(false);
   const [report, setReport] = useState<ReportBuildResponse | null>(initialReport ?? null);
+  const [lastBuildRequest, setLastBuildRequest] = useState<ReportBuildRequest | null>(initialBuildRequest);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
     setLoading(true);
     setError(null);
+    const request: ReportBuildRequest = {
+      username,
+      hparams,
+      max_games: maxGames,
+      engine_depth: engineDepth,
+      use_engine: useEngine,
+      refresh_cache: refreshCache,
+      time_classes: timeClass === "all" ? null : [timeClass],
+      rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
+      since_year: sinceYear === "" ? null : sinceYear,
+      since_month: sinceMonth === "" ? null : sinceMonth,
+    };
     try {
-      const response = await buildReport({
-        username,
-        hparams,
-        max_games: maxGames,
-        engine_depth: engineDepth,
-        use_engine: useEngine,
-        refresh_cache: refreshCache,
-        time_classes: timeClass === "all" ? null : [timeClass],
-        rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
-        since_year: sinceYear === "" ? null : sinceYear,
-        since_month: sinceMonth === "" ? null : sinceMonth,
-      });
+      const response = await buildReport(request);
       setReport(response);
+      setLastBuildRequest(request);
       setHparams(response.normalized_hparams);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not build report.");
@@ -142,14 +160,34 @@ export function PlayerReport({
           {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         </CardContent>
       </Card>
-      {report ? <ReportDashboard report={report} username={username} /> : null}
+      {report ? <ReportDashboard report={report} username={username} buildRequest={lastBuildRequest} /> : null}
     </div>
   );
 }
 
-function ReportDashboard({ report, username }: { report: ReportBuildResponse; username: string }) {
+function ReportDashboard({ report, username, buildRequest }: { report: ReportBuildResponse; username: string; buildRequest: ReportBuildRequest | null }) {
   const charts = report.report.charts;
   const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&cacheHash=${encodeURIComponent(report.cache_hash)}`;
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function handleSave() {
+    if (!buildRequest) return;
+    setSaveState("saving");
+    try {
+      const gamesAnalyzed = (report.report.metadata as Record<string, unknown>).games_selected as number ?? 0;
+      await saveReport({
+        cache_hash: report.cache_hash,
+        username,
+        games_analyzed: gamesAnalyzed,
+        request_params: buildRequest,
+      });
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+      setTimeout(() => setSaveState("idle"), 2000);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between rounded-md border bg-white p-4 text-sm text-slate-600">
@@ -157,14 +195,34 @@ function ReportDashboard({ report, username }: { report: ReportBuildResponse; us
           Cache <span className="font-medium text-slate-950">{report.cache_hit ? "hit" : "miss"}</span>
           {" · "}hash <span className="font-mono text-xs">{report.cache_hash.slice(0, 12)}</span>
         </span>
-        <Link to={studyUrl}>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <Network className="h-3.5 w-3.5" /> Opening Study Tree
-          </button>
-        </Link>
+        <div className="flex items-center gap-2">
+          {buildRequest ? (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saveState === "saving" || saveState === "saved"}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {saveState === "saving" ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+              ) : saveState === "saved" ? (
+                <><BookmarkCheck className="h-3.5 w-3.5 text-green-600" /> Saved</>
+              ) : saveState === "error" ? (
+                <>Error</>
+              ) : (
+                <><Bookmark className="h-3.5 w-3.5" /> Save</>
+              )}
+            </button>
+          ) : null}
+          <Link to={studyUrl}>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Network className="h-3.5 w-3.5" /> Opening Study Tree
+            </button>
+          </Link>
+        </div>
       </div>
       <SkillRadarChart data={charts.skill_profile} />
       <FavouriteOpeningsChart data={charts.favourite_openings} />

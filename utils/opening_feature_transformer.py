@@ -27,7 +27,7 @@ FEATURE_START_PLY = 6
 # ---------------------------------------------------------------------------
 BREADTH_DEPTH = 8          # shallow engine depth used only for branching estimation
 BREADTH_MULTIPV = 6        # how many top moves to sample per position
-BREADTH_CP_THRESHOLD = 40  # cp gap from best; larger = more "reasonable" replies counted
+BREADTH_CP_THRESHOLD = 120  # cp gap from best; larger = more "reasonable" replies counted
 # With plies=4, fanout=3, own=2: worst-case unique nodes ≈ 3+6+18+36 = 63, well under budget.
 BREADTH_MAX_PLIES = 4      # extra plies to walk past the start position
 BREADTH_MAX_FANOUT = 3     # opponent side: sum over at most this many reasonable replies
@@ -1124,6 +1124,14 @@ def compute_line_features(
     if cache is None:
         cache = {}
     boards, moves = replay_boards(line.uci)
+    boards, moves = extend_boards_to_middlegame(
+        boards,
+        moves,
+        engine,
+        limit=limit,
+        multipv=multipv,
+        cache=cache,
+    )
     position_infos = [
         analyse_position(engine, board, limit=limit, multipv=multipv, cache=cache)
         for board in boards
@@ -1204,6 +1212,42 @@ def compute_line_features(
         black_material_imbalance=side_features[chess.BLACK]["material_imbalance"],
         black_endgame_likelihood_proxy=side_features[chess.BLACK]["endgame_likelihood_proxy"],
     )
+
+
+def extend_boards_to_middlegame(
+    boards: list[chess.Board],
+    moves: list[chess.Move],
+    engine: Any,
+    *,
+    limit: chess.engine.Limit,
+    multipv: int,
+    cache: dict[str, EnginePositionInfo],
+    target_ply: int = MIDGAME_PLY,
+) -> tuple[list[chess.Board], list[chess.Move]]:
+    """Extend short book lines with engine choices until a common middlegame ply."""
+    if not boards:
+        return boards, moves
+
+    extended_boards = [board.copy() for board in boards]
+    extended_moves = list(moves)
+    board = extended_boards[-1].copy()
+
+    while board.ply() < target_ply and not board.is_game_over():
+        info = analyse_position(engine, board, limit=limit, multipv=multipv, cache=cache)
+        move_uci = info.top_moves[0].move_uci if info.top_moves else None
+        if move_uci is None:
+            break
+        try:
+            move = chess.Move.from_uci(move_uci)
+        except ValueError:
+            break
+        if move not in board.legal_moves:
+            break
+        extended_moves.append(move)
+        board.push(move)
+        extended_boards.append(board.copy())
+
+    return extended_boards, extended_moves
 
 
 def aggregate_line_features(features: Iterable[LineFeatureVector], *, opening_name: Optional[str] = None) -> OpeningGroupFeatureVector:
@@ -1344,7 +1388,7 @@ def worst_case_line_count(
     plies_left: int,
     max_fanout: int,
     cache: dict[str, EnginePositionInfo],
-    memo: dict[tuple[str, int], int],
+    memo: dict[tuple[str, int, chess.Color], int],
     budget: list[int],
 ) -> int:
     """Bounded min-sum AND/OR tree estimating worst-case memorisation burden.
@@ -1362,7 +1406,7 @@ def worst_case_line_count(
     if plies_left == 0 or board.is_game_over():
         return 1
 
-    key = (board.fen(), plies_left)
+    key = (board.fen(), plies_left, studied_color)
     if key in memo:
         return memo[key]
 
@@ -1491,7 +1535,7 @@ def compute_breadth_for_groups(
         log2_values: dict[chess.Color, float] = {}
         raw_int_values: dict[chess.Color, int] = {}
         for studied_color in (chess.WHITE, chess.BLACK):
-            memo: dict[tuple[str, int], int] = {}
+            memo: dict[tuple[str, int, chess.Color], int] = {}
             budget: list[int] = [breadth_node_budget]
             raw_count = worst_case_line_count(
                 start_board.copy(),

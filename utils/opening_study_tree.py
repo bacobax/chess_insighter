@@ -27,15 +27,8 @@ from typing import Any, Optional, Sequence
 import chess
 
 from utils.opening_feature_transformer import (
-    BREADTH_CP_THRESHOLD,
-    BREADTH_DEPTH,
-    BREADTH_MAX_FANOUT,
-    BREADTH_MAX_PLIES,
-    BREADTH_MULTIPV,
-    BREADTH_NODE_BUDGET,
     MATCHER_COLUMNS_V2,
     opening_vector_for_color,
-    worst_case_line_count,
 )
 
 
@@ -311,7 +304,7 @@ def _load_all_lines(opening_vectors_path: str) -> tuple[dict[str, Any], ...]:
 def _compute_global_priors(
     fv_rows: Sequence[dict[str, Any]],
 ) -> tuple[float, float]:
-    """Return (median_structure_diversity, median_final_structure_entropy) across all families.
+    """Return (median_structure_diversity, median_final_structure_entropy).
 
     Used as a Bayesian prior to shrink sparse-family structure signals toward the
     dataset centre, preventing under-catalogued lines from scoring as "perfectly
@@ -324,14 +317,19 @@ def _compute_global_priors(
         mid = n // 2
         return (values[mid - 1] + values[mid]) / 2.0 if n % 2 == 0 else values[mid]
 
+    richer_rows = [
+        row for row in fv_rows
+        if int(row.get("line_count") or 0) >= 2
+    ]
+    prior_rows = richer_rows or list(fv_rows)
     diversities = sorted(
         float(row["structure_diversity"])
-        for row in fv_rows
+        for row in prior_rows
         if row.get("structure_diversity") is not None
     )
     entropies = sorted(
         float(row["final_structure_entropy"])
-        for row in fv_rows
+        for row in prior_rows
         if row.get("final_structure_entropy") is not None
     )
     return _median(diversities), _median(entropies)
@@ -352,144 +350,6 @@ def _safe_uci_tokens(uci_line: str | None) -> list[str]:
         board.push(move)
         tokens.append(token)
     return tokens
-
-
-# ---------------------------------------------------------------------------
-# Live min-sum AND/OR book walk
-# ---------------------------------------------------------------------------
-
-
-WC_HORIZON_PLIES = 6
-
-
-def _book_worst_case(
-    lines: list[list[str]],
-    depth: int,
-    studied_is_white: bool,
-    *,
-    current_sequence: list[str],
-    engine_ext: Any = None,
-    min_or_lines: int = 5,
-    or_coverage_fraction: float = 0.10,
-    max_depth: int | None = None,
-) -> int:
-    """Exact min-sum AND/OR worst-case line count driven by the opening book.
-
-    ``lines`` is the subset of all-TSV ``_uci_moves`` lists that share the same
-    first ``depth`` moves (i.e. all pass through the current position).
-    ``depth`` is the ply index of the next move to examine.
-
-    OR node  (studied side to move): min over recorded next-move groups that pass
-        the viability filter: a move is viable if its sub-group has at least
-        ``max(min_or_lines, or_coverage_fraction × max_group_size)`` entries.
-        This filters out fringe/novelty moves (e.g. 1...Na6 to 1.e4, or
-        1...g5 with 4 lines vs 1...e5 with 1028) analogous to the engine walk's
-        cp-threshold filter.  If no candidate passes the filter the fallback
-        includes all candidates (so sparse positions always return a finite value).
-    AND node (opponent to move):     sum over ALL recorded next-move groups
-        (no cap — every recorded opponent reply must be covered).
-    Horizon (depth >= max_depth): return the number of distinct next moves still
-        recorded in the book (branching factor), or 1 if no continuations remain.
-        This prevents the walk from collapsing to trivial values in sparse
-        deep book territory.
-    Leaf (no further recorded continuations): call ``engine_ext(sequence)``
-        if an engine extension is provided, otherwise return 1.
-    """
-    if max_depth is not None and depth >= max_depth:
-        seen: set[str] = set()
-        for line in lines:
-            if len(line) > depth:
-                seen.add(line[depth])
-        return max(1, len(seen))
-
-    # Group lines by the move at index `depth`
-    by_move: dict[str, list[list[str]]] = {}
-    for line in lines:
-        if len(line) > depth:
-            m = line[depth]
-            if m not in by_move:
-                by_move[m] = []
-            by_move[m].append(line)
-
-    if not by_move:
-        # Book leaf: no further recorded continuations at this position.
-        if engine_ext is not None:
-            return engine_ext(current_sequence)
-        return 1
-
-    # depth 0 = initial position, White to move.
-    # Even depth => White to move; odd depth => Black to move.
-    white_to_move = (depth % 2 == 0)
-    studied_to_move = (white_to_move == studied_is_white)
-
-    if studied_to_move:
-        # OR node: player picks the single line that minimises memorisation burden.
-        # Viability threshold: >= max(min_or_lines, fraction of most-covered reply).
-        max_sub = max(len(sub) for sub in by_move.values())
-        threshold = max(min_or_lines, int(max_sub * or_coverage_fraction))
-        viable = {m: sub for m, sub in by_move.items() if len(sub) >= threshold}
-        if not viable:
-            viable = by_move  # fallback: all candidates if none meet the threshold
-        child_vals = [
-            _book_worst_case(
-                sub_lines, depth + 1, studied_is_white,
-                current_sequence=current_sequence + [m],
-                engine_ext=engine_ext,
-                min_or_lines=min_or_lines,
-                or_coverage_fraction=or_coverage_fraction,
-                max_depth=max_depth,
-            )
-            for m, sub_lines in viable.items()
-        ]
-        return min(child_vals)
-    else:
-        # AND node: must be ready for every opponent reply (all recorded lines).
-        return sum(
-            _book_worst_case(
-                sub_lines, depth + 1, studied_is_white,
-                current_sequence=current_sequence + [m],
-                engine_ext=engine_ext,
-                min_or_lines=min_or_lines,
-                or_coverage_fraction=or_coverage_fraction,
-                max_depth=max_depth,
-            )
-            for m, sub_lines in by_move.items()
-        )
-
-
-def _inject_live_worst_case(
-    aggregate: dict[str, Any],
-    lines: list[list[str]],
-    *,
-    depth: int,
-    target: str,
-    prefix: list[str],
-    max_line: int,
-    engine_ext: Any = None,
-    min_or_lines: int = 5,
-    or_coverage_fraction: float = 0.10,
-) -> None:
-    """Compute a live worst-case count and write it into ``aggregate`` in-place.
-
-    This overwrites any CSV-averaged worst-case values so ``compute_node_metrics``
-    sees a correct, position-specific number instead of a stale average.
-    """
-    raw = _book_worst_case(
-        lines, depth,
-        studied_is_white=(target == "white"),
-        current_sequence=prefix,
-        engine_ext=engine_ext,
-        min_or_lines=min_or_lines,
-        or_coverage_fraction=or_coverage_fraction,
-        max_depth=depth + WC_HORIZON_PLIES,
-    )
-    worst_int_key = f"{target}_worst_line_count_raw_int"
-    worst_key = f"{target}_worst_line_count"
-    # Calibrate to [0,1] using the same log2 normaliser as line_count_score.
-    denom = math.log2(1 + max(max_line, 1))
-    live_calibrated = clamp01(math.log2(1 + raw) / denom) if denom > 0 else 0.0
-    aggregate[worst_int_key] = raw
-    aggregate[worst_key] = live_calibrated
 
 
 # ---------------------------------------------------------------------------
@@ -835,8 +695,6 @@ def _root_children_for_black(
     matcher_weights: dict[str, float] | None = None,
     prior_diversity: float = 0.5,
     prior_entropy: float = 0.5,
-    all_lines: Sequence[dict[str, Any]] | None = None,
-    engine_ext: Any = None,
 ) -> list[OpeningStudyTreeNode]:
     """At the root, when studying Black, surface the common White first moves
     (conditional recommendation): Black's repertoire depends on White's choice."""
@@ -845,19 +703,6 @@ def _root_children_for_black(
     groups: dict[str, list[dict[str, Any]]] = {}
     for move in COMMON_WHITE_FIRST_MOVES:
         groups[move] = [row for row in rows if row["_uci_moves"][:1] == [move]]
-
-    # Build per-first-move corpus of _uci_moves lists for the live worst-case walk.
-    # target is "black", so studied_is_white=False.
-    first_move_lines: dict[str, list[list[str]]] = {}
-    if all_lines is not None:
-        for line_item in all_lines:
-            uci_moves: list[str] = line_item["_uci_moves"]
-            if uci_moves:
-                fm = uci_moves[0]
-                if fm in groups:
-                    if fm not in first_move_lines:
-                        first_move_lines[fm] = []
-                    first_move_lines[fm].append(uci_moves)
 
     max_line = global_max_line
     for move_uci, grp in groups.items():
@@ -870,16 +715,6 @@ def _root_children_for_black(
         line_count = len(grp)
         if grp:
             aggregate = _aggregate_rows(grp)
-            # Inject live worst-case (AND node: White's first move, Black studying).
-            _inject_live_worst_case(
-                aggregate,
-                first_move_lines.get(move_uci, []),
-                depth=1,  # White's first move already played
-                target="black",
-                prefix=[move_uci],
-                max_line=max_line,
-                engine_ext=engine_ext,
-            )
             metrics = compute_node_metrics(
                 aggregate, player_vector, "black", line_count, max_line, weights,
                 similarity_type=similarity_type,
@@ -998,9 +833,8 @@ def get_opening_study_tree_children(
 
     ``top_k`` limits the player's own candidate moves.
     ``opponent_top_k`` limits opponent responses (defaults to ``top_k``).
-    ``engine`` is an optional open ``chess.engine.SimpleEngine`` used to extend
-    the worst-case walk beyond the book's recorded lines.  When ``None`` the walk
-    is book-only (still exact for in-book positions, leaf = 1 beyond the book).
+    ``engine`` is accepted for backward compatibility but is intentionally unused:
+    interactive expansion treats the opening feature CSV as the source of truth.
 
     Expansion uses all.tsv (3 700+ individual lines) as the candidate corpus so
     that many distinct next-moves are available per position. Feature vectors are
@@ -1032,34 +866,6 @@ def get_opening_study_tree_children(
     # Dataset-level priors for coverage shrink (see compute_node_metrics).
     prior_diversity, prior_entropy = _compute_global_priors(fv_rows)
 
-    # --- Engine extension closure for beyond-book walk (optional) ---
-    # Shared memo/cache/budget across all child nodes in this request so total
-    # engine work stays bounded even when many children hit book leaves.
-    _eng_memo: dict[tuple[str, int], int] = {}
-    _eng_cache: dict[str, Any] = {}
-    _eng_budget: list[int] = [BREADTH_NODE_BUDGET]
-    _eng_limit = chess.engine.Limit(depth=BREADTH_DEPTH) if engine is not None else None
-    _studied_chess_color = chess.WHITE if target == "white" else chess.BLACK
-
-    def _engine_ext(sequence: list[str]) -> int:
-        if engine is None or _eng_budget[0] <= 0:
-            return 1
-        try:
-            ext_board = _board_for_prefix(sequence)
-        except ValueError:
-            return 1
-        return worst_case_line_count(
-            ext_board, _studied_chess_color, engine,
-            limit=_eng_limit,
-            multipv=BREADTH_MULTIPV,
-            cp_threshold=BREADTH_CP_THRESHOLD,
-            plies_left=BREADTH_MAX_PLIES,
-            max_fanout=BREADTH_MAX_FANOUT,
-            cache=_eng_cache,
-            memo=_eng_memo,
-            budget=_eng_budget,
-        )
-
     if target == "black" and len(prefix) == 0:
         nodes = _root_children_for_black(
             player, fv_rows, weights, global_max_line,
@@ -1068,8 +874,6 @@ def get_opening_study_tree_children(
             matcher_weights=matcher_weights,
             prior_diversity=prior_diversity,
             prior_entropy=prior_entropy,
-            all_lines=all_lines,
-            engine_ext=_engine_ext,
         )
         return nodes[:opp_k] if opp_k < len(nodes) else nodes
 
@@ -1086,8 +890,6 @@ def get_opening_study_tree_children(
     # next_move -> ordered list of unique families (first-seen order preserves
     # rough popularity since all.tsv is ordered by eco/name).
     groups: dict[str, dict[str, dict[str, Any]]] = {}  # move -> {family: fv}
-    # Also collect ALL _uci_moves lists per group for the live worst-case walk.
-    group_lines: dict[str, list[list[str]]] = {}
     for line in all_lines:
         moves: list[str] = line["_uci_moves"]
         if len(moves) <= depth or moves[:depth] != prefix:
@@ -1099,12 +901,9 @@ def get_opening_study_tree_children(
             continue
         if next_move not in groups:
             groups[next_move] = {}
-            group_lines[next_move] = []
         # Keep only one entry per family (first seen = highest-priority line).
         if family not in groups[next_move]:
             groups[next_move][family] = fv
-        # Collect every uci_moves list for the live worst-case walk.
-        group_lines[next_move].append(moves)
 
     if not groups:
         return []
@@ -1133,18 +932,6 @@ def get_opening_study_tree_children(
         fv_list = list(family_fvs.values())
         line_count = _group_line_count(family_fvs)
         aggregate = _aggregate_rows(fv_list)
-
-        # Inject a live, position-accurate worst-case count, overriding the
-        # CSV-averaged value that compute_node_metrics would otherwise use.
-        _inject_live_worst_case(
-            aggregate,
-            group_lines.get(next_move_uci, []),
-            depth=depth + 1,
-            target=target,
-            prefix=prefix + [next_move_uci],
-            max_line=max_line,
-            engine_ext=_engine_ext,
-        )
 
         metrics = compute_node_metrics(
             aggregate, player, target, line_count, max_line, weights,
