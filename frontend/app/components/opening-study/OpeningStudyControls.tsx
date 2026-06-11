@@ -28,11 +28,12 @@ export type StudyControlsState = {
 };
 
 export const DEFAULT_WEIGHTS: Required<OpeningStudyWeights> = {
-  playerStyleMatch: 0.4,
-  aggressiveness: 0.18,
-  gambleness: 0.12,
-  systemness: 0.15,
-  memorySimplicity: 0.15,
+  playerStyleMatch: 0.32,
+  engineSoundness: 0.18,
+  aggressiveness: 0.15,
+  gambleness: 0.10,
+  systemness: 0.13,
+  memorySimplicity: 0.12,
 };
 
 export const DEFAULT_MATCHER_WEIGHTS: Record<MatcherFeatureKey, number> = {
@@ -52,6 +53,7 @@ type WeightKey = keyof Required<OpeningStudyWeights>;
 // Descriptions shown as tooltips on the score weight labels.
 const WEIGHT_DESCRIPTIONS: Record<WeightKey, string> = {
   playerStyleMatch: "How closely this opening matches your playing style across all 9 dimensions.",
+  engineSoundness: "Stockfish centipawn utility from your target color's perspective. Equal positions are 50%; losing positions drop toward 0%.",
   aggressiveness: "35 × tactical density + 25 × complexity + 20 × opp-side castling + 20 × material imbalance.",
   gambleness: "40 × material imbalance + 35 × tactical density + 25 × complexity.",
   systemness: "65 × (1 − entropy) + 35 × (1 − diversity) — higher means more principled, repeatable positions.",
@@ -91,6 +93,7 @@ const MATCHER_FEATURE_FIELDS: Array<{ key: MatcherFeatureKey; label: string; col
 
 const WEIGHT_FIELDS: { key: WeightKey; label: string; color: string }[] = [
   { key: "playerStyleMatch", label: "Style",         color: "#2563eb" },
+  { key: "engineSoundness",  label: "Engine",        color: "#0f766e" },
   { key: "aggressiveness",   label: "Aggro",         color: "#dc2626" },
   { key: "gambleness",       label: "Gamble",        color: "#d97706" },
   { key: "systemness",       label: "System",        color: "#059669" },

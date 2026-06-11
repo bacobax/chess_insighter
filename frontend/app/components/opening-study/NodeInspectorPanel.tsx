@@ -32,6 +32,13 @@ const METRIC_SECTIONS: Array<{
   isCost?: boolean;
 }> = [
   {
+    key: "engineSoundness",
+    statKey: "engineSoundness",
+    label: "Engine soundness",
+    color: "#0f766e",
+    description: "Stockfish centipawn utility from the target color's perspective. Equal is 50%; lossy positions drop toward 0%.",
+  },
+  {
     key: "aggressiveness",
     statKey: "aggressiveness",
     label: "Aggressiveness",
@@ -139,8 +146,9 @@ function StyleProfileSection({
 }
 
 function formatRawValue(comp: MetricComponent): string {
-  if (comp.rawValue === undefined) return `${(clamp01(comp.value) * 100).toFixed(1)}%`;
+  if (comp.rawValue == null) return `${(clamp01(comp.value) * 100).toFixed(1)}%`;
   if (comp.rawUnit === "lines") return `${Math.round(comp.rawValue)} lines`;
+  if (comp.rawUnit === "cp") return `${comp.rawValue > 0 ? "+" : ""}${Math.round(comp.rawValue)} cp`;
   if (comp.rawUnit === "entropy" || comp.rawUnit === "diversity") return `${comp.rawValue.toFixed(3)} (pre-inv)`;
   return comp.rawValue.toFixed(4);
 }

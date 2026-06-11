@@ -3,7 +3,13 @@ import { Loader2 } from "lucide-react";
 import { fetchOpeningStudyChildren } from "~/lib/api";
 import type { OpeningStudyTreeNode } from "~/lib/types";
 import type { StudyControlsState } from "./OpeningStudyControls";
-import { NODE_HEIGHT, NODE_WIDTH, OpeningStudyNode } from "./OpeningStudyNode";
+import {
+  EXPANDED_NODE_HEIGHT,
+  EXPANDED_NODE_WIDTH,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  OpeningStudyNode,
+} from "./OpeningStudyNode";
 
 type Entry = {
   node: OpeningStudyTreeNode;
@@ -20,11 +26,22 @@ type Positioned = {
 
 type Edge = { id: string; x1: number; y1: number; x2: number; y2: number };
 
-const COL = NODE_WIDTH + 90;
-const ROW = NODE_HEIGHT + 32;
+const COMPACT_COL = NODE_WIDTH + 100;
+const COMPACT_ROW = NODE_HEIGHT + 28;
+const EXPANDED_GAP_X = 36;
+const EXPANDED_GAP_Y = 28;
+const EXPANDED_COL = EXPANDED_NODE_WIDTH + EXPANDED_GAP_X;
+const EXPANDED_ROW = EXPANDED_NODE_HEIGHT + EXPANDED_GAP_Y;
 
 function nodeId(node: OpeningStudyTreeNode): string {
   return node.prefixUci.join("/");
+}
+
+function hasExpandedEntry(entries: Entry[]): boolean {
+  return entries.some((entry) => {
+    if (entry.children !== null && entry.children.length > 0) return true;
+    return entry.children ? hasExpandedEntry(entry.children) : false;
+  });
 }
 
 // Recursively reconcile an immutable Entry tree: replaces the entry whose node
@@ -43,10 +60,13 @@ function updateEntry(entries: Entry[], targetId: string, fn: (entry: Entry) => E
 function layout(roots: Entry[]): { positioned: Positioned[]; edges: Edge[]; width: number; height: number } {
   const positioned: Positioned[] = [];
   const edges: Edge[] = [];
+  const reservesExpandedCards = hasExpandedEntry(roots);
+  const col = reservesExpandedCards ? EXPANDED_COL : COMPACT_COL;
+  const row = reservesExpandedCards ? EXPANDED_ROW : COMPACT_ROW;
   let leafCursor = 0;
 
   function place(entry: Entry, depth: number): number {
-    const x = depth * COL;
+    const x = depth * col;
     let y: number;
     const visibleChildren = entry.children && entry.children.length > 0 ? entry.children : null;
     if (visibleChildren) {
@@ -58,12 +78,12 @@ function layout(roots: Entry[]): { positioned: Positioned[]; edges: Edge[]; widt
           id: `${nodeId(entry.node)}->${childId}`,
           x1: x + NODE_WIDTH,
           y1: y + NODE_HEIGHT / 2,
-          x2: (depth + 1) * COL,
+          x2: (depth + 1) * col,
           y2: childYs[i] + NODE_HEIGHT / 2,
         });
       }
     } else {
-      y = leafCursor * ROW;
+      y = leafCursor * row;
       leafCursor += 1;
     }
     positioned.push({ entry, x, y, depth });
@@ -87,6 +107,7 @@ type Props = {
 export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, onPlayerVectorLoad }: Props) {
   const [roots, setRoots] = useState<Entry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [rootLoading, setRootLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const playerVectorLoadedRef = useRef(false);
@@ -114,6 +135,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
   useEffect(() => {
     setRoots([]);
     setSelectedId(null);
+    setHoveredId(null);
     setError(null);
     setView({ tx: 40, ty: 40, scale: 1 });
     onNodeSelect?.(null);
@@ -168,6 +190,8 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
     [requestBase],
   );
 
+  // Select a node (updates inspector panel) and expand it if not yet expanded.
+  // Re-clicking an already-expanded node no longer collapses it; use the × badge.
   const onSelect = useCallback(
     (entry: Entry) => {
       const id = nodeId(entry.node);
@@ -176,26 +200,34 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
       if (entry.loading) return;
       if (entry.children === null) {
         void expand(entry);
-      } else if (entry.children.length > 0) {
-        // Collapse an already-expanded branch.
-        setRoots((prev) => updateEntry(prev, id, (e) => ({ ...e, children: null })));
       }
+      // Intentionally no collapse on re-click: use the dedicated × badge.
     },
     [expand, onNodeSelect],
   );
+
+  // Explicitly collapse a branch from its root node.
+  const onCollapse = useCallback((entry: Entry) => {
+    const id = nodeId(entry.node);
+    setRoots((prev) => updateEntry(prev, id, (e) => ({ ...e, children: null })));
+  }, []);
+
+  const onHoverChange = useCallback((id: string, hovered: boolean) => {
+    setHoveredId(hovered ? id : (prev) => (prev === id ? null : prev));
+  }, []);
 
   const { positioned, edges, width, height } = useMemo(() => layout(roots), [roots]);
 
   // --- pan / zoom handlers -------------------------------------------------
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0) return;
+    // Clear any hover card when the user starts a canvas drag.
+    setHoveredId(null);
     dragRef.current = { x: event.clientX, y: event.clientY, tx: view.tx, ty: view.ty };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: React.PointerEvent) => {
     if (!dragRef.current) return;
-    // Capture ref and event values synchronously — dragRef.current is nulled by
-    // onPointerUp and event properties may be stale if the updater runs lazily.
     const { tx: startTx, ty: startTy, x: startX, y: startY } = dragRef.current;
     const clientX = event.clientX;
     const clientY = event.clientY;
@@ -210,9 +242,6 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
   };
   const onWheel = (event: React.WheelEvent) => {
     event.preventDefault();
-    // Read DOM/event values before the state updater — React nullifies
-    // currentTarget after the handler returns, so reading it inside a
-    // lazy setView updater (which may run during a later render) crashes.
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const cx = event.clientX - rect.left;
     const cy = event.clientY - rect.top;
@@ -283,7 +312,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
               <div
                 key={id}
                 className="absolute"
-                style={{ left: x, top: y }}
+                style={{ left: x, top: y, zIndex: hoveredId === id || (entry.children !== null && entry.children.length > 0) ? 50 : 0 }}
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <OpeningStudyNode
@@ -293,6 +322,8 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
                   expanded={entry.children !== null && entry.children.length > 0}
                   loading={entry.loading}
                   onSelect={() => onSelect(entry)}
+                  onCollapse={() => onCollapse(entry)}
+                  onHoverChange={(hovered) => onHoverChange(id, hovered)}
                 />
               </div>
             );

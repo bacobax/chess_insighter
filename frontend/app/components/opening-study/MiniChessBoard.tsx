@@ -5,7 +5,7 @@ import { useMemo } from "react";
 // of nodes at once and many full board widgets would be heavy. This is pure
 // CSS/Unicode and cheap to mount.
 
-const PIECE_GLYPHS: Record<string, string> = {
+export const PIECE_GLYPHS: Record<string, string> = {
   K: "♔",
   Q: "♕",
   R: "♖",

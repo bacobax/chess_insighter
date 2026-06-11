@@ -4,10 +4,10 @@ This is an *additive* analysis module. It powers an interactive, lazily-expanded
 decision tree that suggests which opening moves a given player should study,
 based on calibrated opening feature vectors and a precomputed player vector.
 
-It is **not** an engine-best-move tree. Nodes are scored on style matching and
+It is **not** an engine-best-move tree. Nodes are scored on style matching,
 calibrated opening characteristics (aggressiveness, gambit volatility proxy,
-memorisation cost, systemness). Engine soundness can be layered on later but must
-not dominate this feature.
+memorisation cost, systemness), and an optional bounded Stockfish soundness
+utility so stylistic matches that are simply losing can be demoted.
 
 The module is intentionally dependency-light (csv, math, python-chess) and does
 not import from the FastAPI ``backend`` package so it can be reused from scripts,
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import chess
+import chess.engine
 
 from utils.opening_feature_transformer import (
     MATCHER_COLUMNS_V2,
@@ -54,12 +55,16 @@ MATCHER_FEATURE_WEIGHTS: dict[str, float] = {
 # Default study-score weights. Keys map to the (snake_case) request payload.
 # Note: ``memory_simplicity`` is applied to ``(1 - memory_complexity)``.
 DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
-    "player_style_match": 0.40,
-    "aggressiveness": 0.18,
-    "gambleness": 0.12,
-    "systemness": 0.15,
-    "memory_simplicity": 0.15,
+    "player_style_match": 0.32,
+    "engine_soundness": 0.18,
+    "aggressiveness": 0.15,
+    "gambleness": 0.10,
+    "systemness": 0.13,
+    "memory_simplicity": 0.12,
 }
+
+ENGINE_SOUNDNESS_NEUTRAL = 0.5
+ENGINE_SOUNDNESS_CP_SCALE = 600.0
 
 # Common White first moves shown at the root when the target colour is Black,
 # before any style-based recommendation kicks in.
@@ -117,6 +122,7 @@ class OpeningStudyTreeNode:
     gambleness: float
     memory_complexity: float
     systemness: float
+    engine_soundness: float
     study_score: float
     side_to_move: str
     target_color: str
@@ -140,6 +146,7 @@ class OpeningStudyTreeNode:
             "gambleness": self.gambleness,
             "memoryComplexity": self.memory_complexity,
             "systemness": self.systemness,
+            "engineSoundness": self.engine_soundness,
             "studyScore": self.study_score,
             "sideToMove": self.side_to_move,
             "targetColor": self.target_color,
@@ -164,6 +171,79 @@ def clamp01(value: float) -> float:
     if value != value:  # NaN guard
         return 0.0
     return max(0.0, min(1.0, value))
+
+
+def cp_to_utility(target_cp: float, cp_scale: float = ENGINE_SOUNDNESS_CP_SCALE) -> float:
+    """Map target-oriented centipawns to a bounded [0, 1] utility score."""
+    scale = cp_scale if cp_scale > 0 else ENGINE_SOUNDNESS_CP_SCALE
+    x = max(-12.0, min(12.0, float(target_cp) / scale))
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _target_color_bool(target_color: str) -> chess.Color:
+    return chess.WHITE if target_color == "white" else chess.BLACK
+
+
+def _score_to_white_cp(score: chess.engine.PovScore | None, mate_score: int = 100_000) -> int | None:
+    if score is None:
+        return None
+    return score.white().score(mate_score=mate_score)
+
+
+def evaluate_engine_soundness(
+    board: chess.Board,
+    target_color: str,
+    engine: Any | None,
+    *,
+    depth: int = 8,
+    cache: dict[str, tuple[float, float | None]] | None = None,
+    cp_scale: float = ENGINE_SOUNDNESS_CP_SCALE,
+) -> tuple[float, float | None]:
+    """Return (utility, target_cp) for the position from the target side's view.
+
+    The utility is neutral when no engine is available. Mate scores are converted
+    to large finite centipawns by python-chess, then softened by the logistic
+    transform so one extreme evaluation cannot dominate the whole study score.
+    """
+    fen = board.fen()
+    if cache is not None and fen in cache:
+        return cache[fen]
+
+    outcome = board.outcome()
+    if outcome is not None:
+        target = _target_color_bool(target_color)
+        if outcome.winner is None:
+            result = (ENGINE_SOUNDNESS_NEUTRAL, 0.0)
+        else:
+            result = (1.0 if outcome.winner == target else 0.0, None)
+        if cache is not None:
+            cache[fen] = result
+        return result
+
+    if engine is None:
+        result = (ENGINE_SOUNDNESS_NEUTRAL, None)
+        if cache is not None:
+            cache[fen] = result
+        return result
+
+    try:
+        info = engine.analyse(board, chess.engine.Limit(depth=max(1, int(depth))))
+    except Exception:
+        result = (ENGINE_SOUNDNESS_NEUTRAL, None)
+        if cache is not None:
+            cache[fen] = result
+        return result
+
+    white_cp = _score_to_white_cp(info.get("score") if isinstance(info, dict) else None)
+    if white_cp is None:
+        result = (ENGINE_SOUNDNESS_NEUTRAL, None)
+    else:
+        target_cp = float(white_cp if target_color == "white" else -white_cp)
+        result = (cp_to_utility(target_cp, cp_scale), target_cp)
+
+    if cache is not None:
+        cache[fen] = result
+    return result
 
 
 def _optional_float(value: Any) -> float | None:
@@ -481,6 +561,8 @@ def compute_node_metrics(
     compatible_line_count: int,
     max_line_count: int,
     weights: dict[str, float],
+    engine_soundness: float = ENGINE_SOUNDNESS_NEUTRAL,
+    engine_target_cp: float | None = None,
     similarity_type: str = "cosine",
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
@@ -570,11 +652,13 @@ def compute_node_metrics(
     )
 
     style = clamp01(style)
+    engine_soundness = clamp01(engine_soundness)
 
     w = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
     weight_sum = sum(abs(v) for v in w.values()) or 1.0
     study_score = (
         w["player_style_match"] * style
+        + w["engine_soundness"] * engine_soundness
         + w["aggressiveness"] * aggressiveness
         + w["gambleness"] * gambleness
         + w["systemness"] * systemness
@@ -619,6 +703,16 @@ def compute_node_metrics(
             for k in MATCHER_COLUMNS_V2
             if k in effective_matcher_weights
         ],
+        "engineSoundness": [
+            {
+                "key": "stockfish_cp",
+                "label": "Stockfish cp",
+                "value": round(engine_soundness, 4),
+                "weight": 1.0,
+                "rawValue": round(engine_target_cp, 1) if engine_target_cp is not None else None,
+                "rawUnit": "cp" if engine_target_cp is not None else None,
+            }
+        ],
         "openingFeatures": {
             k: round(float(v if v is not None else (aggregate.get(k) or 0.0)), 4)
             for k in MATCHER_COLUMNS_V2
@@ -632,6 +726,7 @@ def compute_node_metrics(
         "gambleness": gambleness,
         "memory_complexity": memory_complexity,
         "systemness": systemness,
+        "engine_soundness": engine_soundness,
         "study_score": clamp01(study_score),
         "breakdown": breakdown,
     }
@@ -695,6 +790,9 @@ def _root_children_for_black(
     matcher_weights: dict[str, float] | None = None,
     prior_diversity: float = 0.5,
     prior_entropy: float = 0.5,
+    soundness_engine: Any | None = None,
+    soundness_depth: int = 8,
+    soundness_cache: dict[str, tuple[float, float | None]] | None = None,
 ) -> list[OpeningStudyTreeNode]:
     """At the root, when studying Black, surface the common White first moves
     (conditional recommendation): Black's repertoire depends on White's choice."""
@@ -710,6 +808,13 @@ def _root_children_for_black(
         board = base_board.copy()
         san = board.san(move)
         board.push(move)
+        engine_soundness, engine_target_cp = evaluate_engine_soundness(
+            board,
+            "black",
+            soundness_engine,
+            depth=soundness_depth,
+            cache=soundness_cache,
+        )
         # Count the number of variation rows matching this first move.  Summing the
         # ``line_count`` field would over-count since variation subtrees overlap.
         line_count = len(grp)
@@ -717,6 +822,8 @@ def _root_children_for_black(
             aggregate = _aggregate_rows(grp)
             metrics = compute_node_metrics(
                 aggregate, player_vector, "black", line_count, max_line, weights,
+                engine_soundness=engine_soundness,
+                engine_target_cp=engine_target_cp,
                 similarity_type=similarity_type,
                 weighted_matching=weighted_matching,
                 matcher_weights=matcher_weights,
@@ -734,6 +841,7 @@ def _root_children_for_black(
                 "gambleness": 0.0,
                 "memory_complexity": 0.0,
                 "systemness": 0.0,
+                "engine_soundness": engine_soundness,
                 "study_score": 0.0,
                 "breakdown": {},
             }
@@ -791,6 +899,7 @@ def _make_node(
         "gambleness": metrics["gambleness"],
         "memoryComplexity": metrics["memory_complexity"],
         "systemness": metrics["systemness"],
+        "engineSoundness": metrics["engine_soundness"],
     }
     return OpeningStudyTreeNode(
         move_uci=move_uci,
@@ -806,6 +915,7 @@ def _make_node(
         gambleness=metrics["gambleness"],
         memory_complexity=metrics["memory_complexity"],
         systemness=metrics["systemness"],
+        engine_soundness=metrics["engine_soundness"],
         study_score=metrics["study_score"],
         side_to_move=_color_name(board.turn),
         target_color=target_color,
@@ -828,6 +938,8 @@ def get_opening_study_tree_children(
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
     engine: Any = None,
+    soundness_engine: Any | None = None,
+    soundness_depth: int = 8,
 ) -> list[OpeningStudyTreeNode]:
     """Compute child suggestion nodes for a single prefix (one level, lazy).
 
@@ -865,6 +977,8 @@ def get_opening_study_tree_children(
     global_max_line = _compute_global_max_line(all_lines, fv_by_family)
     # Dataset-level priors for coverage shrink (see compute_node_metrics).
     prior_diversity, prior_entropy = _compute_global_priors(fv_rows)
+    soundness_cache: dict[str, tuple[float, float | None]] = {}
+    use_soundness_engine = soundness_engine if weights.get("engine_soundness", 0.0) > 0 else None
 
     if target == "black" and len(prefix) == 0:
         nodes = _root_children_for_black(
@@ -874,6 +988,9 @@ def get_opening_study_tree_children(
             matcher_weights=matcher_weights,
             prior_diversity=prior_diversity,
             prior_entropy=prior_entropy,
+            soundness_engine=use_soundness_engine,
+            soundness_depth=soundness_depth,
+            soundness_cache=soundness_cache,
         )
         return nodes[:opp_k] if opp_k < len(nodes) else nodes
 
@@ -928,6 +1045,13 @@ def get_opening_study_tree_children(
         child_board = board.copy()
         san = child_board.san(move)
         child_board.push(move)
+        engine_soundness, engine_target_cp = evaluate_engine_soundness(
+            child_board,
+            target,
+            use_soundness_engine,
+            depth=soundness_depth,
+            cache=soundness_cache,
+        )
 
         fv_list = list(family_fvs.values())
         line_count = _group_line_count(family_fvs)
@@ -935,6 +1059,8 @@ def get_opening_study_tree_children(
 
         metrics = compute_node_metrics(
             aggregate, player, target, line_count, max_line, weights,
+            engine_soundness=engine_soundness,
+            engine_target_cp=engine_target_cp,
             similarity_type=similarity_type,
             weighted_matching=weighted_matching,
             matcher_weights=matcher_weights,

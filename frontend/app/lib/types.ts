@@ -185,6 +185,7 @@ export type MatcherFeatureKey =
 
 export type OpeningStudyWeights = {
   playerStyleMatch?: number;
+  engineSoundness?: number;
   aggressiveness?: number;
   gambleness?: number;
   systemness?: number;
@@ -215,8 +216,8 @@ export type MetricComponent = {
   label: string;
   value: number;
   weight: number;
-  rawValue?: number;
-  rawUnit?: string;
+  rawValue?: number | null;
+  rawUnit?: string | null;
 };
 
 export type StyleMatchComponent = {
@@ -232,6 +233,7 @@ export type NodeBreakdown = {
   gambleness?: MetricComponent[];
   memoryComplexity?: MetricComponent[];
   systemness?: MetricComponent[];
+  engineSoundness?: MetricComponent[];
   playerStyleMatch?: StyleMatchComponent[];
   openingFeatures?: Record<string, number>;
 };
@@ -247,6 +249,7 @@ export type OpeningStudyTreeNode = {
   representativeUci?: string | null;
   representativePgn?: string | null;
   playerStyleMatch: number;
+  engineSoundness: number;
   aggressiveness: number;
   gambleness: number;
   memoryComplexity: number;
@@ -258,6 +261,7 @@ export type OpeningStudyTreeNode = {
   boardPreviewFen: string;
   stats: {
     playerStyleMatch: number;
+    engineSoundness: number;
     aggressiveness: number;
     gambleness: number;
     memoryComplexity: number;

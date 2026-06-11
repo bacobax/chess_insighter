@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import chess
 import pytest
 
 from utils.opening_study_tree import (
     COMMON_WHITE_FIRST_MOVES,
     PlayerVectorFeatureMismatch,
     clamp01,
+    cp_to_utility,
+    evaluate_engine_soundness,
     get_opening_study_tree_children,
     load_player_vector_from_cache,
 )
@@ -28,6 +31,29 @@ def test_clamp01_bounds():
     assert clamp01(-1.0) == 0.0
     assert clamp01(2.0) == 1.0
     assert clamp01(0.5) == 0.5
+
+
+def test_cp_to_utility_is_target_oriented_and_bounded():
+    assert cp_to_utility(0) == pytest.approx(0.5)
+    assert cp_to_utility(300) > 0.5
+    assert cp_to_utility(-300) < 0.5
+    assert 0.0 < cp_to_utility(-100_000) < 0.01
+    assert 0.99 < cp_to_utility(100_000) < 1.0
+
+
+def test_evaluate_engine_soundness_orients_cp_by_target_color():
+    class FakeEngine:
+        def analyse(self, board, limit):
+            return {"score": chess.engine.PovScore(chess.engine.Cp(240), chess.WHITE)}
+
+    board = chess.Board()
+    white_score, white_cp = evaluate_engine_soundness(board, "white", FakeEngine())
+    black_score, black_cp = evaluate_engine_soundness(board, "black", FakeEngine())
+
+    assert white_cp == pytest.approx(240)
+    assert black_cp == pytest.approx(-240)
+    assert white_score > 0.5
+    assert black_score < 0.5
 
 
 def test_white_root_returns_white_first_moves(player_vector):
@@ -168,6 +194,41 @@ def test_sparse_family_no_longer_has_max_systemness():
     assert m["systemness"] < 1.0, (
         f"Expected systemness < 1.0 for 1-line family; got {m['systemness']}"
     )
+
+
+def test_engine_soundness_weight_changes_study_score():
+    weights = {
+        "player_style_match": 0.0,
+        "engine_soundness": 1.0,
+        "aggressiveness": 0.0,
+        "gambleness": 0.0,
+        "systemness": 0.0,
+        "memory_simplicity": 0.0,
+    }
+    bad = compute_node_metrics(
+        _base_aggregate(),
+        _PLAYER,
+        "white",
+        5,
+        381,
+        weights,
+        engine_soundness=0.2,
+        engine_target_cp=-800,
+    )
+    good = compute_node_metrics(
+        _base_aggregate(),
+        _PLAYER,
+        "white",
+        5,
+        381,
+        weights,
+        engine_soundness=0.8,
+        engine_target_cp=800,
+    )
+
+    assert bad["study_score"] == pytest.approx(0.2)
+    assert good["study_score"] == pytest.approx(0.8)
+    assert bad["breakdown"]["engineSoundness"][0]["rawValue"] == pytest.approx(-800)
 
 
 def test_sparse_family_no_longer_has_zero_memory_complexity():

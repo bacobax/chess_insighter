@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import chess.engine
+
 from backend.models import OpeningStudyTreeChildrenRequest
 from backend.services.cache_service import ReportCache
 from backend.settings import settings
@@ -57,9 +59,10 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
     opening_vectors_path = _resolve_opening_vectors_path(request)
     player_vector, vector_source = _resolve_player_vector(request)
     weights = request.weights.to_weights() if request.weights is not None else None
+    engine_path = settings.stockfish_path
 
-    try:
-        nodes = get_opening_study_tree_children(
+    def _compute(engine: chess.engine.SimpleEngine | None) -> list[Any]:
+        return get_opening_study_tree_children(
             player_vector=player_vector,
             opening_vectors_path=opening_vectors_path,
             target_color=request.target_color,
@@ -70,7 +73,18 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
             similarity_type=request.similarity_type,
             weighted_matching=request.weighted_matching,
             matcher_weights=request.matcher_weights,
+            soundness_engine=engine,
         )
+
+    try:
+        if engine_path is None:
+            nodes = _compute(None)
+        else:
+            try:
+                with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
+                    nodes = _compute(engine)
+            except Exception:
+                nodes = _compute(None)
     except PlayerVectorFeatureMismatch as exc:
         raise ValueError(str(exc)) from exc
 

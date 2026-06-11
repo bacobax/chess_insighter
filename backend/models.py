@@ -162,6 +162,7 @@ class OpeningMatchResponse(BaseModel):
 
 class OpeningStudyWeights(BaseModel):
     player_style_match: float | None = Field(default=None, alias="playerStyleMatch")
+    engine_soundness: float | None = Field(default=None, alias="engineSoundness")
     aggressiveness: float | None = None
     gambleness: float | None = None
     systemness: float | None = None
@@ -172,6 +173,7 @@ class OpeningStudyWeights(BaseModel):
     def to_weights(self) -> dict[str, float]:
         mapping = {
             "player_style_match": self.player_style_match,
+            "engine_soundness": self.engine_soundness,
             "aggressiveness": self.aggressiveness,
             "gambleness": self.gambleness,
             "systemness": self.systemness,
@@ -204,6 +206,7 @@ class OpeningStudyTreeChildrenRequest(BaseModel):
 
 class OpeningStudyNodeStats(BaseModel):
     playerStyleMatch: float
+    engineSoundness: float
     aggressiveness: float
     gambleness: float
     memoryComplexity: float
@@ -232,6 +235,7 @@ class NodeBreakdown(BaseModel):
     gambleness: list[MetricComponent] = Field(default_factory=list)
     memoryComplexity: list[MetricComponent] = Field(default_factory=list)
     systemness: list[MetricComponent] = Field(default_factory=list)
+    engineSoundness: list[MetricComponent] = Field(default_factory=list)
     playerStyleMatch: list[StyleMatchComponent] = Field(default_factory=list)
     openingFeatures: dict[str, float] = Field(default_factory=dict)
 
@@ -246,6 +250,7 @@ class OpeningStudyTreeNodeModel(BaseModel):
     representativeUci: str | None = None
     representativePgn: str | None = None
     playerStyleMatch: float
+    engineSoundness: float
     aggressiveness: float
     gambleness: float
     memoryComplexity: float

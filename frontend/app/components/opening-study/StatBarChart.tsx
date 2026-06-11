@@ -16,6 +16,7 @@ function clamp01(value: number): number {
 export function StatBarChart({ stats }: { stats: OpeningStudyTreeNode["stats"] }) {
   const bars: Bar[] = [
     { label: "Style", value: stats.playerStyleMatch, color: "#2563eb" },
+    { label: "Engine", value: stats.engineSoundness, color: "#0f766e" },
     { label: "Aggro", value: stats.aggressiveness, color: "#dc2626" },
     { label: "Gamble", value: stats.gambleness, color: "#d97706" },
     { label: "Memory", value: stats.memoryComplexity, color: "#7c3aed", isCost: true },
