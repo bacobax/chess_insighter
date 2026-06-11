@@ -359,6 +359,9 @@ def _safe_uci_tokens(uci_line: str | None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+WC_HORIZON_PLIES = 6
+
+
 def _book_worst_case(
     lines: list[list[str]],
     depth: int,
@@ -366,8 +369,9 @@ def _book_worst_case(
     *,
     current_sequence: list[str],
     engine_ext: Any = None,
-    min_or_lines: int = 3,
-    or_coverage_fraction: float = 0.01,
+    min_or_lines: int = 5,
+    or_coverage_fraction: float = 0.10,
+    max_depth: int | None = None,
 ) -> int:
     """Exact min-sum AND/OR worst-case line count driven by the opening book.
 
@@ -384,9 +388,20 @@ def _book_worst_case(
         includes all candidates (so sparse positions always return a finite value).
     AND node (opponent to move):     sum over ALL recorded next-move groups
         (no cap — every recorded opponent reply must be covered).
+    Horizon (depth >= max_depth): return the number of distinct next moves still
+        recorded in the book (branching factor), or 1 if no continuations remain.
+        This prevents the walk from collapsing to trivial values in sparse
+        deep book territory.
     Leaf (no further recorded continuations): call ``engine_ext(sequence)``
         if an engine extension is provided, otherwise return 1.
     """
+    if max_depth is not None and depth >= max_depth:
+        seen: set[str] = set()
+        for line in lines:
+            if len(line) > depth:
+                seen.add(line[depth])
+        return max(1, len(seen))
+
     # Group lines by the move at index `depth`
     by_move: dict[str, list[list[str]]] = {}
     for line in lines:
@@ -422,6 +437,7 @@ def _book_worst_case(
                 engine_ext=engine_ext,
                 min_or_lines=min_or_lines,
                 or_coverage_fraction=or_coverage_fraction,
+                max_depth=max_depth,
             )
             for m, sub_lines in viable.items()
         ]
@@ -435,6 +451,7 @@ def _book_worst_case(
                 engine_ext=engine_ext,
                 min_or_lines=min_or_lines,
                 or_coverage_fraction=or_coverage_fraction,
+                max_depth=max_depth,
             )
             for m, sub_lines in by_move.items()
         )
@@ -449,8 +466,8 @@ def _inject_live_worst_case(
     prefix: list[str],
     max_line: int,
     engine_ext: Any = None,
-    min_or_lines: int = 3,
-    or_coverage_fraction: float = 0.01,
+    min_or_lines: int = 5,
+    or_coverage_fraction: float = 0.10,
 ) -> None:
     """Compute a live worst-case count and write it into ``aggregate`` in-place.
 
@@ -464,6 +481,7 @@ def _inject_live_worst_case(
         engine_ext=engine_ext,
         min_or_lines=min_or_lines,
         or_coverage_fraction=or_coverage_fraction,
+        max_depth=depth + WC_HORIZON_PLIES,
     )
     worst_int_key = f"{target}_worst_line_count_raw_int"
     worst_key = f"{target}_worst_line_count"
