@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.models import SavedReportEntry
 from backend.settings import settings
+
+_lock = threading.Lock()
 
 
 def _now_iso() -> str:
@@ -40,19 +43,21 @@ class SavedReportsIndex:
         return result
 
     def upsert(self, entry: SavedReportEntry) -> None:
-        raw = self._load_raw()
-        for existing in raw:
-            if existing.get("cache_hash") == entry.cache_hash:
-                existing["last_refreshed_at"] = entry.last_refreshed_at
-                self._save_raw(raw)
-                return
-        raw.insert(0, entry.model_dump())
-        self._save_raw(raw)
+        with _lock:
+            raw = self._load_raw()
+            for existing in raw:
+                if existing.get("cache_hash") == entry.cache_hash:
+                    existing["last_refreshed_at"] = entry.last_refreshed_at
+                    self._save_raw(raw)
+                    return
+            raw.insert(0, entry.model_dump())
+            self._save_raw(raw)
 
     def delete(self, cache_hash: str) -> None:
-        raw = self._load_raw()
-        raw = [item for item in raw if item.get("cache_hash") != cache_hash]
-        self._save_raw(raw)
+        with _lock:
+            raw = self._load_raw()
+            raw = [item for item in raw if item.get("cache_hash") != cache_hash]
+            self._save_raw(raw)
 
 
 def save_report_entry(
