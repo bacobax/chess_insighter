@@ -17,8 +17,10 @@ from backend.models import (
     OpeningStudyTreeChildrenResponse,
     ReportBuildRequest,
     ReportBuildResponse,
+    SavedReportsList,
 )
 from backend.services.cache_service import ReportCache
+from backend.services.saved_reports_service import SavedReportsIndex
 from backend.services.chesscom_service import ChessComServiceError, UnknownChessComUser, query_games, summarize_games
 from backend.services.hparams_service import load_hparams
 from backend.services.opening_study_service import opening_study_tree_children
@@ -124,3 +126,13 @@ def report_cache(cache_hash: str) -> ReportBuildResponse:
         raise HTTPException(status_code=404, detail="Report cache entry not found")
     cached["cache_hit"] = True
     return ReportBuildResponse.model_validate(cached)
+
+
+@app.get("/api/reports/saved", response_model=SavedReportsList)
+def list_saved_reports() -> SavedReportsList:
+    return SavedReportsList(entries=SavedReportsIndex().load())
+
+
+@app.delete("/api/reports/saved/{cache_hash}", status_code=204)
+def delete_saved_report(cache_hash: str) -> None:
+    SavedReportsIndex().delete(cache_hash)

@@ -299,3 +299,16 @@ class ReportBuildResponse(BaseModel):
     cache_hit: bool
     normalized_hparams: JsonObject
     report: ReportPayload
+
+
+class SavedReportEntry(BaseModel):
+    cache_hash: str
+    username: str
+    created_at: str
+    last_refreshed_at: str
+    games_analyzed: int
+    request_params: JsonObject
+
+
+class SavedReportsList(BaseModel):
+    entries: list[SavedReportEntry]

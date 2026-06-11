@@ -5,6 +5,7 @@ import { Search } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
+import { SavedReportsList } from "./saved-reports-list";
 
 export function UsernameForm() {
   const [username, setUsername] = useState("");
@@ -23,7 +24,7 @@ export function UsernameForm() {
 
   return (
     <main className="min-h-screen px-4 py-10" style={{ color: "var(--ink)" }}>
-      <section className="mx-auto flex min-h-[80vh] max-w-lg items-center">
+      <div className="mx-auto flex min-h-[80vh] max-w-lg flex-col items-center justify-center gap-6">
         <Card className="w-full">
           <CardHeader className="pb-3">
             <div className="mb-2 text-center text-sm tracking-widest uppercase" style={{ color: "var(--ink-faint)", letterSpacing: "0.2em" }}>
@@ -58,7 +59,8 @@ export function UsernameForm() {
             {error ? <p className="mt-3 text-sm" style={{ color: "var(--accent)" }}>{error}</p> : null}
           </CardContent>
         </Card>
-      </section>
+        <SavedReportsList />
+      </div>
     </main>
   );
 }

@@ -1,9 +1,20 @@
 import { useState } from "react";
 import { PlayerReport } from "./player-report";
-import type { Hparams } from "~/lib/types";
+import type { PlayerReportInitialParams } from "./player-report";
+import type { Hparams, ReportBuildResponse } from "~/lib/types";
 import { Input } from "~/components/ui/input";
 
-export function CompareReportView({ username: initialUsername, defaultHparams }: { username: string; defaultHparams: Hparams }) {
+export function CompareReportView({
+  username: initialUsername,
+  defaultHparams,
+  initialReport,
+  initialParams,
+}: {
+  username: string;
+  defaultHparams: Hparams;
+  initialReport?: ReportBuildResponse;
+  initialParams?: PlayerReportInitialParams;
+}) {
   const [primaryUsername, setPrimaryUsername] = useState(initialUsername);
   const [compare, setCompare] = useState(false);
   const [other, setOther] = useState("");
@@ -26,7 +37,16 @@ export function CompareReportView({ username: initialUsername, defaultHparams }:
         ) : null}
       </div>
       <div className={compare && other.trim() ? "grid gap-6 lg:grid-cols-2" : ""}>
-        {primaryUsername.trim() ? <PlayerReport username={primaryUsername.trim()} defaultHparams={defaultHparams} /> : <div />}
+        {primaryUsername.trim() ? (
+          <PlayerReport
+            username={primaryUsername.trim()}
+            defaultHparams={defaultHparams}
+            initialReport={initialReport}
+            initialParams={initialParams}
+          />
+        ) : (
+          <div />
+        )}
         {compare && other.trim() ? <PlayerReport username={other.trim()} defaultHparams={defaultHparams} /> : null}
       </div>
     </div>

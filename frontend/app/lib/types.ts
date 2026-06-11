@@ -145,6 +145,19 @@ export type ReportBuildResponse = {
   report: ReportPayload;
 };
 
+export type SavedReportEntry = {
+  cache_hash: string;
+  username: string;
+  created_at: string;
+  last_refreshed_at: string;
+  games_analyzed: number;
+  request_params: ReportBuildRequest & Record<string, JsonValue>;
+};
+
+export type SavedReportsList = {
+  entries: SavedReportEntry[];
+};
+
 // ---------------------------------------------------------------------------
 // Opening Study Suggestion Tree
 // ---------------------------------------------------------------------------

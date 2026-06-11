@@ -6,23 +6,44 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Progress } from "~/components/ui/progress";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
 import { buildReport, rematchOpenings } from "~/lib/api";
-import type { Hparams, OpeningMatch, OpeningMatchMode, OpeningReportGroup, ReportBuildResponse } from "~/lib/types";
+import type { Hparams, OpeningMatch, OpeningMatchMode, OpeningReportGroup, ReportBuildRequest, ReportBuildResponse } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 import { OpeningBoardPreview } from "./opening-board-preview";
 import { ReportConfigForm } from "./report-config-form";
 
-export function PlayerReport({ username, defaultHparams }: { username: string; defaultHparams: Hparams }) {
-  const [hparams, setHparams] = useState<Hparams>(defaultHparams);
-  const [maxGames, setMaxGames] = useState(20);
-  const [timeClass, setTimeClass] = useState<string>("all");
-  const [ratedFilter, setRatedFilter] = useState<string>("all");
-  const [sinceYear, setSinceYear] = useState<number | "">("");
-  const [sinceMonth, setSinceMonth] = useState<number | "">("");
+export type PlayerReportInitialParams = Pick<
+  ReportBuildRequest,
+  "max_games" | "engine_depth" | "use_engine" | "time_classes" | "rated_filter" | "since_year" | "since_month" | "hparams"
+>;
+
+export function PlayerReport({
+  username,
+  defaultHparams,
+  initialReport,
+  initialParams,
+}: {
+  username: string;
+  defaultHparams: Hparams;
+  initialReport?: ReportBuildResponse;
+  initialParams?: PlayerReportInitialParams;
+}) {
+  const [hparams, setHparams] = useState<Hparams>(initialParams?.hparams ?? defaultHparams);
+  const [maxGames, setMaxGames] = useState(initialParams?.max_games ?? 20);
+  const [timeClass, setTimeClass] = useState<string>(
+    initialParams?.time_classes && initialParams.time_classes.length === 1
+      ? initialParams.time_classes[0]
+      : "all",
+  );
+  const [ratedFilter, setRatedFilter] = useState<string>(
+    initialParams?.rated_filter === true ? "rated" : initialParams?.rated_filter === false ? "unrated" : "all",
+  );
+  const [sinceYear, setSinceYear] = useState<number | "">(initialParams?.since_year ?? "");
+  const [sinceMonth, setSinceMonth] = useState<number | "">(initialParams?.since_month ?? "");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [engineDepth, setEngineDepth] = useState(10);
-  const [useEngine, setUseEngine] = useState(true);
+  const [engineDepth, setEngineDepth] = useState(initialParams?.engine_depth ?? 10);
+  const [useEngine, setUseEngine] = useState(initialParams?.use_engine ?? true);
   const [refreshCache, setRefreshCache] = useState(false);
-  const [report, setReport] = useState<ReportBuildResponse | null>(null);
+  const [report, setReport] = useState<ReportBuildResponse | null>(initialReport ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
