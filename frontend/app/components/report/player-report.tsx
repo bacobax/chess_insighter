@@ -335,7 +335,7 @@ function TopOpeningMatches({ report, group, targetColor }: { report: ReportBuild
   const initialMatches = group.top_opening_matches;
   const [matches, setMatches] = useState<OpeningMatch[]>(initialMatches);
   const [matchMode, setMatchMode] = useState<OpeningMatchMode>(initialMatches[0]?.match_mode ?? "cosine");
-  const [topK, setTopK] = useState<number>(initialMatches.length || 3);
+  const [topK, setTopK] = useState<number>(3);
   const [rematching, setRematching] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
 

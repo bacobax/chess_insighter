@@ -125,6 +125,94 @@ export type ReportBuildRequest = {
   until_month?: number | null;
 };
 
+export type MistakesAnalysisRequest = {
+  username: string;
+  max_games: number;
+  selected_game_ids?: string[] | null;
+  engine_depth: number;
+  max_punishment_plies: number;
+  time_classes?: string[] | null;
+  rated_filter?: boolean | null;
+  since_year?: number | null;
+  since_month?: number | null;
+  until_year?: number | null;
+  until_month?: number | null;
+};
+
+export type TacticTag = {
+  theme: string;
+  move_uci: string;
+  ply_offset: number;
+  confidence: number;
+  evidence: Record<string, JsonValue>;
+};
+
+export type PunishmentLineMove = {
+  ply_offset: number;
+  side_to_move: "white" | "black";
+  move_uci: string;
+  san: string;
+  fen_before: string;
+  fen_after: string;
+  eval_cp: number | null;
+  user_eval_cp: number | null;
+  user_win_prob: number | null;
+  top_move_gap_cp: number | null;
+  eval_volatility_cp: number | null;
+  retained_wp_loss: number | null;
+  stable_after_move: boolean;
+  tactics: TacticTag[];
+};
+
+export type MistakeAnalysisItem = {
+  game_uuid: string | null;
+  game_url: string | null;
+  ply: number;
+  move_number: number;
+  player_color: "white" | "black";
+  san: string;
+  uci: string;
+  fen_before: string;
+  fen_after: string;
+  severity: "none" | "inaccuracy" | "mistake" | "blunder" | string;
+  cp_loss: number | null;
+  wp_loss: number | null;
+  user_eval_before_cp: number | null;
+  user_eval_after_cp: number | null;
+  win_prob_before: number | null;
+  win_prob_after: number | null;
+  best_line: string[];
+  best_line_moves: PunishmentLineMove[];
+  theoretical_punishment_depth: number;
+  theoretical_punishment_plies: number;
+  punishment_difficulty: number;
+  stability_reached: boolean;
+  actual_punished: boolean;
+  actual_punishing_moves_played: number;
+  missed_at_ply: number | null;
+  missed_best_move_uci: string | null;
+  missed_actual_move_uci: string | null;
+  actual_line_moves: PunishmentLineMove[];
+  tactics: TacticTag[];
+  actual_tactics: TacticTag[];
+};
+
+export type MistakesAnalysisSummary = {
+  games_analyzed: number;
+  target_moves_analyzed: number;
+  mistake_count: number;
+  severity_counts: Record<string, number>;
+  theme_counts: Record<string, number>;
+  average_theoretical_punishment_depth: number | null;
+  actual_punished_count: number;
+};
+
+export type MistakesAnalysisResponse = {
+  metadata: Record<string, JsonValue>;
+  summary: MistakesAnalysisSummary;
+  mistakes: MistakeAnalysisItem[];
+};
+
 export type OpeningMatchRequest = {
   cache_hash: string;
   match_mode: OpeningMatchMode;

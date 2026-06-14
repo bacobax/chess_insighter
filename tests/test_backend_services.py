@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from backend import main as api_main
-from backend.models import ReportBuildRequest, SaveReportRequest
-from backend.services import openings_service, statistics_service
+from backend.models import MistakesAnalysisRequest, ReportBuildRequest, SaveReportRequest
+from backend.services import mistakes_service, openings_service, statistics_service
 from backend.services.cache_service import stable_hash
 from backend.services.cache_service import report_cache_key
 from backend.services.chesscom_service import summarize_game
@@ -319,6 +319,63 @@ def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_
 
     assert calls == {"fetch": 1, "enrich": 1, "build": 1}
     assert set(response.report.charts.opening_report_groups) == {"white", "black", "both"}
+
+
+def test_mistakes_raw_games_filters_selected_ids(monkeypatch):
+    games = [
+        {"uuid": "game-a", "url": "https://example.test/a", "pgn": "pgn-a"},
+        {"uuid": "game-b", "url": "https://example.test/b", "pgn": "pgn-b"},
+        {"uuid": "game-c", "url": "https://example.test/c", "pgn": "pgn-c"},
+    ]
+    calls = []
+
+    def fake_query_games(request):
+        calls.append(request)
+        return games, False, len(games)
+
+    monkeypatch.setattr(mistakes_service, "query_games", fake_query_games)
+
+    selected = mistakes_service._raw_games_for_request(
+        MistakesAnalysisRequest(
+            username="Alice",
+            max_games=1,
+            selected_game_ids=["game-c", "https://example.test/a"],
+        )
+    )
+
+    assert [game["uuid"] for game in selected] == ["game-a", "game-c"]
+    assert calls[0].page_size == 2
+
+
+def test_mistakes_raw_games_uses_latest_n_when_no_selection(monkeypatch):
+    calls = []
+
+    def fake_fetch_latest_games_for_report(**kwargs):
+        calls.append(kwargs)
+        return [{"uuid": "latest", "pgn": "pgn"}]
+
+    monkeypatch.setattr(
+        mistakes_service,
+        "fetch_latest_games_for_report",
+        fake_fetch_latest_games_for_report,
+    )
+
+    selected = mistakes_service._raw_games_for_request(
+        MistakesAnalysisRequest(username="Alice", max_games=7, time_classes=["rapid"])
+    )
+
+    assert selected == [{"uuid": "latest", "pgn": "pgn"}]
+    assert calls[0]["max_games"] == 7
+    assert calls[0]["time_classes"] == ["rapid"]
+
+
+def test_mistakes_analysis_requires_stockfish(monkeypatch):
+    monkeypatch.setattr(mistakes_service, "settings", SimpleNamespace(stockfish_path=None))
+
+    with pytest.raises(ValueError, match="Stockfish is required"):
+        mistakes_service.build_mistakes_analysis(
+            MistakesAnalysisRequest(username="Alice", max_games=1)
+        )
 
 
 def _opening_row(name: str, **values):

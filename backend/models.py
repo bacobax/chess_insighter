@@ -109,6 +109,36 @@ class ReportBuildRequest(GameFilters):
         return username
 
 
+class MistakesAnalysisRequest(GameFilters):
+    username: str
+    max_games: int = Field(default=20, ge=1, le=500)
+    selected_game_ids: list[str] | None = Field(default=None, max_length=500)
+    engine_depth: int = Field(default=10, ge=1, le=30)
+    max_punishment_plies: int = Field(default=8, ge=1, le=20)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        username = value.strip()
+        if not username:
+            raise ValueError("username is required")
+        return username
+
+    @field_validator("selected_game_ids")
+    @classmethod
+    def normalize_selected_game_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized = [item.strip() for item in value if item.strip()]
+        return normalized or None
+
+
+class MistakesAnalysisResponse(BaseModel):
+    metadata: JsonObject
+    summary: JsonObject
+    mistakes: list[JsonObject]
+
+
 class MetricPoint(BaseModel):
     key: str
     label: str

@@ -11,6 +11,8 @@ from backend.models import (
     GamesQueryRequest,
     GamesQueryResponse,
     HealthResponse,
+    MistakesAnalysisRequest,
+    MistakesAnalysisResponse,
     OpeningMatchRequest,
     OpeningMatchResponse,
     OpeningStudyTreeChildrenRequest,
@@ -24,6 +26,7 @@ from backend.services.cache_service import ReportCache
 from backend.services.saved_reports_service import SavedReportsIndex, save_report_entry
 from backend.services.chesscom_service import ChessComServiceError, UnknownChessComUser, query_games, summarize_games
 from backend.services.hparams_service import load_hparams
+from backend.services.mistakes_service import build_mistakes_analysis
 from backend.services.opening_study_service import opening_study_tree_children
 from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
@@ -93,6 +96,11 @@ async def games_query(request: GamesQueryRequest) -> GamesQueryResponse:
 @app.post("/api/report/build", response_model=ReportBuildResponse)
 async def report_build(request: ReportBuildRequest) -> ReportBuildResponse:
     return await run_in_threadpool(build_report, request)
+
+
+@app.post("/api/mistakes/analyze", response_model=MistakesAnalysisResponse)
+async def mistakes_analyze(request: MistakesAnalysisRequest) -> MistakesAnalysisResponse:
+    return await run_in_threadpool(build_mistakes_analysis, request)
 
 
 @app.post("/api/openings/matches", response_model=OpeningMatchResponse)

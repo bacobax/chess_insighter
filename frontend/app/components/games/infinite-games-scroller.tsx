@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { BarChart3, Loader2 } from "lucide-react";
+import { BarChart3, Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { queryGames } from "~/lib/api";
 import type { GameSummary } from "~/lib/types";
@@ -54,12 +54,20 @@ export function InfiniteGamesScroller({ username }: { username: string }) {
           <h1 className="text-2xl font-semibold tracking-normal" style={{ fontFamily: "var(--font-display)" }}>{username}</h1>
           <p className="mt-1 text-sm text-slate-500">Chess.com games · scroll to load more.</p>
         </div>
-        <Link to={`/report/${encodeURIComponent(username)}`}>
-          <Button>
-            <BarChart3 className="h-4 w-4" />
-            Player Report
-          </Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link to={`/mistakes/${encodeURIComponent(username)}`}>
+            <Button variant="secondary">
+              <ShieldAlert className="h-4 w-4" />
+              Mistakes Analyzer
+            </Button>
+          </Link>
+          <Link to={`/report/${encodeURIComponent(username)}`}>
+            <Button>
+              <BarChart3 className="h-4 w-4" />
+              Player Report
+            </Button>
+          </Link>
+        </div>
       </div>
       <PlayerStatsPanel username={username} />
       {error ? <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}

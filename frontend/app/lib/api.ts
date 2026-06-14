@@ -1,4 +1,4 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse, SavedReportsList, SaveReportRequest } from "./types";
+import type { GamesQueryRequest, GamesQueryResponse, Hparams, MistakesAnalysisRequest, MistakesAnalysisResponse, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse, SavedReportsList, SaveReportRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -38,6 +38,13 @@ export function queryGames(request: GamesQueryRequest) {
 
 export function buildReport(request: ReportBuildRequest) {
   return apiFetch<ReportBuildResponse>("/api/report/build", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function analyzeMistakes(request: MistakesAnalysisRequest) {
+  return apiFetch<MistakesAnalysisResponse>("/api/mistakes/analyze", {
     method: "POST",
     body: JSON.stringify(request),
   });
