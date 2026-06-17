@@ -122,6 +122,9 @@ def detect_tactics(
             )
         )
 
+    if after.is_checkmate():
+        return _dedupe_tags(tags)
+
     if not _allow_nontrivial(engine_gain_cp, is_pv_move, config):
         return tags
 
