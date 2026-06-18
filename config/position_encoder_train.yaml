@@ -1,0 +1,61 @@
+# Position Style Encoder — first training run configuration.
+# Profile: lightweight labels · 5k games / 50k positions · 8-block ResNet · 30 epochs.
+#
+# Key mappings to code
+# --------------------
+#   model.*       -> PositionStyleEncoder(width, num_blocks, embed_dim, head_hidden, mode)
+#                    utils/position_style_encoder.py
+#   optim.*       -> torch.optim.Adam(lr, weight_decay, betas)  +  grad_clip
+#   scheduler.*   -> CosineAnnealingLR(T_max=t_max, eta_min=eta_min)
+#   data.*        -> build_labels(mode=label_mode, ...)          utils/position_label_builder.py
+#                    + notebook MAX_GAMES / MAX_POSITIONS / YEAR / MONTH
+#   train.*       -> train_one_epoch / evaluate loops
+#   checkpoint.*  -> save_checkpoint / load_checkpoint
+
+run:
+  name: psenc_lightweight_v1
+  seed: 42
+  device: auto        # auto -> mps -> cuda -> cpu  (via _get_device())
+  output_dir: data
+
+data:
+  year: 2013
+  month: 1
+  max_games: 5000
+  max_positions: 50000
+  label_mode: lightweight         # lightweight | stockfish
+  labels_cache: data/labels_lightweight.parquet
+  val_split: 0.15                 # fraction held out for validation
+  # --- stockfish-only (ignored when label_mode == lightweight) ---
+  stockfish_path: /opt/homebrew/bin/stockfish
+  engine_depth: 12
+
+model:
+  in_channels: 18                 # board_to_tensor output channels
+  width: 128                      # ResNet filter count throughout body
+  num_blocks: 8                   # residual blocks (stem + 8 blocks = 9 conv layers)
+  embed_dim: 128                  # z dimension; also final projection output
+  head_hidden: 64                 # hidden units in each MLP head
+
+optim:
+  name: adam
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+  betas: [0.9, 0.999]
+  grad_clip: 1.0                  # max gradient norm (nn.utils.clip_grad_norm_)
+
+scheduler:
+  name: cosine
+  t_max: 30                       # must match train.epochs
+  eta_min: 1.0e-5
+
+train:
+  epochs: 30
+  batch_size: 128
+  num_workers: 0
+  log_every: 5                    # print metrics every N epochs
+
+checkpoint:
+  path: data/encoder_lightweight.pt
+  monitor: val_total              # metric to track for save_best
+  save_best: true                 # overwrite only when monitored metric improves

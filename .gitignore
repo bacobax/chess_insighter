@@ -2,6 +2,9 @@
 .cache/
 .pytest_cache/
 
+# ML training artifacts (large binaries — not versioned)
+data/
+
 # Python bytecode
 __pycache__/
 *.py[cod]

@@ -1,0 +1,54 @@
+# Follow-up experiment: small model (4 blocks, w=64) + lr=1e-3 + linear warmup.
+# Motivated by sweep results:
+#   - small_50ep nearly matched base at 7× fewer params and 2.4× less time
+#   - lr_high_50ep was the best config overall but showed val spikes in the cosine tail
+# This run combines the efficient small architecture with the aggressive LR,
+# tamed by a 5-epoch linear warmup before the cosine decay kicks in.
+
+run:
+  name: small_lr_high_warmup
+  seed: 42
+  device: auto
+  output_dir: data
+
+data:
+  year: 2013
+  month: 1
+  max_games: 5000
+  max_positions: 50000
+  label_mode: lightweight
+  labels_cache: data/labels_lightweight.parquet
+  val_split: 0.15
+  stockfish_path: /opt/homebrew/bin/stockfish
+  engine_depth: 12
+
+model:
+  in_channels: 18
+  width: 64
+  num_blocks: 4
+  embed_dim: 128
+  head_hidden: 64
+
+optim:
+  name: adam
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  betas: [0.9, 0.999]
+  grad_clip: 1.0
+
+scheduler:
+  name: cosine
+  warmup_epochs: 5      # linear ramp from lr×0.1 → lr, then cosine
+  t_max: 60             # cosine T_max = epochs - warmup_epochs = 55
+  eta_min: 1.0e-5
+
+train:
+  epochs: 60            # more room for warmup + cosine tail
+  batch_size: 128
+  num_workers: 0
+  log_every: 5
+
+checkpoint:
+  path: data/runs/small_lr_high_warmup/checkpoint.pt
+  monitor: val_total
+  save_best: true
