@@ -4,15 +4,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
-
 from backend.models import (
     DefaultHparamsResponse,
     GamesQueryRequest,
     GamesQueryResponse,
     HealthResponse,
-    MistakesAnalysisRequest,
-    MistakesAnalysisResponse,
+    MistakePositionRequest,
+    MistakePositionResponse,
+    ReportGamesCatalogRequest,
+    ReportGamesCatalogResponse,
+    ReportMistakeDetailResponse,
+    ReportMistakesResponse,
+    ReportMistakesSelectionRequest,
     OpeningMatchRequest,
     OpeningMatchResponse,
     OpeningStudyTreeChildrenRequest,
@@ -26,10 +29,17 @@ from backend.services.cache_service import ReportCache
 from backend.services.saved_reports_service import SavedReportsIndex, save_report_entry
 from backend.services.chesscom_service import ChessComServiceError, UnknownChessComUser, query_games, summarize_games
 from backend.services.hparams_service import load_hparams
-from backend.services.mistakes_service import build_mistakes_analysis
+from backend.services.mistakes_service import analyse_position
 from backend.services.opening_study_service import opening_study_tree_children
 from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
+from backend.services.report_analysis_service import (
+    ReportAnalysisUnavailable,
+    build_report_mistakes,
+    get_active_report_mistakes,
+    get_report_mistake_detail,
+    query_report_games,
+)
 from backend.settings import settings
 
 
@@ -98,9 +108,58 @@ async def report_build(request: ReportBuildRequest) -> ReportBuildResponse:
     return await run_in_threadpool(build_report, request)
 
 
-@app.post("/api/mistakes/analyze", response_model=MistakesAnalysisResponse)
-async def mistakes_analyze(request: MistakesAnalysisRequest) -> MistakesAnalysisResponse:
-    return await run_in_threadpool(build_mistakes_analysis, request)
+@app.exception_handler(ReportAnalysisUnavailable)
+async def report_analysis_unavailable_handler(_request, exc: ReportAnalysisUnavailable):
+    return JSONResponse(status_code=409, content={"code": "report_analysis_unavailable", "message": str(exc)})
+
+
+@app.post("/api/report/{cache_hash}/mistakes", response_model=ReportMistakesResponse)
+async def report_mistakes(
+    cache_hash: str,
+    request: ReportMistakesSelectionRequest,
+) -> ReportMistakesResponse:
+    return await run_in_threadpool(build_report_mistakes, cache_hash, request)
+
+
+@app.get("/api/report/{cache_hash}/mistakes", response_model=ReportMistakesResponse)
+async def active_report_mistakes(cache_hash: str) -> ReportMistakesResponse:
+    try:
+        return await run_in_threadpool(get_active_report_mistakes, cache_hash)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/report/{cache_hash}/mistakes/games/query", response_model=ReportGamesCatalogResponse)
+async def report_mistakes_games_query(
+    cache_hash: str,
+    request: ReportGamesCatalogRequest,
+) -> ReportGamesCatalogResponse:
+    return await run_in_threadpool(query_report_games, cache_hash, request)
+
+
+@app.get(
+    "/api/report/{cache_hash}/mistakes/{analysis_hash}/{mistake_id}",
+    response_model=ReportMistakeDetailResponse,
+)
+async def report_mistake_detail(
+    cache_hash: str,
+    analysis_hash: str,
+    mistake_id: str,
+) -> ReportMistakeDetailResponse:
+    try:
+        return await run_in_threadpool(
+            get_report_mistake_detail,
+            cache_hash,
+            analysis_hash,
+            mistake_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/mistakes/position", response_model=MistakePositionResponse)
+async def mistakes_position(request: MistakePositionRequest) -> MistakePositionResponse:
+    return await run_in_threadpool(analyse_position, request)
 
 
 @app.post("/api/openings/matches", response_model=OpeningMatchResponse)

@@ -119,6 +119,7 @@ class MistakeAnalysisItem:
     actual_line_moves: list[PunishmentLineMove]
     tactics: list[TacticTag] = field(default_factory=list)
     actual_tactics: list[TacticTag] = field(default_factory=list)
+    user_rating: int = 1500
 
 
 @dataclass(frozen=True)
@@ -247,6 +248,7 @@ def analyze_mistakes(
                     actual_line_moves=actual.actual_line_moves,
                     tactics=theoretical_tactics,
                     actual_tactics=actual.tactics,
+                    user_rating=rating,
                 )
             )
 
@@ -760,7 +762,7 @@ def _summary(
     theme_counts: dict[str, int] = {}
     for mistake in mistakes:
         severity_counts[mistake.severity] = severity_counts.get(mistake.severity, 0) + 1
-        for tag in mistake.tactics + mistake.actual_tactics:
+        for tag in mistake.tactics:
             theme_counts[tag.theme] = theme_counts.get(tag.theme, 0) + 1
     depths = [mistake.theoretical_punishment_depth for mistake in mistakes]
     return MistakesAnalysisSummary(
@@ -805,3 +807,160 @@ def _color_name(color: chess.Color) -> str:
 
 def _username_key(username: str | None) -> str:
     return (username or "").strip().lower()
+
+
+# ─── Public helper: on-demand position analysis ──────────────────────────────
+
+def _build_line_from_pv(
+    engine: Any,
+    board: chess.Board,
+    pv_uci: list[str],
+    player_color: str,
+    rating: int,
+    config: MistakeAnalyzerConfig,
+    analysis_cache: dict[str, EngineRootAnalysis],
+    max_plies: int = 8,
+) -> list[PunishmentLineMove]:
+    """Replay a PV and build per-move PunishmentLineMove objects."""
+    line: list[PunishmentLineMove] = []
+    temp = board.copy(stack=False)
+    tactic_config = TacticDetectorConfig(min_engine_gain_cp=config.tactic_min_engine_gain_cp)
+
+    for ply_offset, uci in enumerate(pv_uci[:max_plies], start=1):
+        if temp.is_game_over():
+            break
+        try:
+            move = chess.Move.from_uci(uci)
+        except ValueError:
+            break
+        if move not in temp.legal_moves:
+            break
+
+        side_to_move = _color_name(temp.turn)
+        fen_before = temp.fen()
+        san = temp.san(move)
+
+        pre_info = _analyse_position_cached(engine, temp, config, analysis_cache)
+        user_eval_before = _orient_cp(pre_info.eval_cp, player_color)
+
+        temp.push(move)
+        fen_after = temp.fen()
+        post_info = _analyse_position_cached(engine, temp, config, analysis_cache)
+        user_eval_after = _orient_cp(post_info.eval_cp, player_color)
+        user_wp = (
+            default_cp_to_expected_points(user_eval_after, rating)
+            if user_eval_after is not None
+            else None
+        )
+        engine_gain_cp = _engine_gain_against_user(
+            before_user_eval=user_eval_before,
+            after_user_eval=user_eval_after,
+        )
+        tactics = detect_tactics(
+            chess.Board(fen_before),
+            move,
+            ply_offset=ply_offset,
+            engine_gain_cp=engine_gain_cp,
+            mate_in=pre_info.mate_in,
+            is_pv_move=True,
+            config=tactic_config,
+        )
+        volatility_stable = (
+            post_info.eval_volatility_cp is not None
+            and post_info.eval_volatility_cp <= config.stable_volatility_cp
+        )
+        top_gap_stable = (
+            post_info.legal_move_count <= 1
+            or (
+                post_info.top_move_gap_cp is not None
+                and post_info.top_move_gap_cp <= config.stable_top_gap_cp
+            )
+        )
+        line.append(
+            PunishmentLineMove(
+                ply_offset=ply_offset,
+                side_to_move=side_to_move,
+                move_uci=uci,
+                san=san,
+                fen_before=fen_before,
+                fen_after=fen_after,
+                eval_cp=post_info.eval_cp,
+                user_eval_cp=user_eval_after,
+                user_win_prob=user_wp,
+                top_move_gap_cp=post_info.top_move_gap_cp,
+                eval_volatility_cp=post_info.eval_volatility_cp,
+                retained_wp_loss=None,
+                stable_after_move=volatility_stable and top_gap_stable,
+                tactics=tactics,
+            )
+        )
+
+    return line
+
+
+def analyse_position_lines(
+    engine: Any,
+    fen: str,
+    player_color: str,
+    rating: int,
+    config: MistakeAnalyzerConfig | None = None,
+    max_line_plies: int = 6,
+) -> dict[str, Any]:
+    """Compute top-3 engine lines + optimal continuation from a FEN.
+
+    Returns:
+        top_lines: list of dicts with rank, first_san, line_san, user_win_prob, etc.
+        optimal_line: list of PunishmentLineMove (rank-1 PV, per-move analysis).
+    """
+    config = config or MistakeAnalyzerConfig()
+    board = chess.Board(fen)
+    analysis_cache: dict[str, EngineRootAnalysis] = {}
+
+    root = _analyse_position_cached(engine, board, config, analysis_cache)
+
+    top_lines: list[dict[str, Any]] = []
+    for ml in root.top_moves:
+        user_eval_cp = _orient_cp(ml.eval_cp, player_color)
+        user_win_prob = (
+            default_cp_to_expected_points(user_eval_cp, rating)
+            if user_eval_cp is not None
+            else None
+        )
+        line_san: list[str] = []
+        temp = board.copy(stack=False)
+        for uci in ml.line_uci[:max_line_plies]:
+            try:
+                m = chess.Move.from_uci(uci)
+                if m not in temp.legal_moves:
+                    break
+                line_san.append(temp.san(m))
+                temp.push(m)
+            except (ValueError, AssertionError):
+                break
+        top_lines.append(
+            {
+                "rank": ml.rank,
+                "first_uci": ml.move_uci,
+                "first_san": line_san[0] if line_san else ml.move_uci,
+                "line_san": line_san,
+                "line_uci": ml.line_uci[:max_line_plies],
+                "eval_cp": ml.eval_cp,
+                "mate_in": ml.mate_in,
+                "user_win_prob": user_win_prob,
+                "user_eval_cp": user_eval_cp,
+            }
+        )
+
+    rank1_pv = root.top_moves[0].line_uci if root.top_moves else []
+    optimal_line = _build_line_from_pv(
+        engine=engine,
+        board=board,
+        pv_uci=rank1_pv,
+        player_color=player_color,
+        rating=rating,
+        config=config,
+        analysis_cache=analysis_cache,
+        max_plies=config.max_punishment_plies,
+    )
+
+    return {"top_lines": top_lines, "optimal_line": optimal_line}

@@ -8,7 +8,7 @@ from typing import Any
 
 import chess
 
-from backend.models import MetricPoint, OpeningCount, OpeningFeatureSet, OpeningMatch
+from backend.models import MetricPoint, OpeningCount, OpeningMatch
 from backend.services.cache_service import ReportCache
 from backend.settings import settings
 from utils.opening_feature_transformer import (
@@ -33,12 +33,6 @@ MATCHER_FEATURE_WEIGHTS = {
     "material_imbalance": 0.90,
     "endgame_likelihood_proxy": 0.40,
 }
-
-OPENING_FEATURES = [
-    *MATCHER_COLUMNS_V2,
-    "final_structure_entropy",
-]
-
 
 @lru_cache(maxsize=1)
 def opening_feature_rows() -> list[dict[str, Any]]:
@@ -69,7 +63,7 @@ def opening_feature_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def build_opening_charts(bundle: Any, target_color: str = "both") -> dict[str, Any]:
+def build_opening_charts(bundle: Any) -> dict[str, Any]:
     profiles_by_color = getattr(bundle, "player_profiles_by_color", None) or {"both": bundle.player_profile}
     vectors_by_color = getattr(bundle, "matcher_ready_player_vectors", None) or {"both": bundle.matcher_ready_player_vector}
     profile = profiles_by_color.get("both") or bundle.player_profile
@@ -78,23 +72,13 @@ def build_opening_charts(bundle: Any, target_color: str = "both") -> dict[str, A
     favourite = favourite_openings(subfeatures)
     groups = {}
     for color in ["white", "black", "both"]:
-        color_profile = profiles_by_color.get(color) or profile
         color_vector = vectors_by_color.get(color) or vector
         groups[color] = {
-            "top_opening_features": top_opening_features(favourite, target_color=color),
             "opening_characteristics": opening_characteristics(color_vector),
-            "top_opening_matches": top_opening_matches(
-                color_vector,
-                profile=color_profile,
-                target_color=color,
-                match_mode="cosine",
-            ),
         }
     return {
         "favourite_openings": favourite,
-        "top_opening_features": groups["both"]["top_opening_features"],
         "opening_characteristics": groups["both"]["opening_characteristics"],
-        "top_opening_matches": groups["both"]["top_opening_matches"],
         "opening_report_groups": groups,
     }
 
@@ -107,34 +91,6 @@ def favourite_openings(subfeatures: dict[str, Any]) -> list[OpeningCount]:
             if name:
                 items.append(OpeningCount(name=str(name), count=int(count), color=color))
     return items
-
-
-def top_opening_features(favourites: list[OpeningCount], target_color: str = "both") -> list[OpeningFeatureSet]:
-    results: list[OpeningFeatureSet] = []
-    colors = [target_color] if target_color in {"white", "black"} else ["white", "black"]
-    for color in colors:
-        color_items = [item for item in favourites if item.color == color][:3]
-        for item in color_items:
-            family = find_opening_family_row(item.name)
-            family_vector = opening_vector_for_color(family, target_color) if family else {}
-            features = [
-                MetricPoint(
-                    key=feature,
-                    label=pretty(feature),
-                    value=family_vector.get(feature) if feature in MATCHER_COLUMNS_V2 else family.get(feature) if family else None,
-                )
-                for feature in OPENING_FEATURES
-            ]
-            results.append(
-                OpeningFeatureSet(
-                    opening_name=item.name,
-                    color=color,
-                    count=item.count,
-                    family_name=family.get("opening_name") if family else None,
-                    features=features,
-                )
-            )
-    return results
 
 
 def opening_characteristics(vector: dict[str, float | None]) -> list[MetricPoint]:

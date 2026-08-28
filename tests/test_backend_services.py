@@ -6,8 +6,14 @@ import pytest
 from fastapi import HTTPException
 
 from backend import main as api_main
-from backend.models import MistakesAnalysisRequest, ReportBuildRequest, SaveReportRequest
-from backend.services import mistakes_service, openings_service, statistics_service
+from backend.models import (
+    ReportAnalysisContext,
+    ReportBuildRequest,
+    ReportGamesCatalogRequest,
+    ReportMistakesSelectionRequest,
+    SaveReportRequest,
+)
+from backend.services import openings_service, report_analysis_service, statistics_service
 from backend.services.cache_service import stable_hash
 from backend.services.cache_service import report_cache_key
 from backend.services.chesscom_service import summarize_game
@@ -22,6 +28,7 @@ from backend.services.openings_service import (
     find_opening_family_row,
 )
 from backend.settings import settings
+from utils.game_enrichment_transformer import EnrichedGame
 from utils.statistics_shared import StatisticsHparams
 
 
@@ -281,14 +288,10 @@ def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_
     def fake_opening_charts(_bundle):
         group = {
             "opening_characteristics": [],
-            "top_opening_features": [],
-            "top_opening_matches": [],
         }
         return {
             "favourite_openings": [],
-            "top_opening_features": [],
             "opening_characteristics": [],
-            "top_opening_matches": [],
             "opening_report_groups": {"white": group, "black": group, "both": group},
         }
 
@@ -308,6 +311,17 @@ def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_
         },
     )
     monkeypatch.setattr(statistics_service, "update_player_vector_cache", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        statistics_service,
+        "initialize_report_analysis",
+        lambda **_kwargs: ReportAnalysisContext(
+            games=[],
+            default_game_ids=["game"],
+            engine_depth=10,
+            engine_enriched=False,
+            sidecar_id="test-sidecar",
+        ),
+    )
     previous_report_config_dir = settings.report_config_dir
     object.__setattr__(settings, "report_config_dir", tmp_path)
     try:
@@ -319,63 +333,303 @@ def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_
 
     assert calls == {"fetch": 1, "enrich": 1, "build": 1}
     assert set(response.report.charts.opening_report_groups) == {"white", "black", "both"}
+    assert response.report.analysis_context is not None
 
 
-def test_mistakes_raw_games_filters_selected_ids(monkeypatch):
-    games = [
-        {"uuid": "game-a", "url": "https://example.test/a", "pgn": "pgn-a"},
-        {"uuid": "game-b", "url": "https://example.test/b", "pgn": "pgn-b"},
-        {"uuid": "game-c", "url": "https://example.test/c", "pgn": "pgn-c"},
-    ]
-    calls = []
-
-    def fake_query_games(request):
-        calls.append(request)
-        return games, False, len(games)
-
-    monkeypatch.setattr(mistakes_service, "query_games", fake_query_games)
-
-    selected = mistakes_service._raw_games_for_request(
-        MistakesAnalysisRequest(
-            username="Alice",
-            max_games=1,
-            selected_game_ids=["game-c", "https://example.test/a"],
-        )
+def test_report_mistakes_reuses_report_work_and_updates_incrementally(monkeypatch, tmp_path):
+    service_settings = SimpleNamespace(
+        report_analysis_cache_dir=tmp_path,
+        stockfish_path="stockfish-test",
+        openings_path=settings.openings_path,
+    )
+    monkeypatch.setattr(report_analysis_service, "settings", service_settings)
+    report_analysis_service.initialize_report_analysis(
+        cache_hash="report-hash",
+        username="Alice",
+        raw_games=[_raw_game("game-a", 3), _raw_game("game-b", 2)],
+        enriched_games=[_empty_enriched_game("game-a", 3), _empty_enriched_game("game-b", 2)],
+        engine_depth=10,
+        engine_enriched=True,
+        filters={"time_classes": ["rapid"]},
+        refresh=True,
     )
 
-    assert [game["uuid"] for game in selected] == ["game-a", "game-c"]
-    assert calls[0].page_size == 2
+    calls = {"engine": 0, "enrich": 0, "analyze": 0, "query": 0}
 
+    class EngineContext:
+        def __enter__(self):
+            calls["engine"] += 1
+            return object()
 
-def test_mistakes_raw_games_uses_latest_n_when_no_selection(monkeypatch):
-    calls = []
+        def __exit__(self, *_args):
+            return False
 
-    def fake_fetch_latest_games_for_report(**kwargs):
-        calls.append(kwargs)
-        return [{"uuid": "latest", "pgn": "pgn"}]
+    class FakeTransformer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def transform_game(self, *, game_data, **_kwargs):
+            calls["enrich"] += 1
+            return _empty_enriched_game(game_data["uuid"], game_data["end_time"])
+
+    real_analyze = report_analysis_service.analyze_mistakes
+
+    def counted_analyze(*args, **kwargs):
+        calls["analyze"] += 1
+        return real_analyze(*args, **kwargs)
 
     monkeypatch.setattr(
-        mistakes_service,
-        "fetch_latest_games_for_report",
-        fake_fetch_latest_games_for_report,
+        report_analysis_service.chess.engine.SimpleEngine,
+        "popen_uci",
+        lambda _path: EngineContext(),
     )
+    monkeypatch.setattr(report_analysis_service, "GameEnrichmentTransformer", FakeTransformer)
+    monkeypatch.setattr(report_analysis_service, "analyze_mistakes", counted_analyze)
 
-    selected = mistakes_service._raw_games_for_request(
-        MistakesAnalysisRequest(username="Alice", max_games=7, time_classes=["rapid"])
+    initial = report_analysis_service.build_report_mistakes(
+        "report-hash",
+        ReportMistakesSelectionRequest(
+            selected_game_ids=["game-a", "game-b"],
+            engine_depth=10,
+            max_punishment_plies=8,
+        ),
     )
+    assert initial.summary["games_analyzed"] == 2
+    assert calls == {"engine": 1, "enrich": 0, "analyze": 2, "query": 0}
 
-    assert selected == [{"uuid": "latest", "pgn": "pgn"}]
-    assert calls[0]["max_games"] == 7
-    assert calls[0]["time_classes"] == ["rapid"]
+    removed = report_analysis_service.build_report_mistakes(
+        "report-hash",
+        ReportMistakesSelectionRequest(
+            selected_game_ids=["game-a"],
+            engine_depth=10,
+            max_punishment_plies=8,
+        ),
+    )
+    assert removed.summary["games_analyzed"] == 1
+    assert calls == {"engine": 1, "enrich": 0, "analyze": 2, "query": 0}
+
+    def fake_query(_request):
+        calls["query"] += 1
+        return [_raw_game("game-c", 1)], False, 1
+
+    monkeypatch.setattr(report_analysis_service, "query_games", fake_query)
+    catalog = report_analysis_service.query_report_games(
+        "report-hash",
+        ReportGamesCatalogRequest(page=1, page_size=50, result_filter=["loss"]),
+    )
+    assert [game.id for game in catalog.items] == ["game-c"]
+    assert calls["query"] == 1
+
+    added = report_analysis_service.build_report_mistakes(
+        "report-hash",
+        ReportMistakesSelectionRequest(
+            selected_game_ids=["game-a", "game-c"],
+            engine_depth=10,
+            max_punishment_plies=8,
+        ),
+    )
+    assert added.summary["games_analyzed"] == 2
+    assert calls == {"engine": 2, "enrich": 1, "analyze": 3, "query": 1}
+
+    report_analysis_service.build_report_mistakes(
+        "report-hash",
+        ReportMistakesSelectionRequest(
+            selected_game_ids=["game-a", "game-c"],
+            engine_depth=10,
+            max_punishment_plies=10,
+        ),
+    )
+    assert calls == {"engine": 3, "enrich": 1, "analyze": 5, "query": 1}
+
+    report_analysis_service.build_report_mistakes(
+        "report-hash",
+        ReportMistakesSelectionRequest(
+            selected_game_ids=["game-a", "game-c"],
+            engine_depth=12,
+            max_punishment_plies=10,
+        ),
+    )
+    assert calls == {"engine": 4, "enrich": 3, "analyze": 7, "query": 1}
+
+    active = report_analysis_service.get_active_report_mistakes("report-hash")
+    assert active.analysis_hash == report_analysis_service.get_active_report_mistakes("report-hash").analysis_hash
+    assert active.metadata["engine_depth"] == 12
 
 
-def test_mistakes_analysis_requires_stockfish(monkeypatch):
-    monkeypatch.setattr(mistakes_service, "settings", SimpleNamespace(stockfish_path=None))
-
-    with pytest.raises(ValueError, match="Stockfish is required"):
-        mistakes_service.build_mistakes_analysis(
-            MistakesAnalysisRequest(username="Alice", max_games=1)
+def test_report_mistakes_rejects_missing_and_duplicate_ids(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        report_analysis_service,
+        "settings",
+        SimpleNamespace(
+            report_analysis_cache_dir=tmp_path,
+            stockfish_path="stockfish-test",
+            openings_path=settings.openings_path,
+        ),
+    )
+    report_analysis_service.initialize_report_analysis(
+        cache_hash="selection-report",
+        username="Alice",
+        raw_games=[_raw_game("game-a", 1)],
+        enriched_games=[_empty_enriched_game("game-a", 1)],
+        engine_depth=10,
+        engine_enriched=True,
+        filters={},
+        refresh=True,
+    )
+    with pytest.raises(ValueError, match="not in this report catalog"):
+        report_analysis_service.build_report_mistakes(
+            "selection-report",
+            ReportMistakesSelectionRequest(selected_game_ids=["missing"]),
         )
+    with pytest.raises(ValueError, match="must be unique"):
+        ReportMistakesSelectionRequest(selected_game_ids=["game-a", "game-a"])
+
+
+def test_report_without_engine_requires_rebuild(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        report_analysis_service,
+        "settings",
+        SimpleNamespace(report_analysis_cache_dir=tmp_path, stockfish_path=None, openings_path=settings.openings_path),
+    )
+    report_analysis_service.initialize_report_analysis(
+        cache_hash="fallback-report",
+        username="Alice",
+        raw_games=[_raw_game("game-a", 1)],
+        enriched_games=[_empty_enriched_game("game-a", 1)],
+        engine_depth=10,
+        engine_enriched=False,
+        filters={},
+        refresh=True,
+    )
+    with pytest.raises(report_analysis_service.ReportAnalysisUnavailable, match="Rebuild"):
+        report_analysis_service.build_report_mistakes(
+            "fallback-report",
+            ReportMistakesSelectionRequest(selected_game_ids=["game-a"]),
+        )
+
+
+def test_report_mistake_id_is_stable_and_detail_is_directly_loadable(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        report_analysis_service,
+        "settings",
+        SimpleNamespace(
+            report_analysis_cache_dir=tmp_path,
+            stockfish_path="stockfish-test",
+            openings_path=settings.openings_path,
+        ),
+    )
+    report_analysis_service.initialize_report_analysis(
+        cache_hash="detail-report",
+        username="Alice",
+        raw_games=[_raw_game("game-a", 1)],
+        enriched_games=[_empty_enriched_game("game-a", 1)],
+        engine_depth=10,
+        engine_enriched=True,
+        filters={},
+        refresh=True,
+    )
+    store = report_analysis_service.ReportAnalysisStore("detail-report")
+    mistake = {
+        "game_uuid": "game-a",
+        "game_url": "https://example.test/game-a",
+        "ply": 7,
+        "uci": "g1f3",
+        "san": "Nf3",
+        "cp_loss": 180,
+        "wp_loss": 0.12,
+        "theoretical_punishment_depth": 2,
+        "actual_punished": True,
+    }
+    report_analysis_service._atomic_write_json(
+        store.per_game_path("game-a", 10, 8),
+        {
+            "summary": {
+                "games_analyzed": 1,
+                "target_moves_analyzed": 10,
+                "mistake_count": 1,
+                "severity_counts": {"mistake": 1},
+                "theme_counts": {},
+                "average_theoretical_punishment_depth": 2,
+                "actual_punished_count": 1,
+            },
+            "mistakes": [mistake],
+        },
+    )
+    request = ReportMistakesSelectionRequest(selected_game_ids=["game-a"])
+    first = report_analysis_service.build_report_mistakes("detail-report", request)
+    second = report_analysis_service.build_report_mistakes("detail-report", request)
+    assert first.mistakes[0]["mistake_id"] == second.mistakes[0]["mistake_id"]
+
+    detail = report_analysis_service.get_report_mistake_detail(
+        "detail-report",
+        first.analysis_hash,
+        first.mistakes[0]["mistake_id"],
+    )
+    assert detail.mistake["uci"] == "g1f3"
+    assert detail.metadata["selected_game_ids"] == ["game-a"]
+
+
+def test_report_refresh_replaces_analysis_sidecar(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        report_analysis_service,
+        "settings",
+        SimpleNamespace(
+            report_analysis_cache_dir=tmp_path,
+            stockfish_path="stockfish-test",
+            openings_path=settings.openings_path,
+        ),
+    )
+    for game_id in ["game-a", "game-b"]:
+        report_analysis_service.initialize_report_analysis(
+            cache_hash="refresh-report",
+            username="Alice",
+            raw_games=[_raw_game(game_id, 1)],
+            enriched_games=[_empty_enriched_game(game_id, 1)],
+            engine_depth=10,
+            engine_enriched=True,
+            filters={},
+            refresh=True,
+        )
+    manifest = report_analysis_service.ReportAnalysisStore("refresh-report").manifest()
+    assert manifest["default_game_ids"] == ["game-b"]
+    assert set(manifest["games"]) == {"game-b"}
+
+
+def _raw_game(game_id: str, end_time: int):
+    return {
+        "uuid": game_id,
+        "url": f"https://example.test/{game_id}",
+        "white": {"username": "Alice", "rating": 1500, "result": "resigned"},
+        "black": {"username": "Bob", "rating": 1500, "result": "win"},
+        "end_time": end_time,
+        "time_class": "rapid",
+        "time_control": "600",
+        "rated": True,
+        "pgn": '[White "Alice"]\n[Black "Bob"]\n[Result "0-1"]\n\n1. e4 e5 0-1\n',
+    }
+
+
+def _empty_enriched_game(game_id: str, end_time: int):
+    return EnrichedGame(
+        uuid=game_id,
+        url=f"https://example.test/{game_id}",
+        white_username="Alice",
+        black_username="Bob",
+        white_rating=1500,
+        black_rating=1500,
+        white_result="resigned",
+        black_result="win",
+        result="0-1",
+        time_class="rapid",
+        time_control="600",
+        rated=True,
+        end_time=end_time,
+        chesscom_white_accuracy=None,
+        chesscom_black_accuracy=None,
+        opening_eco=None,
+        opening_name=None,
+        moves=[],
+    )
 
 
 def _opening_row(name: str, **values):

@@ -16,6 +16,7 @@ class Settings:
     openings_path: Path = ROOT_DIR / "openings_dataset/all.tsv"
     opening_vectors_path: Path = ROOT_DIR / "openings_dataset/opening_feature_vectors.csv"
     report_cache_dir: Path = ROOT_DIR / ".cache/reports"
+    report_analysis_cache_dir: Path = ROOT_DIR / ".cache/report_analysis"
     report_config_dir: Path = ROOT_DIR / ".cache/report_configs"
     player_vector_cache_path: Path = ROOT_DIR / ".cache/player_vectors.json"
     saved_reports_path: Path = ROOT_DIR / ".cache/saved_reports.json"

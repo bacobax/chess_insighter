@@ -8,6 +8,7 @@ from backend.services.chesscom_service import fetch_latest_games_for_report
 from backend.services.enrichment_service import enrich_games
 from backend.services.hparams_service import dump_simple_yaml, load_hparams, validate_numeric_hparams
 from backend.services.openings_service import build_opening_charts, serializable
+from backend.services.report_analysis_service import initialize_report_analysis
 from backend.settings import settings
 from utils.player_statistics import PlayerStatisticsBuilder
 
@@ -82,9 +83,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
     charts = ReportCharts(
         skill_profile=skill_profile(stats),
         favourite_openings=opening_charts["favourite_openings"],
-        top_opening_features=opening_charts["top_opening_features"],
         opening_characteristics=opening_charts["opening_characteristics"],
-        top_opening_matches=opening_charts["top_opening_matches"],
         opening_report_groups=opening_charts["opening_report_groups"],
         opening_components=opening_components(stats),
         time_management_indicators=time_management_indicators(stats),
@@ -92,6 +91,16 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         resourcefulness_components=resourcefulness_components(stats),
         game_analysis_components=game_analysis_components(stats),
         average_time_by_complexity=average_time_by_complexity(stats),
+    )
+    analysis_context = initialize_report_analysis(
+        cache_hash=cache_hash,
+        username=request.username,
+        raw_games=raw_games,
+        enriched_games=enriched_games,
+        engine_depth=request.engine_depth,
+        engine_enriched=bool(enrichment_metadata.get("engine_used")),
+        filters=filters,
+        refresh=request.refresh_cache,
     )
     response = ReportBuildResponse(
         cache_hash=cache_hash,
@@ -101,6 +110,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
             metadata=metadata,
             statistics_bundle=bundle_json,
             charts=charts,
+            analysis_context=analysis_context,
         ),
     )
     payload = response.model_dump()

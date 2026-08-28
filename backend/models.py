@@ -109,34 +109,58 @@ class ReportBuildRequest(GameFilters):
         return username
 
 
-class MistakesAnalysisRequest(GameFilters):
-    username: str
-    max_games: int = Field(default=20, ge=1, le=500)
-    selected_game_ids: list[str] | None = Field(default=None, max_length=500)
+class ReportMistakesSelectionRequest(BaseModel):
+    selected_game_ids: list[str] = Field(min_length=1, max_length=500)
     engine_depth: int = Field(default=10, ge=1, le=30)
     max_punishment_plies: int = Field(default=8, ge=1, le=20)
-
-    @field_validator("username")
-    @classmethod
-    def normalize_username(cls, value: str) -> str:
-        username = value.strip()
-        if not username:
-            raise ValueError("username is required")
-        return username
+    picker_filters: JsonObject | None = None
 
     @field_validator("selected_game_ids")
     @classmethod
-    def normalize_selected_game_ids(cls, value: list[str] | None) -> list[str] | None:
+    def normalize_selected_game_ids(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item.strip()]
+        if not normalized:
+            raise ValueError("at least one game is required")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("selected game IDs must be unique")
+        return normalized
+
+
+class ReportGamesCatalogRequest(GameFilters):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+    result_filter: list[Literal["win", "loss", "draw", "unknown"]] | None = None
+
+    @field_validator("result_filter")
+    @classmethod
+    def normalize_result_filter(
+        cls,
+        value: list[Literal["win", "loss", "draw", "unknown"]] | None,
+    ) -> list[Literal["win", "loss", "draw", "unknown"]] | None:
         if value is None:
             return None
-        normalized = [item.strip() for item in value if item.strip()]
+        normalized = sorted(set(value))
         return normalized or None
 
 
-class MistakesAnalysisResponse(BaseModel):
+class ReportMistakesResponse(BaseModel):
+    analysis_hash: str
+    cache_hit: bool
+    selected_games: list[GameSummary]
     metadata: JsonObject
     summary: JsonObject
     mistakes: list[JsonObject]
+
+
+class ReportGamesCatalogResponse(GamesQueryResponse):
+    cache_hit: bool
+
+
+class ReportMistakeDetailResponse(BaseModel):
+    analysis_hash: str
+    mistake: JsonObject
+    selected_games: list[GameSummary]
+    metadata: JsonObject
 
 
 class MetricPoint(BaseModel):
@@ -150,14 +174,6 @@ class OpeningCount(BaseModel):
     name: str
     count: int
     color: Literal["white", "black"]
-
-
-class OpeningFeatureSet(BaseModel):
-    opening_name: str
-    color: Literal["white", "black"]
-    count: int
-    family_name: str | None
-    features: list[MetricPoint]
 
 
 class OpeningMatch(BaseModel):
@@ -230,6 +246,12 @@ class OpeningStudyTreeChildrenRequest(BaseModel):
     similarity_type: Literal["cosine", "dot_product"] = Field(default="cosine", alias="similarityType")
     weighted_matching: bool = Field(default=True, alias="weightedMatching")
     matcher_weights: dict[str, float] | None = Field(default=None, alias="matcherWeights")
+    # Match mode controls which scoring dimensions are active:
+    #   "style"  — player_style_match + engine + systemness + memory only
+    #              (aggro/gamble zeroed: they share source data with the style vector)
+    #   "custom" — engine + aggro + gamble + systemness + memory only
+    #              (player_style_match zeroed: user wants objective opening properties)
+    match_mode: Literal["style", "custom"] = Field(default="style", alias="matchMode")
 
     model_config = {"populate_by_name": True}
 
@@ -304,16 +326,12 @@ class OpeningStudyTreeChildrenResponse(BaseModel):
 
 class OpeningReportGroup(BaseModel):
     opening_characteristics: list[MetricPoint]
-    top_opening_features: list[OpeningFeatureSet]
-    top_opening_matches: list[OpeningMatch]
 
 
 class ReportCharts(BaseModel):
     skill_profile: list[MetricPoint]
     favourite_openings: list[OpeningCount]
-    top_opening_features: list[OpeningFeatureSet]
     opening_characteristics: list[MetricPoint]
-    top_opening_matches: list[OpeningMatch]
     opening_report_groups: dict[str, OpeningReportGroup] = Field(default_factory=dict)
     opening_components: list[MetricPoint]
     time_management_indicators: list[MetricPoint]
@@ -323,10 +341,19 @@ class ReportCharts(BaseModel):
     average_time_by_complexity: list[MetricPoint]
 
 
+class ReportAnalysisContext(BaseModel):
+    games: list[GameSummary]
+    default_game_ids: list[str]
+    engine_depth: int
+    engine_enriched: bool
+    sidecar_id: str | None = None
+
+
 class ReportPayload(BaseModel):
     metadata: JsonObject
     statistics_bundle: JsonObject
     charts: ReportCharts
+    analysis_context: ReportAnalysisContext | None = None
 
 
 class ReportBuildResponse(BaseModel):
@@ -354,3 +381,16 @@ class SaveReportRequest(BaseModel):
     username: str
     games_analyzed: int
     request_params: JsonObject
+
+
+class MistakePositionRequest(BaseModel):
+    fen: str
+    player_color: Literal["white", "black"]
+    rating: int = Field(default=1500, ge=100, le=3500)
+    engine_depth: int = Field(default=10, ge=1, le=30)
+    max_plies: int = Field(default=6, ge=1, le=20)
+
+
+class MistakePositionResponse(BaseModel):
+    top_lines: list[JsonObject]
+    optimal_line: list[JsonObject]

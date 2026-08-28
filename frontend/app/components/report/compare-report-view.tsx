@@ -43,11 +43,12 @@ export function CompareReportView({
             defaultHparams={defaultHparams}
             initialReport={initialReport}
             initialParams={initialParams}
+            enableMistakes
           />
         ) : (
           <div />
         )}
-        {compare && other.trim() ? <PlayerReport username={other.trim()} defaultHparams={defaultHparams} /> : null}
+        {compare && other.trim() ? <PlayerReport username={other.trim()} defaultHparams={defaultHparams} enableMistakes={false} /> : null}
       </div>
     </div>
   );

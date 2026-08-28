@@ -55,45 +55,14 @@ export type OpeningCount = {
   color: "white" | "black";
 };
 
-export type OpeningFeatureSet = {
-  opening_name: string;
-  color: "white" | "black";
-  count: number;
-  family_name: string | null;
-  features: MetricPoint[];
-};
-
-export type OpeningMatch = {
-  opening_name: string;
-  similarity_score: number | null;
-  weighted_cosine_score: number | null;
-  dot_product_score: number | null;
-  match_mode: "cosine" | "dot_product";
-  structure_distribution_similarity: number | null;
-  target_color: "white" | "black" | "both" | null;
-  used_vector_color: "white" | "black" | "global";
-  eco_values: string | null;
-  line_count: number | null;
-  representative_pgn: string | null;
-  representative_uci: string | null;
-  fen: string | null;
-  used_features: string[];
-};
-
-export type OpeningMatchMode = "cosine" | "dot_product";
-
 export type OpeningReportGroup = {
   opening_characteristics: MetricPoint[];
-  top_opening_features: OpeningFeatureSet[];
-  top_opening_matches: OpeningMatch[];
 };
 
 export type ReportCharts = {
   skill_profile: MetricPoint[];
   favourite_openings: OpeningCount[];
-  top_opening_features: OpeningFeatureSet[];
   opening_characteristics: MetricPoint[];
-  top_opening_matches: OpeningMatch[];
   opening_report_groups: Record<"white" | "black" | "both", OpeningReportGroup>;
   opening_components: MetricPoint[];
   time_management_indicators: MetricPoint[];
@@ -107,6 +76,7 @@ export type ReportPayload = {
   metadata: Record<string, JsonValue>;
   statistics_bundle: Record<string, JsonValue>;
   charts: ReportCharts;
+  analysis_context: ReportAnalysisContext | null;
 };
 
 export type ReportBuildRequest = {
@@ -125,18 +95,31 @@ export type ReportBuildRequest = {
   until_month?: number | null;
 };
 
-export type MistakesAnalysisRequest = {
-  username: string;
-  max_games: number;
-  selected_game_ids?: string[] | null;
+export type ReportAnalysisContext = {
+  games: GameSummary[];
+  default_game_ids: string[];
+  engine_depth: number;
+  engine_enriched: boolean;
+  sidecar_id?: string | null;
+};
+
+export type ReportMistakesSelectionRequest = {
+  selected_game_ids: string[];
   engine_depth: number;
   max_punishment_plies: number;
+  picker_filters?: Record<string, JsonValue> | null;
+};
+
+export type ReportGamesCatalogRequest = {
+  page: number;
+  page_size: number;
   time_classes?: string[] | null;
   rated_filter?: boolean | null;
   since_year?: number | null;
   since_month?: number | null;
   until_year?: number | null;
   until_month?: number | null;
+  result_filter?: ("win" | "loss" | "draw" | "unknown")[] | null;
 };
 
 export type TacticTag = {
@@ -165,6 +148,7 @@ export type PunishmentLineMove = {
 };
 
 export type MistakeAnalysisItem = {
+  mistake_id: string;
   game_uuid: string | null;
   game_url: string | null;
   ply: number;
@@ -195,6 +179,7 @@ export type MistakeAnalysisItem = {
   actual_line_moves: PunishmentLineMove[];
   tactics: TacticTag[];
   actual_tactics: TacticTag[];
+  user_rating?: number;
 };
 
 export type MistakesAnalysisSummary = {
@@ -207,23 +192,24 @@ export type MistakesAnalysisSummary = {
   actual_punished_count: number;
 };
 
-export type MistakesAnalysisResponse = {
+export type ReportMistakesResponse = {
+  analysis_hash: string;
+  cache_hit: boolean;
+  selected_games: GameSummary[];
   metadata: Record<string, JsonValue>;
   summary: MistakesAnalysisSummary;
   mistakes: MistakeAnalysisItem[];
 };
 
-export type OpeningMatchRequest = {
-  cache_hash: string;
-  match_mode: OpeningMatchMode;
-  target_color: "white" | "black" | "both";
-  limit?: number;
+export type ReportGamesCatalogResponse = GamesQueryResponse & {
+  cache_hit: boolean;
 };
 
-export type OpeningMatchResponse = {
-  top_opening_matches: OpeningMatch[];
-  match_mode: OpeningMatchMode;
-  target_color: "white" | "black" | "both";
+export type ReportMistakeDetailResponse = {
+  analysis_hash: string;
+  mistake: MistakeAnalysisItem;
+  selected_games: GameSummary[];
+  metadata: Record<string, JsonValue>;
 };
 
 export type ReportBuildResponse = {
@@ -254,11 +240,41 @@ export type SaveReportRequest = {
 };
 
 // ---------------------------------------------------------------------------
+// Mistakes Analyzer — Position Analysis
+// ---------------------------------------------------------------------------
+
+export type EngineLinePreview = {
+  rank: number;
+  first_uci: string;
+  first_san: string;
+  line_san: string[];
+  line_uci: string[];
+  eval_cp: number | null;
+  mate_in: number | null;
+  user_win_prob: number | null;
+  user_eval_cp: number | null;
+};
+
+export type PositionAnalysis = {
+  top_lines: EngineLinePreview[];
+  optimal_line: PunishmentLineMove[];
+};
+
+export type MistakePositionRequest = {
+  fen: string;
+  player_color: "white" | "black";
+  rating?: number;
+  engine_depth?: number;
+  max_plies?: number;
+};
+
+// ---------------------------------------------------------------------------
 // Opening Study Suggestion Tree
 // ---------------------------------------------------------------------------
 
 export type TargetColor = "white" | "black";
 export type StudySimilarityType = "cosine" | "dot_product";
+export type MatchMode = "style" | "custom";
 
 export type MatcherFeatureKey =
   | "tactical_density"
@@ -297,6 +313,7 @@ export type OpeningStudyTreeChildrenRequest = {
   similarityType?: StudySimilarityType;
   weightedMatching?: boolean;
   matcherWeights?: Partial<Record<MatcherFeatureKey, number>>;
+  matchMode?: MatchMode;
 };
 
 export type MetricComponent = {

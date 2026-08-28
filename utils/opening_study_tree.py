@@ -66,6 +66,31 @@ DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
 ENGINE_SOUNDNESS_NEUTRAL = 0.5
 ENGINE_SOUNDNESS_CP_SCALE = 600.0
 
+# Dimensions whose source data overlaps with (or is independent of) the style
+# cosine.  The backend zeroes disallowed keys so client sliders can't reintroduce
+# them when the wrong mode is active.
+#
+# "style"  — player_style_match, engine, systemness, memory.
+#             aggro + gamble excluded: they reuse the same MATCHER_COLUMNS_V2
+#             features already in the style cosine → double-counting.
+# "custom" — engine, aggro, gamble, systemness, memory.
+#             player_style_match excluded: objective opening properties only.
+ALLOWED_WEIGHTS_BY_MODE: dict[str, frozenset[str]] = {
+    "style": frozenset({
+        "player_style_match",
+        "engine_soundness",
+        "systemness",
+        "memory_simplicity",
+    }),
+    "custom": frozenset({
+        "engine_soundness",
+        "aggressiveness",
+        "gambleness",
+        "systemness",
+        "memory_simplicity",
+    }),
+}
+
 # Common White first moves shown at the root when the target colour is Black,
 # before any style-based recommendation kicks in.
 COMMON_WHITE_FIRST_MOVES: tuple[str, ...] = ("e2e4", "d2d4", "c2c4", "g1f3")
@@ -940,6 +965,7 @@ def get_opening_study_tree_children(
     engine: Any = None,
     soundness_engine: Any | None = None,
     soundness_depth: int = 8,
+    match_mode: str = "style",
 ) -> list[OpeningStudyTreeNode]:
     """Compute child suggestion nodes for a single prefix (one level, lazy).
 
@@ -961,6 +987,10 @@ def get_opening_study_tree_children(
     top_k = max(1, int(top_k))
     opp_k = max(1, int(opponent_top_k)) if opponent_top_k is not None else top_k
     weights = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
+    # Enforce match mode: zero dimensions whose source data conflicts with the
+    # mode's intent.  This is authoritative — client-side sliders cannot override.
+    allowed = ALLOWED_WEIGHTS_BY_MODE.get(match_mode, ALLOWED_WEIGHTS_BY_MODE["style"])
+    weights = {k: (v if k in allowed else 0.0) for k, v in weights.items()}
     player = _normalize_player_vector(player_vector)
     prefix = list(prefix_uci or [])
 

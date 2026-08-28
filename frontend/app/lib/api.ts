@@ -1,6 +1,13 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, MistakesAnalysisRequest, MistakesAnalysisResponse, OpeningMatchRequest, OpeningMatchResponse, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, ReportBuildRequest, ReportBuildResponse, SavedReportsList, SaveReportRequest } from "./types";
+import type { GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PositionAnalysis, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, SavedReportsList, SaveReportRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -18,7 +25,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Use generic status message.
     }
-    throw new Error(message);
+    throw new ApiRequestError(message, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -43,8 +50,32 @@ export function buildReport(request: ReportBuildRequest) {
   });
 }
 
-export function analyzeMistakes(request: MistakesAnalysisRequest) {
-  return apiFetch<MistakesAnalysisResponse>("/api/mistakes/analyze", {
+export function analyzeReportMistakes(cacheHash: string, request: ReportMistakesSelectionRequest) {
+  return apiFetch<ReportMistakesResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function getActiveReportMistakes(cacheHash: string) {
+  return apiFetch<ReportMistakesResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes`);
+}
+
+export function queryReportMistakeGames(cacheHash: string, request: ReportGamesCatalogRequest) {
+  return apiFetch<ReportGamesCatalogResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes/games/query`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function getReportMistakeDetail(cacheHash: string, analysisHash: string, mistakeId: string) {
+  return apiFetch<ReportMistakeDetailResponse>(
+    `/api/report/${encodeURIComponent(cacheHash)}/mistakes/${encodeURIComponent(analysisHash)}/${encodeURIComponent(mistakeId)}`,
+  );
+}
+
+export function analyzePosition(request: MistakePositionRequest) {
+  return apiFetch<PositionAnalysis>("/api/mistakes/position", {
     method: "POST",
     body: JSON.stringify(request),
   });
@@ -67,13 +98,6 @@ export function saveReport(request: SaveReportRequest) {
 
 export function deleteSavedReport(cacheHash: string) {
   return apiFetch<void>(`/api/reports/saved/${encodeURIComponent(cacheHash)}`, { method: "DELETE" });
-}
-
-export function rematchOpenings(request: OpeningMatchRequest) {
-  return apiFetch<OpeningMatchResponse>("/api/openings/matches", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
 }
 
 /**

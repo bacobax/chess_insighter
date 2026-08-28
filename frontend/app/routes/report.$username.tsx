@@ -37,6 +37,14 @@ export default function ReportPage() {
     Promise.all(tasks);
   }, [restoreHash]);
 
+  useEffect(() => {
+    if (!initialReport || location.hash !== "#mistakes") return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("mistakes")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialReport, location.hash]);
+
   const ready = hparams !== null && (!restoreHash || initialReport !== undefined);
 
   return (

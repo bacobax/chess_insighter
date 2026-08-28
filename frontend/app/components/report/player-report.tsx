@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
-import { Bookmark, BookmarkCheck, ChevronDown, ChevronRight, Loader2, Network, RefreshCw } from "lucide-react";
+import { BarChart3, Bookmark, BookmarkCheck, BookOpen, Loader2, Network, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
-import { buildReport, rematchOpenings, saveReport } from "~/lib/api";
-import type { Hparams, OpeningMatch, OpeningMatchMode, OpeningReportGroup, ReportBuildRequest, ReportBuildResponse } from "~/lib/types";
-import { formatNumber, formatPercent } from "~/lib/utils";
-import { OpeningBoardPreview } from "./opening-board-preview";
+import { buildReport, saveReport } from "~/lib/api";
+import type { Hparams, MetricPoint, OpeningReportGroup, ReportBuildRequest, ReportBuildResponse, ReportCharts } from "~/lib/types";
+import { formatPercent } from "~/lib/utils";
 import { ReportConfigForm } from "./report-config-form";
+import { MistakesReportSection } from "./mistakes-report-section";
 
 export type PlayerReportInitialParams = Pick<
   ReportBuildRequest,
@@ -21,11 +22,13 @@ export function PlayerReport({
   defaultHparams,
   initialReport,
   initialParams,
+  enableMistakes = true,
 }: {
   username: string;
   defaultHparams: Hparams;
   initialReport?: ReportBuildResponse;
   initialParams?: PlayerReportInitialParams;
+  enableMistakes?: boolean;
 }) {
   const initialBuildRequest: ReportBuildRequest | null =
     initialReport && initialParams
@@ -63,7 +66,7 @@ export function PlayerReport({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit() {
+  async function submit(overrides: Partial<Pick<ReportBuildRequest, "use_engine" | "refresh_cache">> = {}) {
     setLoading(true);
     setError(null);
     const request: ReportBuildRequest = {
@@ -71,8 +74,8 @@ export function PlayerReport({
       hparams,
       max_games: maxGames,
       engine_depth: engineDepth,
-      use_engine: useEngine,
-      refresh_cache: refreshCache,
+      use_engine: overrides.use_engine ?? useEngine,
+      refresh_cache: overrides.refresh_cache ?? refreshCache,
       time_classes: timeClass === "all" ? null : [timeClass],
       rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
       since_year: sinceYear === "" ? null : sinceYear,
@@ -83,6 +86,8 @@ export function PlayerReport({
       setReport(response);
       setLastBuildRequest(request);
       setHparams(response.normalized_hparams);
+      setUseEngine(request.use_engine);
+      setRefreshCache(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not build report.");
     } finally {
@@ -153,21 +158,40 @@ export function PlayerReport({
             </div>
           )}
 
-          <Button onClick={submit} disabled={loading}>
+          <Button onClick={() => void submit()} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Build Report
           </Button>
           {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         </CardContent>
       </Card>
-      {report ? <ReportDashboard report={report} username={username} buildRequest={lastBuildRequest} /> : null}
+      {report ? (
+        <ReportDashboard
+          report={report}
+          username={username}
+          buildRequest={lastBuildRequest}
+          enableMistakes={enableMistakes}
+          onRebuildMistakes={() => void submit({ use_engine: true, refresh_cache: true })}
+        />
+      ) : null}
     </div>
   );
 }
 
-function ReportDashboard({ report, username, buildRequest }: { report: ReportBuildResponse; username: string; buildRequest: ReportBuildRequest | null }) {
+function ReportDashboard({
+  report,
+  username,
+  buildRequest,
+  enableMistakes,
+  onRebuildMistakes,
+}: {
+  report: ReportBuildResponse;
+  username: string;
+  buildRequest: ReportBuildRequest | null;
+  enableMistakes: boolean;
+  onRebuildMistakes: () => void;
+}) {
   const charts = report.report.charts;
-  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&cacheHash=${encodeURIComponent(report.cache_hash)}`;
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   async function handleSave() {
@@ -190,241 +214,294 @@ function ReportDashboard({ report, username, buildRequest }: { report: ReportBui
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between rounded-md border bg-white p-4 text-sm text-slate-600">
+      <div className="flex flex-col gap-3 rounded-md border bg-white p-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
         <span>
           Cache <span className="font-medium text-slate-950">{report.cache_hit ? "hit" : "miss"}</span>
           {" · "}hash <span className="font-mono text-xs">{report.cache_hash.slice(0, 12)}</span>
         </span>
-        <div className="flex items-center gap-2">
-          {buildRequest ? (
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saveState === "saving" || saveState === "saved"}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-            >
-              {saveState === "saving" ? (
-                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
-              ) : saveState === "saved" ? (
-                <><BookmarkCheck className="h-3.5 w-3.5 text-green-600" /> Saved</>
-              ) : saveState === "error" ? (
-                <>Error</>
-              ) : (
-                <><Bookmark className="h-3.5 w-3.5" /> Save</>
-              )}
-            </button>
-          ) : null}
-          <Link to={studyUrl}>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Network className="h-3.5 w-3.5" /> Opening Study Tree
-            </button>
-          </Link>
-        </div>
+        {buildRequest ? (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saveState === "saving" || saveState === "saved"}
+            className="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 sm:self-auto"
+          >
+            {saveState === "saving" ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+            ) : saveState === "saved" ? (
+              <><BookmarkCheck className="h-3.5 w-3.5 text-green-600" /> Saved</>
+            ) : saveState === "error" ? (
+              <>Error</>
+            ) : (
+              <><Bookmark className="h-3.5 w-3.5" /> Save</>
+            )}
+          </button>
+        ) : null}
       </div>
-      <SkillRadarChart data={charts.skill_profile} />
-      <FavouriteOpeningsChart data={charts.favourite_openings} />
-      <OpeningReportSections report={report} />
-      <MetricBarChart title="Opening Components" data={charts.opening_components} />
-      <MetricBarChart title="Time Management Indicators" data={charts.time_management_indicators} />
-      <MetricBarChart title="Advantage Capitalization Components" data={charts.advantage_capitalization_components} />
-      <MetricBarChart title="Resourcefulness Components" data={charts.resourcefulness_components} />
-      <MetricBarChart title="Game Analysis Components" data={charts.game_analysis_components} />
-      <MetricBarChart title="Average Time Spent by Complexity" data={charts.average_time_by_complexity} percent={false} />
+      <SkillProfileSection charts={charts} />
+      {enableMistakes ? (
+        <MistakesReportSection
+          username={username}
+          reportHash={report.cache_hash}
+          context={report.report.analysis_context ?? null}
+          reportFilters={buildRequest}
+          onRebuild={onRebuildMistakes}
+        />
+      ) : null}
+      <OpeningRepertoireSection report={report} username={username} />
     </div>
   );
 }
 
-function OpeningReportSections({ report }: { report: ReportBuildResponse }) {
-  const groups = report.report.charts.opening_report_groups ?? {
-    white: {
-      opening_characteristics: report.report.charts.opening_characteristics,
-      top_opening_features: report.report.charts.top_opening_features.filter((item) => item.color === "white"),
-      top_opening_matches: report.report.charts.top_opening_matches.filter((item) => item.target_color === "white"),
+type SkillEvidence = {
+  key: string;
+  label: string;
+  description: string;
+  data: MetricPoint[];
+  secondary?: MetricPoint[];
+};
+
+function SkillProfileSection({ charts }: { charts: ReportCharts }) {
+  const [activeEvidence, setActiveEvidence] = useState("openings");
+  const scoreByKey = new Map(charts.skill_profile.map((item) => [item.key, item.value]));
+  const evidence: SkillEvidence[] = [
+    {
+      key: "openings",
+      label: "Openings",
+      description: "Book accuracy, stability after leaving theory, and results from opening positions.",
+      data: charts.opening_components,
     },
-    black: {
-      opening_characteristics: report.report.charts.opening_characteristics,
-      top_opening_features: report.report.charts.top_opening_features.filter((item) => item.color === "black"),
-      top_opening_matches: report.report.charts.top_opening_matches.filter((item) => item.target_color === "black"),
+    {
+      key: "time_management",
+      label: "Time management",
+      description: "Clock-pressure risks and how thinking time changes with position complexity.",
+      data: charts.time_management_indicators,
+      secondary: charts.average_time_by_complexity,
     },
-    both: {
-      opening_characteristics: report.report.charts.opening_characteristics,
-      top_opening_features: report.report.charts.top_opening_features,
-      top_opening_matches: report.report.charts.top_opening_matches,
+    {
+      key: "advantage_capitalization",
+      label: "Advantage conversion",
+      description: "How reliably favorable positions are preserved and converted into results.",
+      data: charts.advantage_capitalization_components,
     },
-  };
-  const [open, setOpen] = useState<Record<"white" | "black" | "both", boolean>>({
-    white: true,
-    black: true,
-    both: true,
-  });
-  const sections: Array<{ key: "white" | "black" | "both"; title: string }> = [
-    { key: "white", title: "White" },
-    { key: "black", title: "Black" },
-    { key: "both", title: "Both (Avg)" },
+    {
+      key: "resourcefulness",
+      label: "Resourcefulness",
+      description: "The ability to recover, avoid collapse, and save difficult positions.",
+      data: charts.resourcefulness_components,
+    },
+    {
+      key: "game_analysis",
+      label: "Game analysis",
+      description: "Whether recurring weaknesses improve across the analyzed games.",
+      data: charts.game_analysis_components,
+    },
   ];
 
   return (
-    <div className="space-y-4">
-      {sections.map((section) => (
-        <Card key={section.key}>
-          <CardHeader className="space-y-0">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between text-left"
-              onClick={() => setOpen((current) => ({ ...current, [section.key]: !current[section.key] }))}
-            >
-              <CardTitle>{section.title}</CardTitle>
-              {open[section.key] ? <ChevronDown className="h-5 w-5 text-slate-500" /> : <ChevronRight className="h-5 w-5 text-slate-500" />}
-            </button>
+    <section aria-labelledby="skill-profile-heading" className="space-y-4 border-t border-slate-200 pt-6">
+      <ReportSectionHeading
+        icon={<BarChart3 className="h-5 w-5" />}
+        title="Player profile"
+        description="Composite skill scores first, followed by the measurements that support them."
+        headingId="skill-profile-heading"
+      />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
+        <SkillRadarChart data={charts.skill_profile} />
+        <SkillScoreList data={charts.skill_profile} />
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Score evidence</CardTitle>
+          <CardDescription>The underlying measurements available for each composite score.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={activeEvidence} onValueChange={setActiveEvidence}>
+            <TabsList className="flex h-auto w-full max-w-full justify-start gap-1 overflow-x-auto">
+              {evidence.map((item) => (
+                <TabsTrigger key={item.key} value={item.key} className="min-w-[9rem] flex-1 whitespace-normal px-3 py-2 text-left">
+                  <span className="block">
+                    <span className="block text-xs font-medium">{item.label}</span>
+                    <span className="mt-0.5 block text-xs opacity-70">{formatPercent(scoreByKey.get(item.key))}</span>
+                  </span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {evidence.map((item) => (
+              <TabsContent key={item.key} value={item.key} className="border-t border-slate-200 pt-5">
+                {activeEvidence === item.key ? (
+                  <>
+                    <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <h4 className="text-base font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>{item.label}</h4>
+                        <p className="mt-1 max-w-2xl text-sm" style={{ color: "var(--ink-soft)" }}>{item.description}</p>
+                      </div>
+                      <div className="text-sm" style={{ color: "var(--ink-soft)" }}>
+                        Profile score <span className="font-semibold" style={{ color: "var(--ink)" }}>{formatPercent(scoreByKey.get(item.key))}</span>
+                      </div>
+                    </div>
+                    <div className={item.secondary ? "grid gap-6 xl:grid-cols-2" : ""}>
+                      <MetricBarChart
+                        title={item.key === "time_management" ? "Risk indicators" : "Score components"}
+                        data={item.data}
+                        embedded
+                      />
+                      {item.secondary ? (
+                        <MetricBarChart
+                          title="Thinking time by complexity"
+                          description="Average seconds spent per move in each position category."
+                          data={item.secondary}
+                          percent={false}
+                          embedded
+                          directional={false}
+                        />
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+              </TabsContent>
+            ))}
+          </Tabs>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function SkillScoreList({ data }: { data: MetricPoint[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Scores at a glance</CardTitle>
+        <CardDescription>All profile dimensions on the same 0–100 scale.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 xl:grid-cols-1">
+          {data.map((item) => (
+            <div key={item.key}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
+                <span className="min-w-0 font-medium">{item.label}</span>
+                <span className="shrink-0 tabular-nums text-slate-600">{formatPercent(item.value)}</span>
+              </div>
+              <Progress value={item.value} />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OpeningRepertoireSection({ report, username }: { report: ReportBuildResponse; username: string }) {
+  const charts = report.report.charts;
+  const groups = charts.opening_report_groups;
+  const characteristics = {
+    white: groups?.white?.opening_characteristics ?? charts.opening_characteristics,
+    black: groups?.black?.opening_characteristics ?? charts.opening_characteristics,
+    both: groups?.both?.opening_characteristics ?? charts.opening_characteristics,
+  };
+  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&cacheHash=${encodeURIComponent(report.cache_hash)}`;
+
+  return (
+    <section aria-labelledby="opening-repertoire-heading" className="space-y-4 border-t border-slate-200 pt-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <ReportSectionHeading
+          icon={<BookOpen className="h-5 w-5" />}
+          title="Opening repertoire"
+          description="What appears most often and the kinds of positions reached from those openings."
+          headingId="opening-repertoire-heading"
+        />
+        <Link to={studyUrl} className="self-start sm:self-auto">
+          <Button variant="outline" size="sm">
+            <Network className="h-4 w-4" /> Study repertoire
+          </Button>
+        </Link>
+      </div>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <FavouriteOpeningsChart data={charts.favourite_openings} />
+        <Card>
+          <CardHeader>
+            <CardTitle>Position tendencies</CardTitle>
+            <CardDescription>Typical characteristics of the positions produced by the repertoire.</CardDescription>
           </CardHeader>
-          {open[section.key] ? (
-            <CardContent className="space-y-5">
-              <OpeningCharacteristics data={groups[section.key].opening_characteristics} />
-              <OpeningFeaturePanels data={groups[section.key].top_opening_features} />
-              <TopOpeningMatches report={report} group={groups[section.key]} targetColor={section.key} />
-            </CardContent>
-          ) : null}
+          <CardContent>
+            <Tabs defaultValue="both">
+              <TabsList className="grid w-full grid-cols-3 sm:w-auto">
+                <TabsTrigger value="white">As White</TabsTrigger>
+                <TabsTrigger value="black">As Black</TabsTrigger>
+                <TabsTrigger value="both">Overall</TabsTrigger>
+              </TabsList>
+              <TabsContent value="white"><OpeningCharacteristics data={characteristics.white} /></TabsContent>
+              <TabsContent value="black"><OpeningCharacteristics data={characteristics.black} /></TabsContent>
+              <TabsContent value="both"><OpeningCharacteristics data={characteristics.both} /></TabsContent>
+            </Tabs>
+          </CardContent>
         </Card>
+      </div>
+    </section>
+  );
+}
+
+const OPENING_CHARACTERISTIC_GROUPS = [
+  { title: "Position character", keys: ["tactical_density", "quiet_position_density", "middlegame_complexity"] },
+  { title: "King safety", keys: ["king_safety_risk", "early_castling_tendency", "opposite_side_castling_tendency"] },
+  { title: "Structure and outcome", keys: ["pawn_structure_sharpness", "material_imbalance", "endgame_likelihood_proxy", "final_structure_entropy"] },
+];
+
+function OpeningCharacteristics({ data }: { data: OpeningReportGroup["opening_characteristics"] }) {
+  const groupedKeys = new Set(OPENING_CHARACTERISTIC_GROUPS.flatMap((group) => group.keys));
+  const groups = [
+    ...OPENING_CHARACTERISTIC_GROUPS.map((group) => ({
+      ...group,
+      items: group.keys.map((key) => data.find((item) => item.key === key)).filter((item): item is MetricPoint => Boolean(item)),
+    })),
+    {
+      title: "Other",
+      keys: [],
+      items: data.filter((item) => !groupedKeys.has(item.key)),
+    },
+  ].filter((group) => group.items.length > 0);
+
+  return (
+    <div className="grid gap-5 md:grid-cols-3">
+      {groups.map((group, index) => (
+        <div key={group.title} className={index > 0 ? "md:border-l md:border-slate-200 md:pl-5" : ""}>
+          <h4 className="mb-3 text-sm font-semibold" style={{ color: "var(--ink)" }}>{group.title}</h4>
+          <div className="space-y-3">
+            {group.items.map((item) => (
+              <div key={item.key}>
+                <div className="mb-1.5 flex items-baseline justify-between gap-3 text-xs">
+                  <span className="font-medium">{item.label}</span>
+                  <span className="shrink-0 tabular-nums text-slate-600">{formatPercent(item.value)}</span>
+                </div>
+                <Progress value={item.value} />
+              </div>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
 }
 
-function OpeningFeaturePanels({ data }: { data: OpeningReportGroup["top_opening_features"] }) {
+function ReportSectionHeading({
+  icon,
+  title,
+  description,
+  headingId,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  headingId: string;
+}) {
   return (
-    <section className="space-y-3">
-      <h3 className="text-base font-semibold">Top 3 Opening Features</h3>
-      <div className="grid gap-4 md:grid-cols-2">
-        {data.map((opening) => (
-          <div key={`${opening.color}-${opening.opening_name}`} className="rounded-md border p-4">
-            <div className="mb-3 text-sm font-semibold">{opening.color}: {opening.opening_name}</div>
-            <div className="space-y-3">
-              {opening.features.map((feature) => (
-                <div key={feature.key}>
-                  <div className="mb-1 flex justify-between text-xs"><span>{feature.label}</span><span>{formatPercent(feature.value)}</span></div>
-                  <Progress value={feature.value} />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+    <div>
+      <div className="flex items-center gap-2" style={{ color: "var(--accent)" }}>
+        {icon}
+        <h2 id={headingId} className="text-xl" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>{title}</h2>
       </div>
-    </section>
-  );
-}
-
-function OpeningCharacteristics({ data }: { data: OpeningReportGroup["opening_characteristics"] }) {
-  return (
-    <section className="space-y-3">
-      <h3 className="text-base font-semibold">Opening Characteristics</h3>
-      <div className="flex flex-wrap gap-2">
-        {data.map((item) => (
-          <div key={item.key} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-            <span className="font-medium">{item.label}</span> <span className="text-slate-500">{formatPercent(item.value)}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function TopOpeningMatches({ report, group, targetColor }: { report: ReportBuildResponse; group: OpeningReportGroup; targetColor: "white" | "black" | "both" }) {
-  const initialMatches = group.top_opening_matches;
-  const [matches, setMatches] = useState<OpeningMatch[]>(initialMatches);
-  const [matchMode, setMatchMode] = useState<OpeningMatchMode>(initialMatches[0]?.match_mode ?? "cosine");
-  const [topK, setTopK] = useState<number>(3);
-  const [rematching, setRematching] = useState(false);
-  const [rematchError, setRematchError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMatches(initialMatches);
-    setMatchMode(initialMatches[0]?.match_mode ?? "cosine");
-    setTopK(initialMatches.length || 3);
-    setRematchError(null);
-  }, [report.cache_hash, targetColor]);
-
-  async function refresh(mode: OpeningMatchMode, k: number) {
-    setRematching(true);
-    setRematchError(null);
-    try {
-      const response = await rematchOpenings({
-        cache_hash: report.cache_hash,
-        match_mode: mode,
-        target_color: targetColor,
-        limit: k,
-      });
-      setMatches(response.top_opening_matches);
-      setMatchMode(response.match_mode);
-    } catch (err) {
-      setRematchError(err instanceof Error ? err.message : "Could not update opening matches.");
-    } finally {
-      setRematching(false);
-    }
-  }
-
-  async function changeMatchMode(nextMode: OpeningMatchMode) {
-    setMatchMode(nextMode);
-    await refresh(nextMode, topK);
-  }
-
-  async function changeTopK(k: number) {
-    const clamped = Math.min(50, Math.max(1, k));
-    setTopK(clamped);
-    await refresh(matchMode, clamped);
-  }
-
-  return (
-    <section className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-base font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>Top Opening Matches</h3>
-        <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: "var(--ink-soft)" }}>
-          <label className="flex items-center gap-1.5">
-            <span>K</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={topK}
-              disabled={rematching}
-              className="h-8 w-16 rounded px-2 text-sm outline-none focus:ring-2"
-              style={{ backgroundColor: "var(--paper)", border: "1px solid var(--line)", color: "var(--ink)" }}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                if (val >= 1 && val <= 50) changeTopK(val);
-              }}
-            />
-          </label>
-          <label className="flex items-center gap-1.5">
-            <span>Mode</span>
-            <select
-              className="h-8 rounded px-2 text-sm outline-none"
-              style={{ backgroundColor: "var(--paper)", border: "1px solid var(--line)", color: "var(--ink)" }}
-              value={matchMode}
-              disabled={rematching}
-              onChange={(event) => changeMatchMode(event.target.value as OpeningMatchMode)}
-            >
-              <option value="cosine">Cosine</option>
-              <option value="dot_product">Dot product</option>
-            </select>
-          </label>
-        </div>
-      </div>
-      <div className="grid gap-3">
-        {rematchError ? <div className="rounded-md p-3 text-sm" style={{ border: "1px solid #e8c4b8", backgroundColor: "#f9ede9", color: "#7c3a2d" }}>{rematchError}</div> : null}
-        {matches.map((match, index) => (
-          <div key={`${targetColor}-${match.opening_name}-${index}`} className="grid max-w-2xl gap-3 rounded-md p-3 sm:grid-cols-[80px_minmax(0,1fr)]" style={{ border: "1px solid var(--line)" }}>
-            <OpeningBoardPreview fen={match.fen} label={match.opening_name} />
-            <div className="min-w-0">
-              <div className="truncate font-semibold" style={{ color: "var(--ink)" }} title={match.opening_name}>{match.opening_name}</div>
-              <div className="mt-1 truncate text-sm" style={{ color: "var(--ink-soft)" }} title={`ECO ${match.eco_values ?? "n/a"}`}>{matchMode === "dot_product" ? "dot" : "cos"} {formatNumber(match.similarity_score, 3)} · {match.used_vector_color} · ECO {match.eco_values ?? "n/a"} · lines {match.line_count ?? "n/a"}</div>
-              <div className="mt-2 line-clamp-2 text-xs" style={{ color: "var(--ink-faint)" }}>{match.representative_pgn ?? "No representative line"}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+      <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--ink-soft)" }}>{description}</p>
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import { Input } from "~/components/ui/input";
 import { cn } from "~/lib/utils";
 import type {
   MatcherFeatureKey,
+  MatchMode,
   OpeningStudyTreeNode,
   OpeningStudyWeights,
   StudySimilarityType,
@@ -25,6 +26,7 @@ export type StudyControlsState = {
   similarityType: StudySimilarityType;
   weightedMatching: boolean;
   matcherWeights: Record<MatcherFeatureKey, number>;
+  matchMode: MatchMode;
 };
 
 export const DEFAULT_WEIGHTS: Required<OpeningStudyWeights> = {
@@ -49,6 +51,18 @@ export const DEFAULT_MATCHER_WEIGHTS: Record<MatcherFeatureKey, number> = {
 };
 
 type WeightKey = keyof Required<OpeningStudyWeights>;
+
+// Which score-weight dimensions are active per mode.
+// Mirrors ALLOWED_WEIGHTS_BY_MODE in utils/opening_study_tree.py (camelCase keys).
+const ALLOWED_BY_MODE: Record<MatchMode, Set<WeightKey>> = {
+  style: new Set(["playerStyleMatch", "engineSoundness", "systemness", "memorySimplicity"]),
+  custom: new Set(["engineSoundness", "aggressiveness", "gambleness", "systemness", "memorySimplicity"]),
+};
+
+const MODE_DESCRIPTIONS: Record<MatchMode, string> = {
+  style: "Finds openings that fit YOUR playing style. Aggro & Gamble are hidden — they'd double-count the same data the style match already uses.",
+  custom: "Ranks openings by objective properties (sharpness, risk, structure). Style match is hidden — use this when you want to explore outside your comfort zone.",
+};
 
 // Descriptions shown as tooltips on the score weight labels.
 const WEIGHT_DESCRIPTIONS: Record<WeightKey, string> = {
@@ -102,15 +116,18 @@ const WEIGHT_FIELDS: { key: WeightKey; label: string; color: string }[] = [
 
 /**
  * Move one weight to `newValue` and redistribute the delta proportionally
- * among the remaining weights so the sum stays exactly 1.0.
+ * among the other ALLOWED weights so their sum stays exactly 1.0.
+ * Disallowed keys are kept at 0 and never touched.
  */
 function redistributeWeights(
   weights: Required<OpeningStudyWeights>,
   changedKey: WeightKey,
   newValue: number,
+  mode: MatchMode,
 ): Required<OpeningStudyWeights> {
+  const allowed = ALLOWED_BY_MODE[mode];
   const clamped = Math.max(0, Math.min(1, newValue));
-  const others = WEIGHT_FIELDS.map((f) => f.key).filter((k) => k !== changedKey);
+  const others = WEIGHT_FIELDS.map((f) => f.key).filter((k) => k !== changedKey && allowed.has(k));
   const sumOthers = others.reduce((s, k) => s + weights[k], 0);
   const remaining = 1 - clamped;
 
@@ -125,6 +142,34 @@ function redistributeWeights(
     }
   }
 
+  return next;
+}
+
+/**
+ * When switching modes, zero disallowed keys and renormalize allowed ones
+ * so they still sum to 1.0.
+ */
+function applyModeToWeights(
+  weights: Required<OpeningStudyWeights>,
+  newMode: MatchMode,
+): Required<OpeningStudyWeights> {
+  const allowed = ALLOWED_BY_MODE[newMode];
+  const next = { ...weights } as Required<OpeningStudyWeights>;
+  // Zero disallowed.
+  for (const { key } of WEIGHT_FIELDS) {
+    if (!allowed.has(key)) next[key] = 0;
+  }
+  // Renormalize allowed to sum = 1.
+  const sum = WEIGHT_FIELDS.filter(({ key }) => allowed.has(key)).reduce((s, { key }) => s + next[key], 0);
+  if (sum <= 0) {
+    // Fallback: equal split.
+    const each = 1 / allowed.size;
+    for (const key of allowed) next[key] = each;
+  } else {
+    for (const key of allowed) {
+      next[key] = next[key] / sum;
+    }
+  }
   return next;
 }
 
@@ -163,8 +208,14 @@ type Props = {
 export function OpeningStudyControls({ state, loading, onChange, onGenerate, onReset, selectedNode, playerVector }: Props) {
   const canGenerate = !loading && (state.cacheHash.trim() !== "" || state.username.trim() !== "");
 
+  const allowedKeys = ALLOWED_BY_MODE[state.matchMode];
+
   function handleWeightChange(key: WeightKey, newValue: number) {
-    onChange({ weights: redistributeWeights(state.weights, key, newValue) });
+    onChange({ weights: redistributeWeights(state.weights, key, newValue, state.matchMode) });
+  }
+
+  function handleModeChange(newMode: MatchMode) {
+    onChange({ matchMode: newMode, weights: applyModeToWeights(state.weights, newMode) });
   }
 
   function handleMatcherWeightChange(key: MatcherFeatureKey, newValue: number) {
@@ -250,13 +301,36 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         />
       </label>
 
+      {/* Match mode toggle */}
+      <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+        Scoring mode
+        <div className="flex gap-2">
+          {(["style", "custom"] as MatchMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => handleModeChange(m)}
+              className={cn(
+                "flex-1 rounded-md border px-2 py-1.5 text-[11px] capitalize transition-colors",
+                state.matchMode === m
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+              )}
+            >
+              {m === "style" ? "Style match" : "Custom"}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-400">{MODE_DESCRIPTIONS[state.matchMode]}</p>
+      </div>
+
       {/* Score weights — simplex sliders: moving one redistributes the rest */}
       <div className="flex flex-col gap-1 rounded-md border border-slate-200 p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-slate-600">Score weights</span>
           <button
             type="button"
-            onClick={() => onChange({ weights: { ...DEFAULT_WEIGHTS } })}
+            onClick={() => onChange({ weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, state.matchMode) })}
             className="text-[10px] text-slate-400 hover:text-slate-600"
           >
             reset
@@ -264,19 +338,20 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         </div>
 
         {WEIGHT_FIELDS.map(({ key, label, color }) => {
+          const active = allowedKeys.has(key);
           const pct = Math.round(state.weights[key] * 100);
           return (
-            <div key={key} className="flex flex-col gap-0.5">
+            <div key={key} className={cn("flex flex-col gap-0.5", !active && "opacity-35")}>
               <div className="flex items-center justify-between text-[11px]">
-                <span className="font-medium text-slate-600" title={WEIGHT_DESCRIPTIONS[key]}>{label}</span>
-                <span className="tabular-nums text-slate-500">{pct}%</span>
+                <span className="font-medium text-slate-600" title={active ? WEIGHT_DESCRIPTIONS[key] : "Disabled in this mode"}>{label}</span>
+                <span className="tabular-nums text-slate-500">{active ? `${pct}%` : "—"}</span>
               </div>
               <div className="relative flex items-center">
                 {/* Filled track behind the native slider */}
                 <div className="pointer-events-none absolute left-0 top-1/2 h-1.5 w-full -translate-y-1/2 overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full rounded-full transition-[width] duration-75"
-                    style={{ width: `${pct}%`, backgroundColor: color }}
+                    style={{ width: `${pct}%`, backgroundColor: active ? color : "#94a3b8" }}
                   />
                 </div>
                 <input
@@ -285,12 +360,15 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
                   max={1}
                   step={0.01}
                   value={state.weights[key]}
+                  disabled={!active}
                   onChange={(event) => handleWeightChange(key, Number(event.target.value))}
-                  className="weight-slider relative w-full cursor-pointer appearance-none bg-transparent"
+                  className={cn(
+                    "weight-slider relative w-full appearance-none bg-transparent",
+                    active ? "cursor-pointer" : "cursor-not-allowed",
+                  )}
                   style={
                     {
-                      "--thumb-color": color,
-                      // Webkit
+                      "--thumb-color": active ? color : "#94a3b8",
                       WebkitAppearance: "none",
                     } as React.CSSProperties
                   }
@@ -302,14 +380,17 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
 
         {/* Stacked bar showing the current weight distribution */}
         <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full">
-          {WEIGHT_FIELDS.map(({ key, color }) => (
-            <div
-              key={key}
-              className="h-full transition-[flex] duration-75"
-              style={{ flex: state.weights[key], backgroundColor: color }}
-              title={`${WEIGHT_FIELDS.find((f) => f.key === key)?.label}: ${Math.round(state.weights[key] * 100)}%`}
-            />
-          ))}
+          {WEIGHT_FIELDS.map(({ key, color }) => {
+            const active = allowedKeys.has(key);
+            return (
+              <div
+                key={key}
+                className="h-full transition-[flex] duration-75"
+                style={{ flex: state.weights[key], backgroundColor: active ? color : "transparent" }}
+                title={`${WEIGHT_FIELDS.find((f) => f.key === key)?.label}: ${Math.round(state.weights[key] * 100)}%`}
+              />
+            );
+          })}
         </div>
       </div>
 

@@ -74,6 +74,7 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
             weighted_matching=request.weighted_matching,
             matcher_weights=request.matcher_weights,
             soundness_engine=engine,
+            match_mode=request.match_mode,
         )
 
     try:

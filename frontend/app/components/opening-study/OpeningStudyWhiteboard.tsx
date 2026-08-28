@@ -126,6 +126,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
       similarityType: controls.similarityType,
       weightedMatching: controls.weightedMatching,
       matcherWeights: controls.weightedMatching ? controls.matcherWeights : undefined,
+      matchMode: controls.matchMode,
     }),
     [controls],
   );

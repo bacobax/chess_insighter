@@ -34,6 +34,7 @@ export default function OpeningStudyPage() {
     similarityType: "cosine",
     weightedMatching: true,
     matcherWeights: { ...DEFAULT_MATCHER_WEIGHTS },
+    matchMode: "style",
   });
   const [generationKey, setGenerationKey] = useState(0);
   const [selectedNode, setSelectedNode] = useState<OpeningStudyTreeNode | null>(null);

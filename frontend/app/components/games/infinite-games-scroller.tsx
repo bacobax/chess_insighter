@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { BarChart3, Loader2, ShieldAlert } from "lucide-react";
+import { BarChart3, Loader2 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { queryGames } from "~/lib/api";
 import type { GameSummary } from "~/lib/types";
@@ -55,12 +55,6 @@ export function InfiniteGamesScroller({ username }: { username: string }) {
           <p className="mt-1 text-sm text-slate-500">Chess.com games · scroll to load more.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link to={`/mistakes/${encodeURIComponent(username)}`}>
-            <Button variant="secondary">
-              <ShieldAlert className="h-4 w-4" />
-              Mistakes Analyzer
-            </Button>
-          </Link>
           <Link to={`/report/${encodeURIComponent(username)}`}>
             <Button>
               <BarChart3 className="h-4 w-4" />

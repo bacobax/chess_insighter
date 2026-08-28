@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Activity,
-  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Loader2,
+  RefreshCw,
   Search,
   ShieldAlert,
   SlidersHorizontal,
@@ -16,34 +17,43 @@ import {
 import { OpeningBoardPreview } from "~/components/report/opening-board-preview";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
-import { analyzeMistakes, queryGames } from "~/lib/api";
-import type { GameSummary, MistakeAnalysisItem, MistakesAnalysisResponse } from "~/lib/types";
+import {
+  ApiRequestError,
+  analyzeReportMistakes,
+  getActiveReportMistakes,
+  queryReportMistakeGames,
+} from "~/lib/api";
+import type {
+  GameSummary,
+  MistakeAnalysisItem,
+  ReportAnalysisContext,
+  ReportBuildRequest,
+  ReportMistakesResponse,
+} from "~/lib/types";
 import { cn } from "~/lib/utils";
 
-type Mode = "latest" | "selected";
 type ResultFilter = "all" | "loss" | "draw" | "win";
 type RatedFilter = "all" | "rated" | "unrated";
 type DetailMode = "simple" | "advanced";
 type SortMode = "impact" | "move" | "severity" | "punished";
 type GroupMode = "game" | "severity" | "theme" | "outcome";
 
-const TIME_CLASSES = ["rapid", "blitz", "bullet", "daily"];
-const BLUNDER_STORAGE_PREFIX = "chess-insighter:blunder";
-const ANALYSIS_STORAGE_PREFIX = "chess-insighter:mistakes-analysis";
-
-type PersistedMistakesState = {
-  version: 1;
-  mode: Mode;
-  maxGames: number;
+type ReportMistakesDraft = {
+  sidecarId: string;
+  selectedIds: string[];
   engineDepth: number;
   maxPunishmentPlies: number;
   timeClass: string;
   ratedFilter: RatedFilter;
   resultFilter: ResultFilter;
-  selectedIds: string[];
-  games: GameSummary[];
-  analysis: MistakesAnalysisResponse | null;
+  sinceYear: number | "";
+  sinceMonth: number | "";
+  untilYear: number | "";
+  untilMonth: number | "";
 };
+
+const TIME_CLASSES = ["rapid", "blitz", "bullet", "daily"];
+const RESPONSIVE_INITIAL_DIMENSION = { width: 1, height: 1 };
 
 type RankedMistake = {
   mistake: MistakeAnalysisItem;
@@ -67,112 +77,177 @@ type GameMistakeStats = {
   topTheme: string | null;
 };
 
-export default function MistakesPage() {
-  const params = useParams();
-  const username = params.username ?? "";
-  const [mode, setMode] = useState<Mode>("latest");
-  const [maxGames, setMaxGames] = useState(20);
-  const [engineDepth, setEngineDepth] = useState(10);
+export function MistakesReportSection({
+  username,
+  reportHash,
+  context,
+  reportFilters,
+  onRebuild,
+}: {
+  username: string;
+  reportHash: string;
+  context: ReportAnalysisContext | null;
+  reportFilters: Pick<ReportBuildRequest, "time_classes" | "rated_filter" | "since_year" | "since_month" | "until_year" | "until_month"> | null;
+  onRebuild: () => void;
+}) {
+  const [engineDepth, setEngineDepth] = useState(context?.engine_depth ?? 10);
   const [maxPunishmentPlies, setMaxPunishmentPlies] = useState(8);
-  const [timeClass, setTimeClass] = useState<string>("all");
-  const [ratedFilter, setRatedFilter] = useState<RatedFilter>("all");
+  const [timeClass, setTimeClass] = useState<string>(reportFilters?.time_classes?.[0] ?? "all");
+  const [ratedFilter, setRatedFilter] = useState<RatedFilter>(
+    reportFilters?.rated_filter === true ? "rated" : reportFilters?.rated_filter === false ? "unrated" : "all",
+  );
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [games, setGames] = useState<GameSummary[]>([]);
+  const [sinceYear, setSinceYear] = useState<number | "">(reportFilters?.since_year ?? "");
+  const [sinceMonth, setSinceMonth] = useState<number | "">(reportFilters?.since_month ?? "");
+  const [untilYear, setUntilYear] = useState<number | "">(reportFilters?.until_year ?? "");
+  const [untilMonth, setUntilMonth] = useState<number | "">(reportFilters?.until_month ?? "");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(context?.default_game_ids ?? []));
+  const [games, setGames] = useState<GameSummary[]>(context?.games ?? []);
   const [gamesLoading, setGamesLoading] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<MistakesAnalysisResponse | null>(null);
-  const [restored, setRestored] = useState(false);
+  const [analysis, setAnalysis] = useState<ReportMistakesResponse | null>(null);
   const [detailMode, setDetailMode] = useState<DetailMode>("simple");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gameEditorOpen, setGameEditorOpen] = useState(false);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogHasMore, setCatalogHasMore] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("impact");
   const [groupMode, setGroupMode] = useState<GroupMode>("game");
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const sidecarId = context?.sidecar_id ?? context?.default_game_ids.join("|") ?? "missing";
 
   const apiFilters = useMemo(
     () => ({
       time_classes: timeClass === "all" ? null : [timeClass],
       rated_filter: ratedFilter === "all" ? null : ratedFilter === "rated",
+      since_year: sinceYear === "" ? null : sinceYear,
+      since_month: sinceMonth === "" ? null : sinceMonth,
+      until_year: untilYear === "" ? null : untilYear,
+      until_month: untilMonth === "" ? null : untilMonth,
+      result_filter: resultFilter === "all" ? null : [resultFilter],
     }),
-    [ratedFilter, timeClass],
+    [ratedFilter, resultFilter, sinceMonth, sinceYear, timeClass, untilMonth, untilYear],
   );
 
   useEffect(() => {
-    const saved = loadPersistedState(username);
-    if (saved) {
-      setMode(saved.mode);
-      setMaxGames(saved.maxGames);
-      setEngineDepth(saved.engineDepth);
-      setMaxPunishmentPlies(saved.maxPunishmentPlies);
-      setTimeClass(saved.timeClass);
-      setRatedFilter(saved.ratedFilter);
-      setResultFilter(saved.resultFilter);
-      setSelectedIds(new Set(saved.selectedIds));
-      setGames(saved.games);
-      setAnalysis(saved.analysis);
-    } else {
-      setMode("latest");
-      setMaxGames(20);
-      setEngineDepth(10);
-      setMaxPunishmentPlies(8);
-      setTimeClass("all");
-      setRatedFilter("all");
-      setResultFilter("all");
-      setSelectedIds(new Set());
-      setGames([]);
-      setAnalysis(null);
-    }
+    let cancelled = false;
+    const initialPickerFilters = {
+      time_classes: reportFilters?.time_classes ?? null,
+      rated_filter: reportFilters?.rated_filter ?? null,
+      since_year: reportFilters?.since_year ?? null,
+      since_month: reportFilters?.since_month ?? null,
+      until_year: reportFilters?.until_year ?? null,
+      until_month: reportFilters?.until_month ?? null,
+      result_filter: null,
+    };
+    setAnalysis(null);
+    setDraftReady(false);
     setError(null);
-    setRestored(true);
-  }, [username]);
+    setGames(context?.games ?? []);
+    setSelectedIds(new Set(context?.default_game_ids ?? []));
+    setEngineDepth(context?.engine_depth ?? 10);
+    setMaxPunishmentPlies(8);
+    setTimeClass(reportFilters?.time_classes?.[0] ?? "all");
+    setRatedFilter(reportFilters?.rated_filter === true ? "rated" : reportFilters?.rated_filter === false ? "unrated" : "all");
+    setResultFilter("all");
+    setSinceYear(reportFilters?.since_year ?? "");
+    setSinceMonth(reportFilters?.since_month ?? "");
+    setUntilYear(reportFilters?.until_year ?? "");
+    setUntilMonth(reportFilters?.until_month ?? "");
+    if (!context?.engine_enriched) return () => { cancelled = true; };
+
+    setAnalysisLoading(true);
+    getActiveReportMistakes(reportHash)
+      .catch((err) => {
+        if (err instanceof ApiRequestError && err.status === 404) {
+          return analyzeReportMistakes(reportHash, {
+            selected_game_ids: context.default_game_ids,
+            engine_depth: context.engine_depth,
+            max_punishment_plies: 8,
+            picker_filters: initialPickerFilters,
+          });
+        }
+        throw err;
+      })
+      .then((response) => {
+        if (cancelled) return;
+        applyAnalysisResponse(response);
+        applyDraft(loadReportDraft(reportHash, sidecarId));
+        setDraftReady(true);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not analyze mistakes.");
+          setDraftReady(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAnalysisLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [reportHash, sidecarId]);
 
   useEffect(() => {
-    if (!restored) return;
-    setGamesLoading(true);
-    queryGames({ username, page: 1, page_size: 100, ...apiFilters })
-      .then((response) => setGames(response.items))
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load games."))
-      .finally(() => setGamesLoading(false));
-  }, [apiFilters, restored, username]);
-
-  useEffect(() => {
-    if (!restored) return;
-    persistState(username, {
-      version: 1,
-      mode,
-      maxGames,
+    if (!draftReady) return;
+    saveReportDraft(reportHash, {
+      sidecarId,
+      selectedIds: Array.from(selectedIds),
       engineDepth,
       maxPunishmentPlies,
       timeClass,
       ratedFilter,
       resultFilter,
-      selectedIds: Array.from(selectedIds),
-      games,
-      analysis,
+      sinceYear,
+      sinceMonth,
+      untilYear,
+      untilMonth,
     });
-  }, [
-    analysis,
-    engineDepth,
-    games,
-    maxGames,
-    maxPunishmentPlies,
-    mode,
-    ratedFilter,
-    restored,
-    resultFilter,
-    selectedIds,
-    timeClass,
-    username,
-  ]);
+  }, [draftReady, engineDepth, maxPunishmentPlies, ratedFilter, reportHash, resultFilter, selectedIds, sidecarId, sinceMonth, sinceYear, timeClass, untilMonth, untilYear]);
+
+  function applyAnalysisResponse(response: ReportMistakesResponse) {
+    setAnalysis(response);
+    setGames((current) => mergeGames(current, context?.games ?? [], response.selected_games));
+    const metadata = response.metadata as Record<string, unknown>;
+    setSelectedIds(new Set(stringArray(metadata.selected_game_ids)));
+    setEngineDepth(numberOr(metadata.engine_depth, context?.engine_depth ?? 10));
+    setMaxPunishmentPlies(numberOr(metadata.max_punishment_plies, 8));
+    const filters = metadata.picker_filters;
+    if (isRecord(filters)) {
+      const classes = stringArray(filters.time_classes);
+      setTimeClass(classes[0] ?? "all");
+      setRatedFilter(filters.rated_filter === true ? "rated" : filters.rated_filter === false ? "unrated" : "all");
+      const results = stringArray(filters.result_filter);
+      setResultFilter(isResultFilter(results[0]) ? results[0] : "all");
+      setSinceYear(optionalNumber(filters.since_year));
+      setSinceMonth(optionalNumber(filters.since_month));
+      setUntilYear(optionalNumber(filters.until_year));
+      setUntilMonth(optionalNumber(filters.until_month));
+    }
+  }
+
+  function applyDraft(draft: ReportMistakesDraft | null) {
+    if (!draft) return;
+    setSelectedIds(new Set(draft.selectedIds));
+    setEngineDepth(draft.engineDepth);
+    setMaxPunishmentPlies(draft.maxPunishmentPlies);
+    setTimeClass(draft.timeClass);
+    setRatedFilter(draft.ratedFilter);
+    setResultFilter(draft.resultFilter);
+    setSinceYear(draft.sinceYear);
+    setSinceMonth(draft.sinceMonth);
+    setUntilYear(draft.untilYear);
+    setUntilMonth(draft.untilMonth);
+  }
 
   const filteredGames = useMemo(
     () => games.filter((game) => resultFilter === "all" || game.result === resultFilter),
     [games, resultFilter],
   );
   const selectedGames = useMemo(
-    () => filteredGames.filter((game) => game.id && selectedIds.has(game.id)),
-    [filteredGames, selectedIds],
+    () => games.filter((game) => game.id && selectedIds.has(game.id)),
+    [games, selectedIds],
   );
   const topMistake = analysis?.mistakes[0] ?? null;
   const gameStats = useMemo(
@@ -184,35 +259,31 @@ export default function MistakesPage() {
     [activeTheme, analysis?.mistakes, sortMode],
   );
   const mistakeGroups = useMemo(
-    () => groupMistakes(visibleMistakes, games, groupMode),
-    [games, groupMode, visibleMistakes],
+    () => groupMistakes(visibleMistakes, mergeGames(games, analysis?.selected_games ?? []), groupMode),
+    [analysis?.selected_games, games, groupMode, visibleMistakes],
+  );
+  const activeIds = stringArray((analysis?.metadata as Record<string, unknown> | undefined)?.selected_game_ids);
+  const stale = Boolean(
+    analysis && (
+      sortedKey(activeIds) !== sortedKey(Array.from(selectedIds))
+      || numberOr(analysis.metadata.engine_depth, 0) !== engineDepth
+      || numberOr(analysis.metadata.max_punishment_plies, 0) !== maxPunishmentPlies
+    ),
   );
 
   async function runAnalysis() {
     setAnalysisLoading(true);
     setError(null);
     try {
-      const filteredLatestIds =
-        mode === "latest" && resultFilter !== "all"
-          ? filteredGames.slice(0, maxGames).map((game) => game.id).filter(isString)
-          : null;
-      const explicitSelectedIds = mode === "selected" ? Array.from(selectedIds) : null;
-      const selected_game_ids = explicitSelectedIds ?? filteredLatestIds;
-      if (mode === "selected" && (!selected_game_ids || selected_game_ids.length === 0)) {
-        throw new Error("Select at least one game.");
-      }
-      if (resultFilter !== "all" && (!selected_game_ids || selected_game_ids.length === 0)) {
-        throw new Error("No games match that result filter.");
-      }
-      const response = await analyzeMistakes({
-        username,
-        max_games: selected_game_ids ? Math.max(maxGames, games.length, selected_game_ids.length) : maxGames,
-        selected_game_ids,
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) throw new Error("Select at least one game.");
+      const response = await analyzeReportMistakes(reportHash, {
+        selected_game_ids: ids,
         engine_depth: engineDepth,
         max_punishment_plies: maxPunishmentPlies,
-        ...apiFilters,
+        picker_filters: apiFilters,
       });
-      setAnalysis(response);
+      applyAnalysisResponse(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not analyze mistakes.");
     } finally {
@@ -220,9 +291,27 @@ export default function MistakesPage() {
     }
   }
 
+  async function loadCatalog(page = 1) {
+    setGamesLoading(true);
+    setError(null);
+    try {
+      const response = await queryReportMistakeGames(reportHash, {
+        page,
+        page_size: 50,
+        ...apiFilters,
+      });
+      setGames((current) => mergeGames(page === 1 ? context?.games ?? [] : current, response.items));
+      setCatalogPage(page);
+      setCatalogHasMore(response.has_more && page * response.page_size < 500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load games.");
+    } finally {
+      setGamesLoading(false);
+    }
+  }
+
   function toggleSelected(id: string | null) {
     if (!id) return;
-    setMode("selected");
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -232,33 +321,41 @@ export default function MistakesPage() {
   }
 
   function selectLosses() {
-    setMode("selected");
     setSelectedIds(new Set(games.filter((game) => game.result === "loss").map((game) => game.id).filter(isString)));
   }
 
   function selectRecent(count: number) {
-    setMode("selected");
     setSelectedIds(new Set(filteredGames.slice(0, count).map((game) => game.id).filter(isString)));
   }
 
+  if (!context?.engine_enriched) {
+    return (
+      <section id="mistakes" aria-labelledby="mistakes-heading" className="scroll-mt-5 space-y-4 border-t border-slate-200 pt-6">
+        <div>
+          <div className="flex items-center gap-2" style={{ color: "var(--accent)" }}>
+            <ShieldAlert className="h-5 w-5" />
+            <h2 id="mistakes-heading" className="text-xl" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>Mistakes and learning priorities</h2>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--ink-soft)" }}>Concrete positions where evaluation changed, grouped into practical review priorities.</p>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">Engine data is not available for this report.</p>
+          <p className="mt-1 text-amber-800">Rebuild the report once with Stockfish enabled. The profile remains available while the new report is generated.</p>
+          <Button className="mt-3" size="sm" onClick={onRebuild}><RefreshCw className="h-4 w-4" /> Rebuild with engine</Button>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <main className="min-h-screen px-4 py-6" style={{ color: "var(--ink)" }}>
-      <div className="mx-auto max-w-7xl">
+    <section id="mistakes" aria-labelledby="mistakes-heading" className="scroll-mt-5 space-y-4 border-t border-slate-200 pt-6" style={{ color: "var(--ink)" }}>
         <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3">
-            <Link to={`/games/${encodeURIComponent(username)}`}>
-              <Button variant="outline" size="icon" aria-label="Back to games">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <div>
-              <p className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--accent)" }}>
-                {username}
-              </p>
-              <h1 className="text-3xl font-semibold tracking-normal" style={{ fontFamily: "var(--font-display)" }}>
-                Mistakes Analyzer
-              </h1>
+          <div>
+            <div className="flex items-center gap-2" style={{ color: "var(--accent)" }}>
+              <ShieldAlert className="h-5 w-5" />
+              <h2 id="mistakes-heading" className="text-xl" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>Mistakes and learning priorities</h2>
             </div>
+            <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--ink-soft)" }}>Review the most consequential decisions from this report, then adjust the game sample independently.</p>
           </div>
           <div className="flex items-center gap-2">
             <SegmentedControl
@@ -270,9 +367,9 @@ export default function MistakesPage() {
               ]}
               ariaLabel="Analysis detail mode"
             />
-            <Button onClick={runAnalysis} disabled={analysisLoading || gamesLoading}>
-              {analysisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              Analyze
+            <Button onClick={runAnalysis} disabled={analysisLoading || gamesLoading || selectedIds.size === 0}>
+              {analysisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {analysis ? "Rerun" : "Analyze"}
             </Button>
           </div>
         </div>
@@ -283,29 +380,29 @@ export default function MistakesPage() {
           </div>
         ) : null}
 
+        {stale ? (
+          <div className="mb-4 flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between" role="status">
+            <span>The game selection or engine settings changed. Results below are from the previous run.</span>
+            <Button size="sm" onClick={runAnalysis} disabled={analysisLoading}>Update results</Button>
+          </div>
+        ) : null}
+
         <div className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
           <section className="space-y-4" aria-label="Analyzer controls">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Target className="h-4 w-4" />
-                  Scope
+                  Analysis setup
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <ModeButton active={mode === "latest"} onClick={() => setMode("latest")} label="Latest" />
-                  <ModeButton active={mode === "selected"} onClick={() => setMode("selected")} label="Selected" />
+                <div className="flex items-center justify-between rounded-md border px-3 py-2" style={{ borderColor: "var(--line)", backgroundColor: "var(--paper-dark)" }}>
+                  <div><div className="text-sm font-semibold">{selectedIds.size} games selected</div><div className="text-xs" style={{ color: "var(--ink-soft)" }}>Changes affect only this chapter.</div></div>
+                  <Button variant="outline" size="sm" onClick={() => setGameEditorOpen((value) => !value)}>{gameEditorOpen ? "Close" : "Edit"}</Button>
                 </div>
 
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                  <NumberField label="Games" value={maxGames} min={1} max={100} onChange={setMaxGames} />
-                  <Button onClick={runAnalysis} disabled={analysisLoading || gamesLoading} className="self-end">
-                    {analysisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                    Analyze
-                  </Button>
-                </div>
-
+                {/* Engine params — collapsible */}
                 <button
                   type="button"
                   onClick={() => setSettingsOpen((current) => !current)}
@@ -315,67 +412,26 @@ export default function MistakesPage() {
                 >
                   <span className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4" />
-                    Advanced settings
+                    Engine settings
                   </span>
                   {settingsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
 
                 {settingsOpen ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <NumberField label="Engine depth" value={engineDepth} min={1} max={30} onChange={setEngineDepth} />
-                      <NumberField label="PV plies" value={maxPunishmentPlies} min={1} max={20} onChange={setMaxPunishmentPlies} />
-                      <SelectField
-                        label="Rated"
-                        value={ratedFilter}
-                        onChange={(value) => setRatedFilter(value as RatedFilter)}
-                        options={[
-                          ["all", "All"],
-                          ["rated", "Rated"],
-                          ["unrated", "Unrated"],
-                        ]}
-                      />
-                      <SelectField
-                        label="Time"
-                        value={timeClass}
-                        onChange={setTimeClass}
-                        options={[["all", "All"], ...TIME_CLASSES.map((item) => [item, title(item)] as [string, string])]}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="mb-2 text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
-                        Result
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {(["all", "loss", "draw", "win"] as ResultFilter[]).map((value) => (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => setResultFilter(value)}
-                            className="h-8 rounded text-xs font-semibold transition-colors"
-                            style={{
-                              backgroundColor: resultFilter === value ? "var(--ink)" : "var(--paper-dark)",
-                              color: resultFilter === value ? "var(--paper)" : "var(--ink)",
-                              border: "1px solid var(--line)",
-                            }}
-                          >
-                            {title(value)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <NumberField label="Engine depth" value={engineDepth} min={1} max={30} onChange={setEngineDepth} />
+                    <NumberField label="PV plies" value={maxPunishmentPlies} min={1} max={20} onChange={setMaxPunishmentPlies} />
                   </div>
                 ) : null}
               </CardContent>
             </Card>
 
-            <Card>
+            {gameEditorOpen ? <Card>
               <CardHeader>
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="flex items-center gap-2">
                     <Activity className="h-4 w-4" />
-                    Records
+                    Games
                   </CardTitle>
                   <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
                     {selectedIds.size} selected
@@ -383,6 +439,23 @@ export default function MistakesPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div>
+                  <div className="mb-2 text-xs uppercase" style={{ color: "var(--ink-faint)" }}>Result</div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(["all", "loss", "draw", "win"] as ResultFilter[]).map((value) => <ModeButton key={value} active={resultFilter === value} onClick={() => setResultFilter(value)} label={title(value)} />)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <SelectField label="Time" value={timeClass} onChange={setTimeClass} options={[["all", "All"], ...TIME_CLASSES.map((item) => [item, title(item)] as [string, string])]} />
+                  <SelectField label="Rated" value={ratedFilter} onChange={(value) => setRatedFilter(value as RatedFilter)} options={[["all", "All"], ["rated", "Rated"], ["unrated", "Unrated"]]} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <OptionalNumberField label="Since year" value={sinceYear} min={2000} max={2100} onChange={setSinceYear} />
+                  <OptionalNumberField label="Since month" value={sinceMonth} min={1} max={12} onChange={setSinceMonth} />
+                  <OptionalNumberField label="Until year" value={untilYear} min={2000} max={2100} onChange={setUntilYear} />
+                  <OptionalNumberField label="Until month" value={untilMonth} min={1} max={12} onChange={setUntilMonth} />
+                </div>
+                <Button variant="outline" size="sm" className="w-full" onClick={() => loadCatalog(1)} disabled={gamesLoading}><Search className="h-4 w-4" /> Search games</Button>
                 <div className="grid grid-cols-3 gap-1.5">
                   <Button variant="secondary" size="sm" onClick={selectLosses} type="button">Losses</Button>
                   <Button variant="secondary" size="sm" onClick={() => selectRecent(12)} type="button">Recent 12</Button>
@@ -403,14 +476,16 @@ export default function MistakesPage() {
                         key={game.id ?? `${game.end_time}-${game.opponent_username}`}
                         game={game}
                         selected={Boolean(game.id && selectedIds.has(game.id))}
+                        previewing={false}
                         stats={game.id ? gameStats.get(game.id) ?? null : null}
                         onToggle={() => toggleSelected(game.id)}
                       />
                     ))
                   )}
                 </div>
+                {catalogHasMore ? <Button variant="outline" size="sm" className="w-full" onClick={() => loadCatalog(catalogPage + 1)} disabled={gamesLoading}>Load more</Button> : null}
               </CardContent>
-            </Card>
+            </Card> : null}
           </section>
 
           <section className="space-y-4" aria-label="Mistakes analysis results" aria-live="polite">
@@ -419,9 +494,9 @@ export default function MistakesPage() {
               loading={analysisLoading}
               topMistake={topMistake}
               selectedCount={selectedGames.length}
-              mode={mode}
-              maxGames={maxGames}
               username={username}
+              reportHash={reportHash}
+              analysisHash={analysis?.analysis_hash ?? null}
               activeTheme={activeTheme}
               onThemeSelect={setActiveTheme}
             />
@@ -485,6 +560,8 @@ export default function MistakesPage() {
                     key={group.key}
                     group={group}
                     username={username}
+                    reportHash={reportHash}
+                    analysisHash={analysis?.analysis_hash ?? ""}
                     groupIndex={groupIndex}
                     totalGroups={mistakeGroups.length}
                     detailMode={detailMode}
@@ -498,20 +575,23 @@ export default function MistakesPage() {
             ) : null}
           </section>
         </div>
-      </div>
-    </main>
+    </section>
   );
 }
 
 function MistakeGameSection({
   group,
   username,
+  reportHash,
+  analysisHash,
   groupIndex,
   totalGroups,
   detailMode,
 }: {
   group: MistakeGameGroup;
   username: string;
+  reportHash: string;
+  analysisHash: string;
   groupIndex: number;
   totalGroups: number;
   detailMode: DetailMode;
@@ -584,7 +664,14 @@ function MistakeGameSection({
       {!collapsed ? (
         <div id={`mistake-game-panel-${groupIndex}`} className="divide-y" style={{ borderColor: "var(--line)" }}>
           {group.mistakes.map(({ mistake, rank }) => (
-            <MistakeRow key={`${mistake.game_uuid}-${mistake.ply}-${mistake.uci}-${rank}`} mistake={mistake} username={username} index={rank} detailMode={detailMode} />
+            <MistakeRow
+              key={mistake.mistake_id}
+              mistake={mistake}
+              username={username}
+              reportHash={reportHash}
+              analysisHash={analysisHash}
+              detailMode={detailMode}
+            />
           ))}
         </div>
       ) : null}
@@ -592,32 +679,51 @@ function MistakeGameSection({
   );
 }
 
+const THEME_COLORS = [
+  "#c0392b", "#2d5016", "#1a5276", "#6c3483",
+  "#117a65", "#8b6914", "#784212", "#0b5394",
+  "#4a235a", "#145a32", "#7d6608", "#17202a",
+];
+
+function blunderThemeCounts(mistakes: MistakeAnalysisItem[]): { theme: string; label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const mistake of mistakes) {
+    if (mistake.severity !== "blunder") continue;
+    for (const t of getMistakeThemes(mistake)) {
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([theme, count]) => ({ theme, label: themeLabel(theme), count }));
+}
+
 function SummaryPanel({
   analysis,
   loading,
   topMistake,
   selectedCount,
-  mode,
-  maxGames,
   username,
+  reportHash,
+  analysisHash,
   activeTheme,
   onThemeSelect,
 }: {
-  analysis: MistakesAnalysisResponse | null;
+  analysis: ReportMistakesResponse | null;
   loading: boolean;
   topMistake: MistakeAnalysisItem | null;
   selectedCount: number;
-  mode: Mode;
-  maxGames: number;
   username: string;
+  reportHash: string;
+  analysisHash: string | null;
   activeTheme: string | null;
   onThemeSelect: (theme: string | null) => void;
 }) {
   const summary = analysis?.summary;
-  const scopeText = mode === "selected" ? `${selectedCount} selected` : `latest ${maxGames}`;
-  const topThemes = topThemeEntries(summary?.theme_counts ?? {});
+  const scopeText = `${selectedCount} selected`;
   const worstLoss = analysis?.mistakes.reduce((max, mistake) => Math.max(max, mistake.cp_loss ?? 0), 0) ?? null;
-  const recommendedTheme = topThemes[0]?.[0] ?? null;
+  const themeData = useMemo(() => blunderThemeCounts(analysis?.mistakes ?? []), [analysis?.mistakes]);
+
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_250px]">
       <div
@@ -628,6 +734,7 @@ function SummaryPanel({
             "linear-gradient(135deg, color-mix(in srgb, var(--accent) 11%, var(--paper)) 0%, var(--paper) 46%, color-mix(in srgb, #2d5016 10%, var(--paper)) 100%)",
         }}
       >
+        {/* Header row */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--accent)" }}>
@@ -644,52 +751,139 @@ function SummaryPanel({
           </div>
           {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldAlert className="h-5 w-5" />}
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4">
-          <StatTile label="Blunders" value={summary?.severity_counts.blunder ?? "—"} />
-          <StatTile label="Mistakes" value={summary?.severity_counts.mistake ?? "—"} />
-          <StatTile label="Punished" value={summary ? `${summary.actual_punished_count}/${summary.mistake_count}` : "—"} />
-          <StatTile label="Worst loss" value={worstLoss == null ? "—" : formatCp(worstLoss)} />
-        </div>
+
+        {/* Tactic theme pie + compact stats + legend */}
         {summary ? (
-          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-            <div>
-              <div className="mb-2 text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
-                Recommended focus
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {topThemes.slice(0, 5).map(([theme, count], index) => (
-                  <button
-                    key={theme}
-                    type="button"
-                    onClick={() => onThemeSelect(activeTheme === theme ? null : theme)}
-                    className="rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors"
-                    style={{
-                      borderColor: activeTheme === theme ? "var(--accent)" : "var(--line)",
-                      backgroundColor: activeTheme === theme ? "color-mix(in srgb, var(--accent) 12%, var(--paper))" : "var(--paper)",
-                      color: activeTheme === theme ? "var(--accent)" : "var(--ink)",
-                    }}
-                  >
-                    {index + 1}. {themeLabel(theme)} · {count}
-                  </button>
-                ))}
-                {topThemes.length === 0 ? <Badge tone="ink">No themes yet</Badge> : null}
-              </div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
+            {/* Pie chart */}
+            <div className="flex items-center justify-center">
+              {themeData.length > 0 ? (
+                <div style={{ width: 200, height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={RESPONSIVE_INITIAL_DIMENSION}>
+                    <PieChart>
+                      <Pie
+                        data={themeData}
+                        dataKey="count"
+                        nameKey="label"
+                        innerRadius={52}
+                        outerRadius={88}
+                        paddingAngle={2}
+                        onClick={(entry) => {
+                          const t = (entry as unknown as { theme: string }).theme;
+                          onThemeSelect(activeTheme === t ? null : t);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {themeData.map((entry, index) => (
+                          <Cell
+                            key={entry.theme}
+                            fill={THEME_COLORS[index % THEME_COLORS.length]}
+                            opacity={activeTheme && activeTheme !== entry.theme ? 0.35 : 1}
+                            stroke={activeTheme === entry.theme ? "var(--ink)" : "transparent"}
+                            strokeWidth={activeTheme === entry.theme ? 2 : 0}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value) => [`${value} blunder${value !== 1 ? "s" : ""}`]}
+                        contentStyle={{
+                          backgroundColor: "var(--paper)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div
+                  className="flex h-[200px] w-[200px] items-center justify-center rounded-full border-2 border-dashed text-center text-xs"
+                  style={{ borderColor: "var(--line)", color: "var(--ink-faint)" }}
+                >
+                  No tactical<br />themes in<br />blunders
+                </div>
+              )}
             </div>
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              <Link to={topMistake ? `/mistakes/${encodeURIComponent(username)}/blunder/${encodeURIComponent(mistakeKey(topMistake, 0))}` : "#"} onClick={() => topMistake && sessionStorage.setItem(`${BLUNDER_STORAGE_PREFIX}:${username}:${mistakeKey(topMistake, 0)}`, JSON.stringify({ username, mistake: topMistake }))}>
-                <Button variant="default" size="sm" type="button" disabled={!topMistake}>
-                  <Target className="h-4 w-4" />
-                  Review highest impact
-                </Button>
-              </Link>
-              {recommendedTheme ? (
-                <Button variant="outline" size="sm" type="button" onClick={() => onThemeSelect(recommendedTheme)}>
-                  Train {themeLabel(recommendedTheme)}
-                </Button>
+
+            {/* Right column: compact stat strip + clickable legend */}
+            <div className="flex flex-col gap-3">
+              {/* Compact stat strip */}
+              <div className="flex flex-wrap gap-2">
+                <CompactPill label="Blunders" value={summary.severity_counts.blunder ?? 0} />
+                <CompactPill label="Mistakes" value={summary.severity_counts.mistake ?? 0} />
+                <CompactPill label="Punished" value={`${summary.actual_punished_count}/${summary.mistake_count}`} />
+                <CompactPill label="Worst" value={worstLoss == null ? "—" : formatCp(worstLoss)} />
+              </div>
+
+              {/* Clickable theme legend (replaces "Recommended focus" chips) */}
+              {themeData.length > 0 ? (
+                <div>
+                  <div className="mb-2 text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
+                    Tactic themes in blunders
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {themeData.slice(0, 8).map((entry, index) => (
+                      <button
+                        key={entry.theme}
+                        type="button"
+                        onClick={() => onThemeSelect(activeTheme === entry.theme ? null : entry.theme)}
+                        className="flex items-center gap-2 rounded px-2 py-1 text-left text-xs font-semibold transition-colors"
+                        style={{
+                          backgroundColor:
+                            activeTheme === entry.theme
+                              ? `color-mix(in srgb, ${THEME_COLORS[index % THEME_COLORS.length]} 14%, var(--paper))`
+                              : "transparent",
+                          color: activeTheme === entry.theme ? "var(--ink)" : "var(--ink-soft)",
+                        }}
+                      >
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: THEME_COLORS[index % THEME_COLORS.length],
+                            opacity: activeTheme && activeTheme !== entry.theme ? 0.35 : 1,
+                          }}
+                        />
+                        <span className="flex-1">{entry.label}</span>
+                        <span style={{ color: "var(--ink-faint)" }}>{entry.count}</span>
+                      </button>
+                    ))}
+                    {activeTheme ? (
+                      <button
+                        type="button"
+                        onClick={() => onThemeSelect(null)}
+                        className="mt-1 rounded px-2 py-1 text-left text-xs"
+                        style={{ color: "var(--accent)" }}
+                      >
+                        ✕ Clear filter
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
+
+              {/* Action button */}
+              <div className="mt-auto">
+                <Link
+                  to={topMistake && analysisHash ? mistakeDetailUrl(username, reportHash, analysisHash, topMistake.mistake_id) : "#"}
+                >
+                  <Button variant="default" size="sm" type="button" disabled={!topMistake}>
+                    <Target className="h-4 w-4" />
+                    Review highest impact
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
-        ) : null}
+        ) : (
+          /* No analysis yet: show placeholder tiles */
+          <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <StatTile label="Blunders" value="—" />
+            <StatTile label="Mistakes" value="—" />
+            <StatTile label="Punished" value="—" />
+            <StatTile label="Worst loss" value="—" />
+          </div>
+        )}
       </div>
 
       <div className="rounded-md border p-3" style={{ borderColor: "var(--line)", backgroundColor: "var(--paper-dark)" }}>
@@ -702,24 +896,18 @@ function SummaryPanel({
 function MistakeRow({
   mistake,
   username,
-  index,
+  reportHash,
+  analysisHash,
   detailMode,
 }: {
   mistake: MistakeAnalysisItem;
   username: string;
-  index: number;
+  reportHash: string;
+  analysisHash: string;
   detailMode: DetailMode;
 }) {
-  const allTags = [...mistake.tactics, ...mistake.actual_tactics];
-  const blunderKey = mistakeKey(mistake, index);
+  const allTags = [...mistake.tactics];
   const bestMove = mistake.best_line[0] ?? null;
-
-  function persistMistake() {
-    sessionStorage.setItem(
-      `${BLUNDER_STORAGE_PREFIX}:${username}:${blunderKey}`,
-      JSON.stringify({ username, mistake }),
-    );
-  }
 
   return (
     <article className="grid gap-3 p-3 md:grid-cols-[minmax(210px,1fr)_minmax(0,1.4fr)_auto] md:items-center" style={{ backgroundColor: "var(--paper)" }}>
@@ -791,7 +979,7 @@ function MistakeRow({
         ) : null}
       </div>
 
-      <Link to={`/mistakes/${encodeURIComponent(username)}/blunder/${encodeURIComponent(blunderKey)}`} onClick={persistMistake}>
+      <Link to={mistakeDetailUrl(username, reportHash, analysisHash, mistake.mistake_id)}>
         <Button variant="outline" size="sm" type="button" className="w-full md:w-auto">
           <Target className="h-4 w-4" />
           Analyze
@@ -804,25 +992,19 @@ function MistakeRow({
 function GameRow({
   game,
   selected,
+  previewing,
   stats,
   onToggle,
 }: {
   game: GameSummary;
   selected: boolean;
+  previewing?: boolean;
   stats: GameMistakeStats | null;
   onToggle: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md border p-2.5 text-left transition-transform hover:translate-x-0.5"
-      style={{
-        borderColor: selected ? "var(--accent)" : "var(--line)",
-        backgroundColor: selected ? "color-mix(in srgb, var(--accent) 10%, var(--paper))" : "var(--paper)",
-      }}
-    >
-      <span className={cn("h-2.5 w-2.5 rounded-full", resultColor(game.result))} />
+  const innerContent = (
+    <>
+      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", resultColor(game.result))} />
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold">
           {game.player_color} vs {game.opponent_username ?? "Unknown"}
@@ -837,6 +1019,42 @@ function GameRow({
           </span>
         ) : null}
       </span>
+    </>
+  );
+
+  if (previewing) {
+    return (
+      <div
+        className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md border p-2.5"
+        style={{
+          borderColor: selected ? "var(--accent)" : "var(--line)",
+          backgroundColor: selected
+            ? "color-mix(in srgb, var(--accent) 7%, var(--paper))"
+            : "var(--paper)",
+          opacity: selected ? 1 : 0.4,
+        }}
+      >
+        {innerContent}
+        {selected ? (
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} aria-label="Will be analyzed" />
+        ) : (
+          <span className="text-xs capitalize" style={{ color: "var(--ink-soft)" }}>{game.result}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md border p-2.5 text-left transition-transform hover:translate-x-0.5"
+      style={{
+        borderColor: selected ? "var(--accent)" : "var(--line)",
+        backgroundColor: selected ? "color-mix(in srgb, var(--accent) 10%, var(--paper))" : "var(--paper)",
+      }}
+    >
+      {innerContent}
       <span className="text-xs capitalize" style={{ color: "var(--ink-soft)" }}>
         {game.result}
       </span>
@@ -904,6 +1122,35 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         value={value}
         onChange={(event) => onChange(clamp(Number(event.target.value), min, max))}
         style={{ borderColor: "var(--line)", backgroundColor: "var(--paper)", color: "var(--ink)" }}
+      />
+    </label>
+  );
+}
+
+function OptionalNumberField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number | "";
+  min: number;
+  max: number;
+  onChange: (value: number | "") => void;
+}) {
+  return (
+    <label className="text-xs font-medium">
+      <span className="mb-1 block" style={{ color: "var(--ink-soft)" }}>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
+        className="h-9 w-full rounded-md border bg-white px-2 text-sm"
+        style={{ borderColor: "var(--line)" }}
       />
     </label>
   );
@@ -1137,7 +1384,7 @@ function topThemeEntries(themeCounts: Record<string, number>) {
 }
 
 function getMistakeThemes(mistake: MistakeAnalysisItem) {
-  return Array.from(new Set([...mistake.tactics, ...mistake.actual_tactics].map((tag) => tag.theme)));
+  return Array.from(new Set(mistake.tactics.map((tag) => tag.theme)));
 }
 
 function primaryTheme(mistake: MistakeAnalysisItem) {
@@ -1201,68 +1448,84 @@ function formatGameDate(game: GameSummary | null) {
   return new Date(game.end_time_iso).toLocaleDateString();
 }
 
-function mistakeKey(mistake: MistakeAnalysisItem, index: number) {
-  return [
-    mistake.game_uuid ?? "game",
-    mistake.ply,
-    mistake.uci,
-    index,
-  ].join("-").replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function analysisStorageKey(username: string) {
-  return `${ANALYSIS_STORAGE_PREFIX}:${username}`;
-}
-
-function loadPersistedState(username: string): PersistedMistakesState | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.sessionStorage.getItem(analysisStorageKey(username));
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedMistakesState>;
-    if (parsed.version !== 1) return null;
-    if (!isMode(parsed.mode) || !isRatedFilter(parsed.ratedFilter) || !isResultFilter(parsed.resultFilter)) {
-      return null;
-    }
-    return {
-      version: 1,
-      mode: parsed.mode,
-      maxGames: numberOr(parsed.maxGames, 20),
-      engineDepth: numberOr(parsed.engineDepth, 10),
-      maxPunishmentPlies: numberOr(parsed.maxPunishmentPlies, 8),
-      timeClass: typeof parsed.timeClass === "string" ? parsed.timeClass : "all",
-      ratedFilter: parsed.ratedFilter,
-      resultFilter: parsed.resultFilter,
-      selectedIds: Array.isArray(parsed.selectedIds) ? parsed.selectedIds.filter(isString) : [],
-      games: Array.isArray(parsed.games) ? parsed.games : [],
-      analysis: parsed.analysis ?? null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function persistState(username: string, state: PersistedMistakesState) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(analysisStorageKey(username), JSON.stringify(state));
-  } catch {
-    // Session storage may be unavailable or full; the analyzer still works in memory.
-  }
+function mistakeDetailUrl(username: string, reportHash: string, analysisHash: string, mistakeId: string) {
+  const query = new URLSearchParams({ cacheHash: reportHash, analysisHash });
+  return `/report/${encodeURIComponent(username)}/mistake/${encodeURIComponent(mistakeId)}?${query.toString()}`;
 }
 
 function numberOr(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function isMode(value: unknown): value is Mode {
-  return value === "latest" || value === "selected";
+function optionalNumber(value: unknown): number | "" {
+  return typeof value === "number" && Number.isFinite(value) ? value : "";
 }
 
-function isRatedFilter(value: unknown): value is RatedFilter {
-  return value === "all" || value === "rated" || value === "unrated";
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(isString) : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isResultFilter(value: unknown): value is ResultFilter {
   return value === "all" || value === "loss" || value === "draw" || value === "win";
+}
+
+function mergeGames(...collections: GameSummary[][]): GameSummary[] {
+  const games = new Map<string, GameSummary>();
+  for (const collection of collections) {
+    for (const game of collection) {
+      const key = game.id ?? game.url;
+      if (key) games.set(key, game);
+    }
+  }
+  return Array.from(games.values()).sort((left, right) => (right.end_time ?? 0) - (left.end_time ?? 0));
+}
+
+function sortedKey(values: string[]) {
+  return [...values].sort().join("\n");
+}
+
+function reportDraftKey(reportHash: string) {
+  return `chess-insighter:report-mistakes-draft:${reportHash}`;
+}
+
+function loadReportDraft(reportHash: string, sidecarId: string): ReportMistakesDraft | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(reportDraftKey(reportHash));
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ReportMistakesDraft>;
+    if (value.sidecarId !== sidecarId || !Array.isArray(value.selectedIds) || !isRatedFilter(value.ratedFilter) || !isResultFilter(value.resultFilter)) return null;
+    return {
+      sidecarId,
+      selectedIds: value.selectedIds.filter(isString),
+      engineDepth: numberOr(value.engineDepth, 10),
+      maxPunishmentPlies: numberOr(value.maxPunishmentPlies, 8),
+      timeClass: typeof value.timeClass === "string" ? value.timeClass : "all",
+      ratedFilter: value.ratedFilter,
+      resultFilter: value.resultFilter,
+      sinceYear: optionalNumber(value.sinceYear),
+      sinceMonth: optionalNumber(value.sinceMonth),
+      untilYear: optionalNumber(value.untilYear),
+      untilMonth: optionalNumber(value.untilMonth),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveReportDraft(reportHash: string, draft: ReportMistakesDraft) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(reportDraftKey(reportHash), JSON.stringify(draft));
+  } catch {
+    // The backend still restores the last completed analysis if storage is unavailable.
+  }
+}
+
+function isRatedFilter(value: unknown): value is RatedFilter {
+  return value === "all" || value === "rated" || value === "unrated";
 }
