@@ -20,18 +20,18 @@ export function CompareReportView({
   const [other, setOther] = useState("");
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-md border bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-[20px] border border-[var(--line)] bg-[linear-gradient(145deg,var(--paper-raised),var(--paper-dark))] p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-700">Player 1:</span>
+          <span className="eyebrow whitespace-nowrap">Player 01</span>
           <Input className="max-w-[200px]" value={primaryUsername} onChange={(event) => setPrimaryUsername(event.target.value)} placeholder="Chess.com username" />
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex min-h-11 items-center gap-2 rounded-full border border-[var(--line)] px-4 text-sm font-semibold">
           <input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} />
           Compare with another user
         </label>
         {compare ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Player 2:</span>
+            <span className="eyebrow whitespace-nowrap">Player 02</span>
             <Input className="max-w-[200px]" value={other} onChange={(event) => setOther(event.target.value)} placeholder="Second Chess.com username" />
           </div>
         ) : null}

@@ -4,11 +4,11 @@ import { cn } from "~/lib/utils";
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-md", className)}
+      className={cn("rounded-[20px]", className)}
       style={{
-        backgroundColor: "var(--paper)",
+        background: "linear-gradient(145deg, rgba(27,38,32,.96), rgba(16,23,19,.98))",
         border: "1px solid var(--line)",
-        boxShadow: "0 1px 4px rgba(46,42,35,0.10)",
+        boxShadow: "var(--shadow), inset 0 1px 0 rgba(255,255,255,.025)",
       }}
       {...props}
     />
@@ -22,7 +22,7 @@ export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDiv
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn("text-base font-semibold leading-none tracking-normal", className)}
+      className={cn("text-base font-semibold leading-tight tracking-[-0.02em]", className)}
       style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}
       {...props}
     />

@@ -110,8 +110,8 @@ export function OpeningStudyNode({
             : "translate(0, 0)",
           borderRadius: 14,
           // Solid base colour prevents other nodes showing through.
-          backgroundColor: "#1c140e",
-          border: "1px solid rgba(255,255,255,0.12)",
+          backgroundColor: "#101713",
+          border: "1px solid rgba(33,231,131,0.24)",
           boxShadow: ring,
           transition: [
             "width 0.32s cubic-bezier(0.34,1.56,0.64,1)",
@@ -149,7 +149,7 @@ export function OpeningStudyNode({
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "linear-gradient(160deg, rgba(16,12,8,0.82) 0%, rgba(22,16,10,0.70) 100%)",
+              "linear-gradient(160deg, rgba(9,15,11,0.88) 0%, rgba(13,26,18,0.78) 100%)",
           }}
         />
 
@@ -157,12 +157,12 @@ export function OpeningStudyNode({
         {expanded && !loading && (
           <button
             type="button"
-            className="absolute"
+            className="absolute focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--acid)]"
             style={{
-              top: 6,
-              right: 6,
-              width: 18,
-              height: 18,
+              top: 8,
+              right: 8,
+              width: 28,
+              height: 28,
               borderRadius: "50%",
               display: "flex",
               alignItems: "center",
@@ -177,9 +177,9 @@ export function OpeningStudyNode({
               e.stopPropagation();
               onCollapse();
             }}
-            title="Collapse branch"
+            aria-label={`Collapse branch after ${node.moveSan}`}
           >
-            <X className="h-2.5 w-2.5" />
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         )}
 
@@ -224,7 +224,7 @@ export function OpeningStudyNode({
             width: 7,
             height: 7,
             borderRadius: "50%",
-            backgroundColor: node.isTargetMove ? "#fafafa" : "rgba(255,255,255,0.35)",
+            backgroundColor: node.isTargetMove ? "#21e783" : "rgba(255,255,255,0.35)",
             boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
             opacity: isVisuallyExpanded ? 0 : 1,
             transition: "opacity 0.12s ease",
@@ -241,8 +241,8 @@ export function OpeningStudyNode({
               right: 5,
               padding: "1px 4px",
               borderRadius: 3,
-              backgroundColor: "rgba(243,249,241,0.88)",
-              color: "#2d5016",
+              backgroundColor: "#dcff42",
+              color: "#0a0e0b",
               fontSize: 8,
               fontWeight: 700,
               lineHeight: 1.2,
@@ -281,7 +281,7 @@ export function OpeningStudyNode({
             {/* Header: move label + your-move badge + score */}
             <div
               className="flex flex-shrink-0 items-center gap-1.5 px-3 py-2.5"
-              style={{ paddingRight: expanded ? 30 : 12 }}
+              style={{ paddingRight: expanded ? 44 : 12 }}
             >
               <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                 <span
@@ -310,8 +310,8 @@ export function OpeningStudyNode({
               <span
                 className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
                 style={{
-                  backgroundColor: "rgba(243,249,241,0.90)",
-                  color: "#2d5016",
+                  backgroundColor: "#dcff42",
+                  color: "#0a0e0b",
                   lineHeight: 1.2,
                 }}
               >
@@ -353,7 +353,8 @@ export function OpeningStudyNode({
             <div
               className="mx-3 flex-shrink-0"
               style={{
-                backgroundColor: "rgba(244,236,216,0.92)",
+                backgroundColor: "rgba(13,19,16,0.94)",
+                border: "1px solid rgba(33,231,131,.18)",
                 borderRadius: 8,
                 padding: "8px 10px",
               }}

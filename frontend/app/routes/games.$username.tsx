@@ -5,7 +5,7 @@ export default function GamesPage() {
   const params = useParams();
   const username = params.username ?? "";
   return (
-    <main className="min-h-screen px-4 py-8" style={{ color: "var(--ink)" }}>
+    <main id="main-content" className="page-shell min-h-screen px-5 py-8 sm:px-8 lg:px-12 lg:py-12" style={{ color: "var(--ink)" }}>
       <div className="mx-auto max-w-6xl">
         <InfiniteGamesScroller username={username} />
       </div>

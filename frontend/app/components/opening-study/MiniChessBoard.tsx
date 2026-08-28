@@ -64,7 +64,7 @@ export function MiniChessBoard({ fen, size = 116 }: { fen: string | null; size?:
           return (
             <div
               key={`${r}-${c}`}
-              className={isLight ? "bg-[#eadbc0]" : "bg-[#b58863]"}
+              className={isLight ? "bg-[#c6e8d2]" : "bg-[#225c42]"}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
             >
               <span

@@ -9,21 +9,21 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 export function Button({ className, variant = "default", size = "default", style, ...props }: ButtonProps) {
   const variantStyle: React.CSSProperties =
     variant === "default"
-      ? { backgroundColor: "var(--accent)", color: "var(--paper)" }
+      ? { backgroundColor: "var(--acid)", color: "#0a0e0b", boxShadow: "0 0 0 1px rgba(220,255,66,.18), 0 10px 28px rgba(220,255,66,.08)" }
       : variant === "secondary"
-      ? { backgroundColor: "var(--paper-dark)", color: "var(--ink)" }
+      ? { backgroundColor: "var(--paper-raised)", color: "var(--ink)", border: "1px solid var(--line)" }
       : variant === "outline"
-      ? { backgroundColor: "transparent", color: "var(--ink)", border: "1px solid var(--line)" }
+      ? { backgroundColor: "rgba(13,19,16,.64)", color: "var(--ink)", border: "1px solid var(--line)" }
       : { backgroundColor: "transparent", color: "var(--ink)" };
 
   return (
     <button
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center gap-2 rounded text-sm font-medium transition-opacity disabled:pointer-events-none disabled:opacity-40",
-        "focus-visible:outline-none focus-visible:ring-2",
-        variant === "ghost" && "hover:bg-[rgba(46,42,35,0.07)]",
-        variant === "outline" && "hover:bg-[rgba(46,42,35,0.05)]",
-        (variant === "default" || variant === "secondary") && "hover:opacity-85",
+        "inline-flex cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-extrabold transition-all disabled:pointer-events-none disabled:opacity-40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#090d0b]",
+        variant === "ghost" && "hover:bg-[rgba(33,231,131,0.08)] hover:text-[var(--accent)]",
+        variant === "outline" && "hover:-translate-y-0.5 hover:border-[var(--accent)] hover:text-[var(--accent)]",
+        (variant === "default" || variant === "secondary") && "hover:-translate-y-0.5 hover:brightness-110",
         size === "default" && "h-10 px-4 py-2",
         size === "sm" && "h-9 px-3",
         size === "icon" && "h-9 w-9",

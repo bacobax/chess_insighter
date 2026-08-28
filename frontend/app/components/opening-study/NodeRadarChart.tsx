@@ -27,10 +27,10 @@ export function NodeRadarChart({ stats, width = 200, height = 150 }: Props) {
 
   return (
     <RadarChart width={width} height={height} data={data} cx="50%" cy="50%">
-      <PolarGrid stroke="#c8b99a" />
-      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: "#6b6358" }} />
+      <PolarGrid stroke="#314139" />
+      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: "#a5b3aa" }} />
       <PolarRadiusAxis domain={[0, 1]} tick={false} axisLine={false} />
-      <Radar dataKey="value" stroke="#7c3a2d" fill="#b58863" fillOpacity={0.35} dot={false} />
+      <Radar dataKey="value" stroke="#21e783" fill="#21e783" fillOpacity={0.25} dot={false} />
     </RadarChart>
   );
 }

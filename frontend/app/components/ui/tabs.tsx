@@ -6,8 +6,8 @@ export const Tabs = TabsPrimitive.Root;
 export function TabsList({ className, ...props }: TabsPrimitive.TabsListProps) {
   return (
     <TabsPrimitive.List
-      className={cn("inline-flex h-9 items-center rounded p-1", className)}
-      style={{ backgroundColor: "var(--line-faint)" }}
+      className={cn("inline-flex h-10 items-center rounded-full border p-1", className)}
+      style={{ backgroundColor: "var(--paper-dark)", borderColor: "var(--line)" }}
       {...props}
     />
   );
@@ -17,8 +17,8 @@ export function TabsTrigger({ className, ...props }: TabsPrimitive.TabsTriggerPr
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "rounded px-3 py-1 text-sm transition-colors",
-        "data-[state=active]:bg-[var(--paper)] data-[state=active]:shadow-sm data-[state=active]:font-medium",
+        "rounded-full px-3 py-1.5 text-sm font-semibold transition-colors",
+        "data-[state=active]:bg-[var(--acid)] data-[state=active]:text-[#0a0e0b]! data-[state=active]:shadow-sm",
         className,
       )}
       style={{ color: "var(--ink-soft)" }}

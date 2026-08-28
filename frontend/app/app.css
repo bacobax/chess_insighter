@@ -1,31 +1,63 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Spectral", Georgia, "Times New Roman", serif;
-  --font-display: "DM Serif Display", Georgia, serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
 }
 
 :root {
-  --paper: #f4ecd8;
-  --paper-dark: #ece3c7;
-  --ink: #2e2a23;
-  --ink-soft: #6b6358;
-  --ink-faint: #a89e8e;
-  --accent: #7c3a2d;
-  --accent-hover: #9a4a38;
-  --board-dark: #b58863;
-  --board-light: #eadbc0;
-  --line: #c8b99a;
-  --line-faint: #dfd2bb;
+  color-scheme: dark;
+  --paper: #151c18;
+  --paper-dark: #0d1310;
+  --paper-raised: #1b2620;
+  --ink: #f2f7f0;
+  --ink-soft: #a5b3aa;
+  --ink-faint: #6f8076;
+  --accent: #21e783;
+  --accent-hover: #63f2a2;
+  --acid: #dcff42;
+  --coral: #ff6a4d;
+  --board-dark: #225c42;
+  --board-light: #c6e8d2;
+  --line: #314139;
+  --line-faint: #222f28;
+  --glow: rgba(33, 231, 131, 0.18);
+  --shadow: 0 22px 80px rgba(0, 0, 0, 0.35);
 }
 
-html, body {
-  background-color: var(--paper);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='250'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='250' height='250' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+* { box-sizing: border-box; }
+
+html { background: #090d0b; scroll-behavior: smooth; }
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 4%, rgba(33, 231, 131, 0.09), transparent 26rem),
+    radial-gradient(circle at 88% 18%, rgba(220, 255, 66, 0.04), transparent 22rem),
+    linear-gradient(180deg, #0b100d 0%, #090d0b 100%);
   color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" 1, "cv02" 1;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* ── Vintage theme: remap Tailwind white/slate/blue to paper palette ──────── */
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(83, 110, 94, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(83, 110, 94, 0.055) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+::selection { background: var(--acid); color: #0a0e0b; }
+
+/* ── Legacy Tailwind utilities mapped onto the neon design tokens ────────── */
 
 /* Backgrounds */
 .bg-white   { background-color: var(--paper) !important; }
@@ -33,12 +65,12 @@ html, body {
 .bg-slate-100 { background-color: var(--line-faint) !important; }
 .bg-slate-200 { background-color: var(--line) !important; }
 .bg-slate-700 { background-color: var(--ink-soft) !important; }
-.bg-slate-900 { background-color: var(--ink) !important; }
-.bg-slate-950 { background-color: var(--ink) !important; }
+.bg-slate-900 { background-color: #090d0b !important; }
+.bg-slate-950 { background-color: #090d0b !important; }
 .bg-slate-400 { background-color: var(--ink-faint) !important; }
 
 /* Text */
-.text-white   { color: var(--paper) !important; }
+.text-white   { color: #f7fff9 !important; }
 .text-slate-300 { color: var(--ink-faint) !important; }
 .text-slate-400 { color: var(--ink-faint) !important; }
 .text-slate-500 { color: var(--ink-soft) !important; }
@@ -51,11 +83,11 @@ html, body {
 /* Borders */
 .border-slate-200 { border-color: var(--line) !important; }
 .border-slate-300 { border-color: var(--line) !important; }
-.border-slate-900 { border-color: var(--ink) !important; }
+.border-slate-900 { border-color: var(--accent) !important; }
 .divide-slate-100 > * + * { border-color: var(--line-faint) !important; }
 
 /* Ring (focus/selected state) */
-.ring-slate-900  { --tw-ring-color: var(--ink) !important; }
+.ring-slate-900  { --tw-ring-color: var(--accent) !important; }
 .ring-slate-400  { --tw-ring-color: var(--line) !important; }
 
 /* Blue → accent */
@@ -69,34 +101,34 @@ html, body {
 .hover\:bg-slate-50:hover   { background-color: var(--paper-dark) !important; }
 .hover\:bg-slate-100:hover  { background-color: var(--line-faint) !important; }
 .hover\:bg-slate-200:hover  { background-color: var(--line) !important; }
-.hover\:text-slate-950:hover { color: var(--ink) !important; }
-.hover\:text-slate-900:hover { color: var(--ink) !important; }
+.hover\:text-slate-950:hover { color: var(--accent) !important; }
+.hover\:text-slate-900:hover { color: var(--accent) !important; }
 .hover\:text-slate-600:hover { color: var(--ink-soft) !important; }
-.hover\:bg-slate-950:hover  { background-color: var(--ink) !important; }
-.hover\:bg-slate-800:hover  { background-color: var(--ink-soft) !important; }
+.hover\:bg-slate-950:hover  { background-color: var(--paper-raised) !important; }
+.hover\:bg-slate-800:hover  { background-color: var(--paper-raised) !important; }
 
 /* Result indicator dots */
-.bg-emerald-500 { background-color: #2d5016 !important; }   /* win  */
-.bg-red-500     { background-color: var(--accent) !important; }  /* loss */
-.bg-amber-500   { background-color: #8b6914 !important; }    /* draw */
+.bg-emerald-500 { background-color: var(--accent) !important; }
+.bg-red-500     { background-color: var(--coral) !important; }
+.bg-amber-500   { background-color: var(--acid) !important; }
 
 /* Info / success banners (emerald) */
-.bg-emerald-50    { background-color: color-mix(in srgb, #2d5016 10%, var(--paper)) !important; }
-.border-emerald-200 { border-color: #8ab578 !important; }
-.text-emerald-700 { color: #2d5016 !important; }
-.text-emerald-800 { color: #2d5016 !important; }
-.text-emerald-600 { color: #2d5016 !important; }
+.bg-emerald-50    { background-color: color-mix(in srgb, var(--accent) 9%, var(--paper-dark)) !important; }
+.border-emerald-200 { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)) !important; }
+.text-emerald-700 { color: var(--accent) !important; }
+.text-emerald-800 { color: var(--accent) !important; }
+.text-emerald-600 { color: var(--accent) !important; }
 
 /* Warning banners (amber) */
-.bg-amber-50    { background-color: color-mix(in srgb, #8b6914 12%, var(--paper)) !important; }
-.border-amber-200 { border-color: #c4aa60 !important; }
-.text-amber-800 { color: #8b6914 !important; }
+.bg-amber-50    { background-color: color-mix(in srgb, #f59e0b 9%, var(--paper-dark)) !important; }
+.border-amber-200 { border-color: color-mix(in srgb, var(--acid) 35%, var(--line)) !important; }
+.text-amber-800 { color: #fcd34d !important; }
 
 /* Error banners (red) */
-.bg-red-50     { background-color: color-mix(in srgb, var(--accent) 8%, var(--paper)) !important; }
-.border-red-200 { border-color: color-mix(in srgb, var(--accent) 35%, var(--paper)) !important; }
-.text-red-700   { color: var(--accent) !important; }
-.text-red-600   { color: var(--accent) !important; }
+.bg-red-50     { background-color: color-mix(in srgb, var(--coral) 9%, var(--paper-dark)) !important; }
+.border-red-200 { border-color: color-mix(in srgb, var(--coral) 38%, var(--line)) !important; }
+.text-red-700   { color: #ff947f !important; }
+.text-red-600   { color: #ff947f !important; }
 
 /* ── Slider thumb (weight simplex) ───────────────────────────────────────── */
 input[type="range"].weight-slider::-webkit-slider-thumb {
@@ -141,4 +173,84 @@ input[type="range"].weight-slider::-moz-range-track { background: transparent; }
 /* The 0.1s delay lets the size expansion start before the content appears. */
 .node-expanded-content {
   animation: nodeExpandedFadeIn 0.16s ease 0.1s both;
+}
+
+/* ── Neon tournament system ─────────────────────────────────────────────── */
+.text-amber-900, .text-amber-950 { color: #e7fa9b !important; }
+.text-red-800, .text-red-900 { color: #ff947f !important; }
+
+/* Recharts ships light tooltip and hover-cursor defaults. Keep every chart
+   interaction on the same dark surface as the surrounding dashboard. */
+.recharts-default-tooltip {
+  background: rgba(13, 19, 16, .97) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .42) !important;
+  color: var(--ink) !important;
+}
+.recharts-tooltip-label { color: var(--ink-soft) !important; }
+.recharts-tooltip-item { color: var(--ink) !important; }
+.recharts-tooltip-cursor {
+  fill: rgba(33, 231, 131, .055) !important;
+  stroke: rgba(33, 231, 131, .32) !important;
+}
+
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  z-index: 10000;
+  transform: translateY(-160%);
+  border-radius: 999px;
+  background: var(--acid);
+  color: #0a0e0b;
+  padding: .7rem 1rem;
+  font-weight: 800;
+}
+.skip-link:focus { transform: translateY(0); }
+
+.page-shell { position: relative; isolation: isolate; }
+.page-shell::after {
+  position: absolute;
+  top: 1.25rem;
+  right: 3vw;
+  z-index: -1;
+  width: 128px;
+  height: 128px;
+  content: "";
+  opacity: .3;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 12px);
+  clip-path: polygon(48% 0, 100% 0, 100% 100%, 0 100%, 0 48%);
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.display-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 7vw, 5.5rem);
+  font-weight: 500;
+  letter-spacing: -.065em;
+  line-height: .88;
+}
+
+input[type="checkbox"] { accent-color: var(--accent); }
+select { color-scheme: dark; }
+
+@keyframes pageIn { from { opacity: 0; transform: translateY(12px); } }
+main { animation: pageIn .48s cubic-bezier(.22,.8,.22,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+@media (max-width: 640px) {
+  body::before { background-size: 40px 40px; }
+  .page-shell::after { width: 72px; height: 72px; right: 1rem; }
 }

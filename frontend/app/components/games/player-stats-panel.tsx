@@ -12,10 +12,11 @@ import { queryGames } from "~/lib/api";
 import type { GameSummary } from "~/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 
-const WIN_COLOR = "#2d5016";
-const DRAW_COLOR = "#8b6914";
-const LOSS_COLOR = "#7c3a2d";
-const ELO_COLOR = "#7c3a2d";
+const WIN_COLOR = "#21e783";
+const DRAW_COLOR = "#dcff42";
+const LOSS_COLOR = "#ff6a4d";
+const ELO_COLOR = "#21e783";
+const RESPONSIVE_INITIAL_DIMENSION = { width: 1, height: 1 };
 
 interface TCRow {
   name: string;
@@ -89,13 +90,13 @@ function thinSeries<T>(arr: T[], max: number): T[] {
 function StatChip({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div
-      className="flex flex-col items-center rounded-md px-4 py-3"
-      style={{ background: "var(--paper-dark)", border: "1px solid var(--line)" }}
+      className="flex min-h-28 flex-col items-start justify-end rounded-[18px] px-4 py-4 transition-transform hover:-translate-y-0.5"
+      style={{ background: "linear-gradient(145deg, var(--paper-raised), var(--paper-dark))", border: "1px solid var(--line)" }}
     >
       <span className="text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)", fontFamily: "var(--font-sans)" }}>
         {label}
       </span>
-      <span className="mt-1 text-2xl font-semibold leading-none" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>
+      <span className="mt-3 text-3xl font-semibold leading-none" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>
         {value}
       </span>
       {sub && (
@@ -147,7 +148,7 @@ function EloChart({ data, current }: { data: { n: number; elo: number; date: str
       </CardHeader>
       <CardContent className="pt-0">
         <div className="h-32">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={RESPONSIVE_INITIAL_DIMENSION}>
             <AreaChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
               <defs>
                 <linearGradient id="eloGrad" x1="0" y1="0" x2="0" y2="1">

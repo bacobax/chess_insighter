@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { BarChart3, Loader2 } from "lucide-react";
+import { ArrowLeft, BarChart3, Loader2, Sparkles } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { queryGames } from "~/lib/api";
 import type { GameSummary } from "~/lib/types";
@@ -49,16 +49,20 @@ export function InfiniteGamesScroller({ username }: { username: string }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-6 border-b border-[var(--line)] pb-8 sm:flex-row sm:items-end">
         <div>
-          <h1 className="text-2xl font-semibold tracking-normal" style={{ fontFamily: "var(--font-display)" }}>{username}</h1>
-          <p className="mt-1 text-sm text-slate-500">Chess.com games · scroll to load more.</p>
+          <Link to="/" className="mb-8 inline-flex items-center gap-2 text-xs font-bold text-[var(--ink-soft)] transition-colors hover:text-[var(--accent)]">
+            <ArrowLeft className="h-3.5 w-3.5" /> New player
+          </Link>
+          <p className="eyebrow mb-3 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5" /> Match archive / Live profile</p>
+          <h1 className="font-[var(--font-display)] text-[clamp(3rem,8vw,6.5rem)] font-medium leading-[.84] tracking-[-.065em]">{username}</h1>
+          <p className="mt-4 text-sm text-slate-500">Chess.com games · the latest 100 shape the snapshot below.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={`/report/${encodeURIComponent(username)}`}>
-            <Button>
+            <Button className="px-6">
               <BarChart3 className="h-4 w-4" />
-              Player Report
+              Build player report
             </Button>
           </Link>
         </div>

@@ -47,15 +47,18 @@ export default function OpeningStudyPage() {
     : "/";
 
   return (
-    <main className="flex h-screen w-screen flex-col" style={{ color: "var(--ink)" }}>
-      <header className="flex items-center gap-3 px-4 py-2" style={{ borderBottom: "1px solid var(--line)", backgroundColor: "var(--paper-dark)" }}>
+    <main id="main-content" className="flex h-screen w-screen flex-col" style={{ color: "var(--ink)" }}>
+      <header className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-6" style={{ borderBottom: "1px solid var(--line)", background: "rgba(9,13,11,.92)", backdropFilter: "blur(16px)" }}>
         <Link to={backTarget}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         </Link>
-        <h1 className="text-sm font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>Opening Study Tree</h1>
-        <span className="text-xs" style={{ color: "var(--ink-faint)" }}>Drag to pan · scroll to zoom · click a node to expand</span>
+        <div className="h-7 w-px bg-[var(--line)]" />
+        <div>
+          <h1 className="text-sm font-bold tracking-[-.02em]" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>OPENING LAB <span className="text-[var(--accent)]">/ TREE</span></h1>
+          <span className="hidden text-[10px] font-semibold uppercase tracking-[.12em] sm:block" style={{ color: "var(--ink-faint)" }}>Drag to pan · scroll to zoom · click or press Enter to expand</span>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">

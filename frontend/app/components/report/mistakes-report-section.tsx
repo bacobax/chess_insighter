@@ -5,6 +5,7 @@ import {
   Activity,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Loader2,
   RefreshCw,
@@ -53,6 +54,8 @@ type ReportMistakesDraft = {
 };
 
 const TIME_CLASSES = ["rapid", "blitz", "bullet", "daily"];
+const GAME_LIST_PAGE_SIZE = 5;
+const MISTAKE_GROUPS_PAGE_SIZE = 5;
 const RESPONSIVE_INITIAL_DIMENSION = { width: 1, height: 1 };
 
 type RankedMistake = {
@@ -110,11 +113,13 @@ export function MistakesReportSection({
   const [detailMode, setDetailMode] = useState<DetailMode>("simple");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gameEditorOpen, setGameEditorOpen] = useState(false);
+  const [gameListPage, setGameListPage] = useState(1);
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogHasMore, setCatalogHasMore] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("impact");
   const [groupMode, setGroupMode] = useState<GroupMode>("game");
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  const [mistakeGroupsPage, setMistakeGroupsPage] = useState(1);
   const [draftReady, setDraftReady] = useState(false);
   const sidecarId = context?.sidecar_id ?? context?.default_game_ids.join("|") ?? "missing";
 
@@ -145,6 +150,7 @@ export function MistakesReportSection({
     setAnalysis(null);
     setDraftReady(false);
     setError(null);
+    setGameListPage(1);
     setGames(context?.games ?? []);
     setSelectedIds(new Set(context?.default_game_ids ?? []));
     setEngineDepth(context?.engine_depth ?? 10);
@@ -249,6 +255,11 @@ export function MistakesReportSection({
     () => games.filter((game) => game.id && selectedIds.has(game.id)),
     [games, selectedIds],
   );
+  const gameListPageCount = Math.max(1, Math.ceil(filteredGames.length / GAME_LIST_PAGE_SIZE));
+  const visibleGames = useMemo(() => {
+    const start = (gameListPage - 1) * GAME_LIST_PAGE_SIZE;
+    return filteredGames.slice(start, start + GAME_LIST_PAGE_SIZE);
+  }, [filteredGames, gameListPage]);
   const topMistake = analysis?.mistakes[0] ?? null;
   const gameStats = useMemo(
     () => summarizeGamesFromMistakes(analysis?.mistakes ?? []),
@@ -262,6 +273,13 @@ export function MistakesReportSection({
     () => groupMistakes(visibleMistakes, mergeGames(games, analysis?.selected_games ?? []), groupMode),
     [analysis?.selected_games, games, groupMode, visibleMistakes],
   );
+  const mistakeGroupsPageCount = Math.max(1, Math.ceil(mistakeGroups.length / MISTAKE_GROUPS_PAGE_SIZE));
+  const resolvedMistakeGroupsPage = Math.min(mistakeGroupsPage, mistakeGroupsPageCount);
+  const mistakeGroupsPageStart = (resolvedMistakeGroupsPage - 1) * MISTAKE_GROUPS_PAGE_SIZE;
+  const paginatedMistakeGroups = useMemo(
+    () => mistakeGroups.slice(mistakeGroupsPageStart, mistakeGroupsPageStart + MISTAKE_GROUPS_PAGE_SIZE),
+    [mistakeGroups, mistakeGroupsPageStart],
+  );
   const activeIds = stringArray((analysis?.metadata as Record<string, unknown> | undefined)?.selected_game_ids);
   const stale = Boolean(
     analysis && (
@@ -270,6 +288,14 @@ export function MistakesReportSection({
       || numberOr(analysis.metadata.max_punishment_plies, 0) !== maxPunishmentPlies
     ),
   );
+
+  useEffect(() => {
+    setGameListPage((current) => Math.min(current, gameListPageCount));
+  }, [gameListPageCount]);
+
+  useEffect(() => {
+    setMistakeGroupsPage(1);
+  }, [activeTheme, analysis?.analysis_hash, groupMode, sortMode]);
 
   async function runAnalysis() {
     setAnalysisLoading(true);
@@ -303,6 +329,7 @@ export function MistakesReportSection({
       setGames((current) => mergeGames(page === 1 ? context?.games ?? [] : current, response.items));
       setCatalogPage(page);
       setCatalogHasMore(response.has_more && page * response.page_size < 500);
+      if (page === 1) setGameListPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load games.");
     } finally {
@@ -442,7 +469,17 @@ export function MistakesReportSection({
                 <div>
                   <div className="mb-2 text-xs uppercase" style={{ color: "var(--ink-faint)" }}>Result</div>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {(["all", "loss", "draw", "win"] as ResultFilter[]).map((value) => <ModeButton key={value} active={resultFilter === value} onClick={() => setResultFilter(value)} label={title(value)} />)}
+                    {(["all", "loss", "draw", "win"] as ResultFilter[]).map((value) => (
+                      <ModeButton
+                        key={value}
+                        active={resultFilter === value}
+                        onClick={() => {
+                          setResultFilter(value);
+                          setGameListPage(1);
+                        }}
+                        label={title(value)}
+                      />
+                    ))}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -461,7 +498,7 @@ export function MistakesReportSection({
                   <Button variant="secondary" size="sm" onClick={() => selectRecent(12)} type="button">Recent 12</Button>
                   <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())} type="button">Clear</Button>
                 </div>
-                <div className="max-h-[560px] space-y-2 overflow-auto pr-1">
+                <div className="space-y-2">
                   {gamesLoading ? (
                     <div className="flex h-24 items-center justify-center">
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -471,7 +508,7 @@ export function MistakesReportSection({
                       No games.
                     </div>
                   ) : (
-                    filteredGames.map((game) => (
+                    visibleGames.map((game) => (
                       <GameRow
                         key={game.id ?? `${game.end_time}-${game.opponent_username}`}
                         game={game}
@@ -483,6 +520,42 @@ export function MistakesReportSection({
                     ))
                   )}
                 </div>
+                {filteredGames.length > 0 ? (
+                  <nav
+                    className="flex items-center justify-between gap-3 border-t pt-3"
+                    style={{ borderColor: "var(--line)" }}
+                    aria-label="Games pagination"
+                  >
+                    <span className="text-xs tabular-nums" style={{ color: "var(--ink-soft)" }} aria-live="polite">
+                      {(gameListPage - 1) * GAME_LIST_PAGE_SIZE + 1}–{Math.min(gameListPage * GAME_LIST_PAGE_SIZE, filteredGames.length)} of {filteredGames.length}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        onClick={() => setGameListPage((current) => Math.max(1, current - 1))}
+                        disabled={gameListPage === 1}
+                        aria-label="Previous games page"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="min-w-12 text-center text-xs font-semibold tabular-nums" style={{ color: "var(--ink-soft)" }}>
+                        {gameListPage} / {gameListPageCount}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        onClick={() => setGameListPage((current) => Math.min(gameListPageCount, current + 1))}
+                        disabled={gameListPage === gameListPageCount}
+                        aria-label="Next games page"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </nav>
+                ) : null}
                 {catalogHasMore ? <Button variant="outline" size="sm" className="w-full" onClick={() => loadCatalog(catalogPage + 1)} disabled={gamesLoading}>Load more</Button> : null}
               </CardContent>
             </Card> : null}
@@ -554,19 +627,104 @@ export function MistakesReportSection({
             ) : null}
 
             {mistakeGroups.length ? (
-              <div className="grid gap-2">
-                {mistakeGroups.map((group, groupIndex) => (
-                  <MistakeGameSection
-                    key={group.key}
-                    group={group}
-                    username={username}
-                    reportHash={reportHash}
-                    analysisHash={analysis?.analysis_hash ?? ""}
-                    groupIndex={groupIndex}
-                    totalGroups={mistakeGroups.length}
-                    detailMode={detailMode}
-                  />
-                ))}
+              <div className="space-y-3">
+                {mistakeGroupsPageCount > 1 ? (
+                  <div
+                    className="flex gap-2 overflow-x-auto rounded-md border p-2"
+                    style={{ borderColor: "var(--line)", backgroundColor: "var(--paper-dark)" }}
+                    role="tablist"
+                    aria-label={groupMode === "game" ? "Mistake game pages" : "Mistake group pages"}
+                  >
+                    {Array.from({ length: mistakeGroupsPageCount }, (_, index) => {
+                      const page = index + 1;
+                      const pageStart = index * MISTAKE_GROUPS_PAGE_SIZE + 1;
+                      const pageEnd = Math.min((index + 1) * MISTAKE_GROUPS_PAGE_SIZE, mistakeGroups.length);
+                      const active = page === resolvedMistakeGroupsPage;
+                      return (
+                        <button
+                          key={page}
+                          id={`mistake-games-tab-${page}`}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          aria-controls="mistake-games-panel"
+                          onClick={() => setMistakeGroupsPage(page)}
+                          className="min-w-24 shrink-0 rounded-full border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                          style={{
+                            borderColor: active ? "var(--acid)" : "var(--line)",
+                            backgroundColor: active ? "var(--acid)" : "var(--paper)",
+                            color: active ? "#0a0e0b" : "var(--ink)",
+                          }}
+                        >
+                          <span className="block text-xs font-extrabold">Page {page}</span>
+                          <span className="block text-[11px] opacity-70">
+                            {groupMode === "game" ? "Games" : "Groups"} {pageStart}–{pageEnd}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                <div
+                  id="mistake-games-panel"
+                  role="tabpanel"
+                  aria-labelledby={mistakeGroupsPageCount > 1 ? `mistake-games-tab-${resolvedMistakeGroupsPage}` : undefined}
+                  className="grid gap-2"
+                >
+                  {paginatedMistakeGroups.map((group, pageGroupIndex) => {
+                    const groupIndex = mistakeGroupsPageStart + pageGroupIndex;
+                    return (
+                      <MistakeGameSection
+                        key={group.key}
+                        group={group}
+                        username={username}
+                        reportHash={reportHash}
+                        analysisHash={analysis?.analysis_hash ?? ""}
+                        groupIndex={groupIndex}
+                        totalGroups={mistakeGroups.length}
+                        detailMode={detailMode}
+                      />
+                    );
+                  })}
+                </div>
+
+                {mistakeGroupsPageCount > 1 ? (
+                  <nav
+                    className="flex flex-col items-center justify-between gap-3 rounded-md border px-3 py-2 sm:flex-row"
+                    style={{ borderColor: "var(--line)", backgroundColor: "var(--paper-dark)" }}
+                    aria-label={groupMode === "game" ? "Mistake games pagination" : "Mistake groups pagination"}
+                  >
+                    <span className="text-xs tabular-nums" style={{ color: "var(--ink-soft)" }} aria-live="polite">
+                      {groupMode === "game" ? "Games" : "Groups"} {mistakeGroupsPageStart + 1}–{Math.min(mistakeGroupsPageStart + MISTAKE_GROUPS_PAGE_SIZE, mistakeGroups.length)} of {mistakeGroups.length}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        onClick={() => setMistakeGroupsPage((current) => Math.max(1, current - 1))}
+                        disabled={resolvedMistakeGroupsPage === 1}
+                        aria-label="Previous mistake games page"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="min-w-14 text-center text-xs font-semibold tabular-nums" style={{ color: "var(--ink-soft)" }}>
+                        {resolvedMistakeGroupsPage} / {mistakeGroupsPageCount}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        onClick={() => setMistakeGroupsPage((current) => Math.min(mistakeGroupsPageCount, current + 1))}
+                        disabled={resolvedMistakeGroupsPage === mistakeGroupsPageCount}
+                        aria-label="Next mistake games page"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </nav>
+                ) : null}
               </div>
             ) : analysis && !analysisLoading ? (
               <div className="rounded-md border p-8 text-center" style={{ borderColor: "var(--line)", color: "var(--ink-soft)" }}>
@@ -610,7 +768,7 @@ function MistakeGameSection({
       className="rounded-md border"
       style={{
         borderColor: "var(--line)",
-        backgroundColor: "color-mix(in srgb, var(--paper) 88%, white)",
+        background: "linear-gradient(145deg, var(--paper-raised), var(--paper-dark))",
       }}
       aria-labelledby={`mistake-game-${groupIndex}`}
     >
@@ -680,9 +838,9 @@ function MistakeGameSection({
 }
 
 const THEME_COLORS = [
-  "#c0392b", "#2d5016", "#1a5276", "#6c3483",
-  "#117a65", "#8b6914", "#784212", "#0b5394",
-  "#4a235a", "#145a32", "#7d6608", "#17202a",
+  "#ff6a4d", "#21e783", "#60a5fa", "#a78bfa",
+  "#2dd4bf", "#fbbf24", "#fb923c", "#22d3ee",
+  "#f472b6", "#75e6c2", "#dcff42", "#94a3b8",
 ];
 
 function blunderThemeCounts(mistakes: MistakeAnalysisItem[]): { theme: string; label: string; count: number }[] {
@@ -731,7 +889,7 @@ function SummaryPanel({
         style={{
           borderColor: "var(--line)",
           background:
-            "linear-gradient(135deg, color-mix(in srgb, var(--accent) 11%, var(--paper)) 0%, var(--paper) 46%, color-mix(in srgb, #2d5016 10%, var(--paper)) 100%)",
+            "linear-gradient(135deg, color-mix(in srgb, var(--coral) 7%, var(--paper-dark)) 0%, var(--paper) 48%, color-mix(in srgb, var(--accent) 7%, var(--paper-dark)) 100%)",
         }}
       >
         {/* Header row */}
@@ -919,7 +1077,7 @@ function MistakeRow({
             {mistake.player_color === "black" ? "..." : "."} {mistake.san}
           </span>
           {mistake.actual_punished ? (
-            <CheckCircle2 className="h-4 w-4" style={{ color: "#2d5016" }} aria-label="Punished" />
+            <CheckCircle2 className="h-4 w-4" style={{ color: "var(--accent)" }} aria-label="Punished" />
           ) : (
             <XCircle className="h-4 w-4" style={{ color: "var(--accent)" }} aria-label="Escaped" />
           )}
@@ -1069,9 +1227,9 @@ function ModeButton({ active, onClick, label }: { active: boolean; onClick: () =
       onClick={onClick}
       className="h-10 rounded text-sm font-semibold transition-colors"
       style={{
-        backgroundColor: active ? "var(--ink)" : "var(--paper-dark)",
-        color: active ? "var(--paper)" : "var(--ink)",
-        border: "1px solid var(--line)",
+        backgroundColor: active ? "var(--acid)" : "var(--paper-dark)",
+        color: active ? "#0a0e0b" : "var(--ink)",
+        border: active ? "1px solid var(--acid)" : "1px solid var(--line)",
       }}
     >
       {label}
@@ -1099,8 +1257,8 @@ function SegmentedControl({
           onClick={() => onChange(optionValue)}
           className="h-8 rounded px-3 text-xs font-semibold transition-colors"
           style={{
-            backgroundColor: value === optionValue ? "var(--ink)" : "transparent",
-            color: value === optionValue ? "var(--paper)" : "var(--ink)",
+            backgroundColor: value === optionValue ? "var(--acid)" : "transparent",
+            color: value === optionValue ? "#0a0e0b" : "var(--ink)",
           }}
         >
           {label}
@@ -1176,7 +1334,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
 
 function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-md border px-3 py-2" style={{ borderColor: "var(--line)", backgroundColor: "rgba(244,236,216,0.72)" }}>
+    <div className="rounded-xl border px-3 py-3" style={{ borderColor: "var(--line)", background: "linear-gradient(145deg, var(--paper-raised), var(--paper-dark))", boxShadow: "inset 0 1px 0 rgba(255,255,255,.025)" }}>
       <div className="text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>{label}</div>
       <div className="mt-1 text-xl font-semibold leading-none" style={{ fontFamily: "var(--font-display)" }}>{value}</div>
     </div>
@@ -1206,9 +1364,9 @@ function CompactPill({ label, value }: { label: string; value: string | number }
 
 function Badge({ children, tone }: { children: ReactNode; tone: "red" | "amber" | "green" | "ink" }) {
   const styles = {
-    red: { backgroundColor: "color-mix(in srgb, var(--accent) 13%, var(--paper))", color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 36%, var(--paper))" },
-    amber: { backgroundColor: "color-mix(in srgb, #8b6914 15%, var(--paper))", color: "#8b6914", borderColor: "#c4aa60" },
-    green: { backgroundColor: "color-mix(in srgb, #2d5016 13%, var(--paper))", color: "#2d5016", borderColor: "#8ab578" },
+    red: { backgroundColor: "color-mix(in srgb, var(--coral) 12%, var(--paper-dark))", color: "#ff9c89", borderColor: "color-mix(in srgb, var(--coral) 48%, var(--line))" },
+    amber: { backgroundColor: "color-mix(in srgb, #f59e0b 11%, var(--paper-dark))", color: "#fcd34d", borderColor: "color-mix(in srgb, #f59e0b 48%, var(--line))" },
+    green: { backgroundColor: "color-mix(in srgb, var(--accent) 10%, var(--paper-dark))", color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 44%, var(--line))" },
     ink: { backgroundColor: "var(--paper-dark)", color: "var(--ink)", borderColor: "var(--line)" },
   }[tone];
   return (

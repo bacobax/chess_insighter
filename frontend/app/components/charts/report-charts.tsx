@@ -22,8 +22,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type { MetricPoint, OpeningCount } from "~/lib/types";
 import { formatNumber, formatPercent } from "~/lib/utils";
 
-const COLORS = ["#7c3a2d", "#4a3728", "#8b6914", "#2d5016", "#b58863", "#6b5d4f", "#9a6b5a"];
+const COLORS = ["#21e783", "#dcff42", "#ff6a4d", "#75c6ff", "#c68cff", "#75e6c2", "#ffc36a"];
 const RESPONSIVE_INITIAL_DIMENSION = { width: 1, height: 1 };
+const TOOLTIP_CONTENT_STYLE = {
+  backgroundColor: "#0d1310",
+  border: "1px solid #314139",
+  borderRadius: 12,
+  boxShadow: "0 16px 42px rgba(0,0,0,.42)",
+  color: "#f2f7f0",
+};
+const TOOLTIP_ITEM_STYLE = { color: "#f2f7f0" };
+const TOOLTIP_LABEL_STYLE = { color: "#a5b3aa" };
+const TOOLTIP_CURSOR = { fill: "rgba(33,231,131,.055)" };
 
 export function SkillRadarChart({ data }: { data: MetricPoint[] }) {
   const chartData = data
@@ -38,11 +48,11 @@ export function SkillRadarChart({ data }: { data: MetricPoint[] }) {
       <CardContent className="h-80">
         <ResponsiveContainer minWidth={0} initialDimension={RESPONSIVE_INITIAL_DIMENSION}>
           <RadarChart data={chartData}>
-            <PolarGrid stroke="#c8b99a" />
-            <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: "#6b6358" }} />
-            <PolarRadiusAxis domain={[0, 1]} tickFormatter={(value) => `${Number(value) * 100}`} tick={{ fill: "#a89e8e", fontSize: 10 }} />
-            <Radar dataKey="value" stroke="#7c3a2d" fill="#b58863" fillOpacity={0.3} />
-            <Tooltip formatter={(value) => formatPercent(Number(value))} />
+            <PolarGrid stroke="#314139" />
+            <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: "#a5b3aa" }} />
+            <PolarRadiusAxis domain={[0, 1]} tickFormatter={(value) => `${Number(value) * 100}`} tick={{ fill: "#6f8076", fontSize: 10 }} />
+            <Radar dataKey="value" stroke="#21e783" fill="#21e783" fillOpacity={0.2} />
+            <Tooltip contentStyle={TOOLTIP_CONTENT_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} formatter={(value) => formatPercent(Number(value))} />
           </RadarChart>
         </ResponsiveContainer>
       </CardContent>
@@ -69,11 +79,11 @@ export function FavouriteOpeningsChart({ data }: { data: OpeningCount[] }) {
             {view === "bar" ? (
               <ResponsiveContainer minWidth={0} initialDimension={RESPONSIVE_INITIAL_DIMENSION}>
                 <BarChart data={barData} layout="vertical" margin={{ left: 32 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#dfd2bb" />
-                  <XAxis type="number" allowDecimals={false} tick={{ fill: "#6b6358", fontSize: 11 }} />
-                  <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: "#6b6358" }} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#7c3a2d" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#222f28" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fill: "#a5b3aa", fontSize: 11 }} />
+                  <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: "#a5b3aa" }} />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={TOOLTIP_CONTENT_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                  <Bar dataKey="count" fill="#21e783" radius={[0, 6, 6, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : null}
@@ -85,7 +95,7 @@ export function FavouriteOpeningsChart({ data }: { data: OpeningCount[] }) {
                   <Pie data={barData} dataKey="count" nameKey="label" outerRadius={105} label>
                     {barData.map((_, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip contentStyle={TOOLTIP_CONTENT_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -122,11 +132,11 @@ export function MetricBarChart({
       <div className="h-72">
         <ResponsiveContainer minWidth={0} initialDimension={RESPONSIVE_INITIAL_DIMENSION}>
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#dfd2bb" />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b6358" }} interval={0} angle={-20} textAnchor="end" height={70} />
-            <YAxis domain={percent ? [0, 1] : undefined} tickFormatter={(value) => percent ? `${Number(value) * 100}` : String(value)} tick={{ fill: "#6b6358", fontSize: 11 }} />
-            <Tooltip formatter={(value, _name, props) => [percent ? formatPercent(Number(value)) : formatNumber(Number(value)), props.payload.directionLabel]} />
-            <Bar dataKey="displayValue" fill="#7c3a2d" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#222f28" />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a5b3aa" }} interval={0} angle={-20} textAnchor="end" height={70} />
+            <YAxis domain={percent ? [0, 1] : undefined} tickFormatter={(value) => percent ? `${Number(value) * 100}` : String(value)} tick={{ fill: "#a5b3aa", fontSize: 11 }} />
+            <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={TOOLTIP_CONTENT_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} formatter={(value, _name, props) => [percent ? formatPercent(Number(value)) : formatNumber(Number(value)), props.payload.directionLabel]} />
+            <Bar dataKey="displayValue" fill="#21e783" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

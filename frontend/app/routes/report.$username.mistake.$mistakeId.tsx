@@ -38,6 +38,14 @@ type BoardStep = {
   source: "blunder" | Track;
 };
 
+type ExpandedBranch = {
+  sourceKey: string;
+  fen: string;
+};
+
+// One diagram column is a node plus the connector that precedes the next node.
+const DIAGRAM_COLUMN_WIDTH_PX = 84 + 24;
+
 // ─── Tactic colour palette ────────────────────────────────────────────────────
 const TACTIC_PRIORITY = [
   "check",
@@ -53,14 +61,14 @@ const TACTIC_PRIORITY = [
 type TacticTheme = (typeof TACTIC_PRIORITY)[number];
 
 const THEME_COLORS: Record<TacticTheme, { bg: string; border: string; text: string; label: string }> = {
-  check:            { bg: "#dbeafe", border: "#3b82f6", text: "#1e40af", label: "Check" },
-  double_check:     { bg: "#e0f2fe", border: "#0891b2", text: "#0e7490", label: "Double check" },
-  discovered_check: { bg: "#ede9fe", border: "#7c3aed", text: "#5b21b6", label: "Discovered check" },
-  checkmate_in_k:   { bg: "#fee2e2", border: "#dc2626", text: "#991b1b", label: "Checkmate" },
-  fork:             { bg: "#fef3c7", border: "#d97706", text: "#92400e", label: "Fork" },
-  absolute_pin:     { bg: "#ffedd5", border: "#ea580c", text: "#9a3412", label: "Pin" },
-  skewer:           { bg: "#ccfbf1", border: "#0d9488", text: "#115e59", label: "Skewer" },
-  king_attraction:  { bg: "#fce7f3", border: "#db2777", text: "#9d174d", label: "King attraction" },
+  check:            { bg: "color-mix(in srgb, #3b82f6 14%, var(--paper-dark))", border: "#60a5fa", text: "#bfdbfe", label: "Check" },
+  double_check:     { bg: "color-mix(in srgb, #22d3ee 14%, var(--paper-dark))", border: "#22d3ee", text: "#a5f3fc", label: "Double check" },
+  discovered_check: { bg: "color-mix(in srgb, #8b5cf6 15%, var(--paper-dark))", border: "#a78bfa", text: "#ddd6fe", label: "Discovered check" },
+  checkmate_in_k:   { bg: "color-mix(in srgb, var(--coral) 14%, var(--paper-dark))", border: "var(--coral)", text: "#ffc1b5", label: "Checkmate" },
+  fork:             { bg: "color-mix(in srgb, #fbbf24 13%, var(--paper-dark))", border: "#fbbf24", text: "#fde68a", label: "Fork" },
+  absolute_pin:     { bg: "color-mix(in srgb, #fb923c 14%, var(--paper-dark))", border: "#fb923c", text: "#fed7aa", label: "Pin" },
+  skewer:           { bg: "color-mix(in srgb, #2dd4bf 14%, var(--paper-dark))", border: "#2dd4bf", text: "#99f6e4", label: "Skewer" },
+  king_attraction:  { bg: "color-mix(in srgb, #f472b6 14%, var(--paper-dark))", border: "#f472b6", text: "#fbcfe8", label: "King attraction" },
 };
 
 function primaryTactic(tactics: TacticTag[]): TacticTheme | null {
@@ -90,8 +98,9 @@ export default function BlunderAnalysisPage() {
   const [positionCache, setPositionCache] = useState<Map<string, PositionAnalysis>>(new Map());
   const loadingFens = useRef<Set<string>>(new Set());
 
-  // Optimal branch expansion: which actual-step FEN is expanded
-  const [expandedFen, setExpandedFen] = useState<string | null>(null);
+  // Each expanded actual-game node owns a separate optimal-line row.
+  const [expandedBranches, setExpandedBranches] = useState<ExpandedBranch[]>([]);
+  const [activeOptimalSourceKey, setActiveOptimalSourceKey] = useState<string | null>(null);
   const reportUrl = `/report/${encodeURIComponent(username)}?restore=${encodeURIComponent(cacheHash)}#mistakes`;
 
   useEffect(() => {
@@ -122,15 +131,22 @@ export default function BlunderAnalysisPage() {
   const engineSteps = useMemo(() => (mistake ? buildSteps(mistake, "engine") : []), [mistake]);
   const actualSteps = useMemo(() => (mistake ? buildSteps(mistake, "actual") : []), [mistake]);
 
-  const optimalSteps = useMemo(() => {
-    if (!expandedFen || !mistake) return [];
-    const cached = positionCache.get(expandedFen);
-    if (!cached?.optimal_line) return [];
-    return cached.optimal_line.map((move) => lineMoveToStep(move, "optimal"));
-  }, [expandedFen, positionCache, mistake]);
+  const optimalStepsBySource = useMemo(() => {
+    const stepsBySource = new Map<string, BoardStep[]>();
+    for (const expansion of expandedBranches) {
+      const cached = positionCache.get(expansion.fen);
+      const steps = cached?.optimal_line?.map((move) => lineMoveToStep(move, "optimal")) ?? [];
+      stepsBySource.set(expansion.sourceKey, steps);
+    }
+    return stepsBySource;
+  }, [expandedBranches, positionCache]);
+
+  const activeOptimalSteps = activeOptimalSourceKey
+    ? optimalStepsBySource.get(activeOptimalSourceKey) ?? []
+    : [];
 
   const activeSteps =
-    track === "engine" ? engineSteps : track === "actual" ? actualSteps : optimalSteps;
+    track === "engine" ? engineSteps : track === "actual" ? actualSteps : activeOptimalSteps;
   const step = activeSteps[Math.min(stepIndex, Math.max(activeSteps.length - 1, 0))] ?? null;
 
   useEffect(() => {
@@ -168,6 +184,18 @@ export default function BlunderAnalysisPage() {
     if (step?.fen) requestPositionAnalysis(step.fen);
   }, [step?.fen, requestPositionAnalysis]);
 
+  const navigableOptimalBranches = useMemo(() => {
+    const expansionsBySource = new Map(
+      expandedBranches.map((expansion) => [expansion.sourceKey, expansion] as const),
+    );
+    return actualSteps.flatMap((actualStep) => {
+      const expansion = expansionsBySource.get(actualStep.key);
+      return expansion && (optimalStepsBySource.get(expansion.sourceKey)?.length ?? 0) > 0
+        ? [expansion]
+        : [];
+    });
+  }, [actualSteps, expandedBranches, optimalStepsBySource]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!activeSteps.length) return;
@@ -179,20 +207,30 @@ export default function BlunderAnalysisPage() {
         setStepIndex((current) => Math.max(0, current - 1));
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
-        setTrack((current) => {
-          if (current === "engine") return "actual";
-          if (current === "actual") return optimalSteps.length > 0 ? "optimal" : "engine";
-          return "engine";
-        });
+        const rows: Array<{ track: Track; sourceKey?: string }> = [
+          { track: "engine" },
+          { track: "actual" },
+          ...navigableOptimalBranches.map((expansion) => ({
+            track: "optimal" as const,
+            sourceKey: expansion.sourceKey,
+          })),
+        ];
+        const currentRow = rows.findIndex(
+          (row) => row.track === track && (row.track !== "optimal" || row.sourceKey === activeOptimalSourceKey),
+        );
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextRow = rows[(Math.max(currentRow, 0) + direction + rows.length) % rows.length];
+        setTrack(nextRow.track);
+        if (nextRow.track === "optimal") setActiveOptimalSourceKey(nextRow.sourceKey ?? null);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeSteps.length, optimalSteps.length]);
+  }, [activeOptimalSourceKey, activeSteps.length, navigableOptimalBranches, track]);
 
   if (!mistake || !step) {
     return (
-      <main className="min-h-screen px-4 py-8" style={{ color: "var(--ink)" }}>
+      <main id="main-content" className="page-shell min-h-screen px-5 py-8 sm:px-8" style={{ color: "var(--ink)" }}>
         <div className="mx-auto max-w-3xl rounded-md border p-6" style={{ borderColor: "var(--line)", backgroundColor: "var(--paper)" }}>
           <Link to={reportUrl}>
             <Button variant="outline">
@@ -223,29 +261,36 @@ export default function BlunderAnalysisPage() {
         : 1 - userWinProb
       : 0.5;
 
-  const handleNodeSelect = (newTrack: Track, newIndex: number) => {
+  const handleNodeSelect = (newTrack: Track, newIndex: number, sourceKey?: string) => {
     setTrack(newTrack);
     setStepIndex(newIndex);
+    if (newTrack === "optimal") setActiveOptimalSourceKey(sourceKey ?? null);
   };
 
-  const handleExpand = (fen: string) => {
-    if (expandedFen === fen) {
-      // toggle off
-      setExpandedFen(null);
-      if (track === "optimal") setTrack("actual");
-    } else {
-      setExpandedFen(fen);
-      requestPositionAnalysis(fen);
+  const handleExpand = (sourceKey: string, fen: string) => {
+    const isExpanded = expandedBranches.some((expansion) => expansion.sourceKey === sourceKey);
+    if (isExpanded) {
+      setExpandedBranches((current) => current.filter((expansion) => expansion.sourceKey !== sourceKey));
+      if (track === "optimal" && activeOptimalSourceKey === sourceKey) {
+        const sourceIndex = actualSteps.findIndex((actualStep) => actualStep.key === sourceKey);
+        setTrack("actual");
+        setStepIndex(Math.max(sourceIndex, 0));
+        setActiveOptimalSourceKey(null);
+      }
+      return;
     }
+
+    setExpandedBranches((current) => [...current, { sourceKey, fen }]);
+    requestPositionAnalysis(fen);
   };
 
   const isLoadingFen = (fen: string) => loadingFens.current.has(fen) && !positionCache.has(fen);
   const currentPositionAnalysis = step?.fen ? positionCache.get(step.fen) ?? null : null;
 
   return (
-    <main className="min-h-screen px-4 py-6" style={{ color: "var(--ink)" }}>
+    <main id="main-content" className="page-shell min-h-screen px-5 py-6 sm:px-8 lg:px-12" style={{ color: "var(--ink)" }}>
       <div className="mx-auto max-w-7xl">
-        <header className="mb-4 flex items-center gap-3">
+        <header className="mb-7 flex items-center gap-3 border-b border-[var(--line)] pb-6">
           <Link to={reportUrl}>
             <Button variant="outline" size="icon" aria-label="Back to mistakes">
               <ArrowLeft className="h-4 w-4" />
@@ -255,7 +300,7 @@ export default function BlunderAnalysisPage() {
             <p className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--accent)" }}>
               {username} · move {mistake.move_number}{mistake.player_color === "black" ? "..." : "."}
             </p>
-            <h1 className="text-3xl font-semibold tracking-normal" style={{ fontFamily: "var(--font-display)" }}>
+            <h1 className="text-3xl font-semibold tracking-[-.04em] sm:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
               {mistake.san} under the lens
             </h1>
           </div>
@@ -331,11 +376,11 @@ export default function BlunderAnalysisPage() {
           <section className="space-y-4">
             <LineStatus mistake={mistake} step={step} track={track} stepIndex={stepIndex} total={activeSteps.length} userWinProb={userWinProb} />
             <ForkDiagram
-              mistake={mistake}
               engineSteps={engineSteps}
               actualSteps={actualSteps}
-              optimalSteps={optimalSteps}
-              expandedFen={expandedFen}
+              optimalStepsBySource={optimalStepsBySource}
+              expandedBranches={expandedBranches}
+              activeOptimalSourceKey={activeOptimalSourceKey}
               track={track}
               stepIndex={stepIndex}
               onSelect={handleNodeSelect}
@@ -429,40 +474,49 @@ function EvalBar({
 // ─── Fork Diagram ─────────────────────────────────────────────────────────────
 
 function ForkDiagram({
-  mistake,
   engineSteps,
   actualSteps,
-  optimalSteps,
-  expandedFen,
+  optimalStepsBySource,
+  expandedBranches,
+  activeOptimalSourceKey,
   track,
   stepIndex,
   onSelect,
   onExpand,
   isLoadingFen,
 }: {
-  mistake: MistakeAnalysisItem;
   engineSteps: BoardStep[];
   actualSteps: BoardStep[];
-  optimalSteps: BoardStep[];
-  expandedFen: string | null;
+  optimalStepsBySource: Map<string, BoardStep[]>;
+  expandedBranches: ExpandedBranch[];
+  activeOptimalSourceKey: string | null;
   track: Track;
   stepIndex: number;
-  onSelect: (track: Track, index: number) => void;
-  onExpand: (fen: string) => void;
+  onSelect: (track: Track, index: number, sourceKey?: string) => void;
+  onExpand: (sourceKey: string, fen: string) => void;
   isLoadingFen: (fen: string) => boolean;
 }) {
   const trunk = engineSteps.slice(0, 2);
   const engineBranch = engineSteps.slice(2);
   const actualBranch = actualSteps.slice(2);
+  const expandedSourceKeys = new Set(expandedBranches.map((expansion) => expansion.sourceKey));
+  const expandedRows = actualBranch
+    .map((sourceStep, sourceColumn) => ({
+      sourceStep,
+      sourceColumn,
+      steps: optimalStepsBySource.get(sourceStep.key) ?? [],
+    }))
+    .filter(({ sourceStep }) => expandedSourceKeys.has(sourceStep.key));
 
   const allThemesPresent = useMemo(() => {
     const themes = new Set<TacticTheme>();
-    for (const s of [...engineBranch, ...actualBranch, ...optimalSteps]) {
+    const expandedSteps = expandedRows.flatMap((row) => row.steps);
+    for (const s of [...engineBranch, ...actualBranch, ...expandedSteps]) {
       const t = primaryTactic(s.tactics);
       if (t) themes.add(t);
     }
     return Array.from(themes);
-  }, [engineBranch, actualBranch, optimalSteps]);
+  }, [engineBranch, actualBranch, expandedRows]);
 
   const isActive = (t: Track, i: number) => track === t && stepIndex === i;
 
@@ -477,7 +531,7 @@ function ForkDiagram({
         </h2>
         <div className="flex items-center gap-3 text-xs" style={{ color: "var(--ink-soft)" }}>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-6 rounded-full" style={{ backgroundColor: "#16a34a" }} />
+            <span className="inline-block h-2 w-6 rounded-full" style={{ backgroundColor: "var(--accent)" }} />
             stable
           </span>
           <span className="flex items-center gap-1">
@@ -525,7 +579,7 @@ function ForkDiagram({
                 activeIndex={track === "engine" ? stepIndex : -1}
                 onSelect={(i) => onSelect("engine", i)}
                 label="Engine punishment"
-                labelColor="#2d5016"
+                labelColor="var(--accent)"
               />
               {/* Actual branch */}
               <BranchRow
@@ -537,27 +591,27 @@ function ForkDiagram({
                 label="Actual game"
                 labelColor="var(--accent)"
                 onExpand={onExpand}
-                expandedFen={expandedFen}
+                expandedSourceKeys={expandedSourceKeys}
                 isLoadingFen={isLoadingFen}
               />
-              {/* Optimal branch (when expanded) */}
-              {expandedFen && optimalSteps.length > 0 && (
+              {/* One separately aligned row for every expanded actual-game node. */}
+              {expandedRows.map(({ sourceStep, sourceColumn, steps }) => (
                 <BranchRow
-                  steps={optimalSteps}
+                  key={sourceStep.key}
+                  steps={steps}
                   trackType="optimal"
                   baseIndex={0}
-                  activeIndex={track === "optimal" ? stepIndex : -1}
-                  onSelect={(i) => onSelect("optimal", i)}
-                  label="Optimal from here"
+                  activeIndex={
+                    track === "optimal" && activeOptimalSourceKey === sourceStep.key ? stepIndex : -1
+                  }
+                  onSelect={(i) => onSelect("optimal", i, sourceStep.key)}
+                  label={`From ${sourceStep.san}`}
                   labelColor="#7c3aed"
+                  startColumn={sourceColumn}
+                  isLoading={steps.length === 0 && isLoadingFen(sourceStep.fen)}
+                  emptyLabel="No optimal line"
                 />
-              )}
-              {expandedFen && optimalSteps.length === 0 && isLoadingFen(expandedFen) && (
-                <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--ink-soft)" }}>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Computing optimal line…
-                </div>
-              )}
+              ))}
             </div>
           )}
         </div>
@@ -594,8 +648,11 @@ function BranchRow({
   label,
   labelColor,
   onExpand,
-  expandedFen,
+  expandedSourceKeys,
   isLoadingFen,
+  startColumn = 0,
+  isLoading = false,
+  emptyLabel,
 }: {
   steps: BoardStep[];
   trackType: Track;
@@ -604,9 +661,12 @@ function BranchRow({
   onSelect: (absoluteIndex: number) => void;
   label: string;
   labelColor: string;
-  onExpand?: (fen: string) => void;
-  expandedFen?: string | null;
+  onExpand?: (sourceKey: string, fen: string) => void;
+  expandedSourceKeys?: Set<string>;
   isLoadingFen?: (fen: string) => boolean;
+  startColumn?: number;
+  isLoading?: boolean;
+  emptyLabel?: string;
 }) {
   return (
     <div className="flex items-center gap-0">
@@ -616,6 +676,13 @@ function BranchRow({
       >
         {label}
       </span>
+      {startColumn > 0 && (
+        <span
+          className="shrink-0"
+          style={{ width: `${startColumn * DIAGRAM_COLUMN_WIDTH_PX}px` }}
+          aria-hidden="true"
+        />
+      )}
       {steps.map((s, i) => (
         <div key={s.key} className="flex items-center">
           {i > 0 && <Connector stable={s.stable} />}
@@ -626,12 +693,30 @@ function BranchRow({
             isBlunder={false}
             isTrunk={false}
             onClick={() => onSelect(baseIndex + i)}
-            onExpand={trackType === "actual" && onExpand ? () => onExpand(s.fen) : undefined}
-            isExpanded={trackType === "actual" && expandedFen === s.fen}
+            onExpand={trackType === "actual" && onExpand ? () => onExpand(s.key, s.fen) : undefined}
+            isExpanded={trackType === "actual" && expandedSourceKeys?.has(s.key)}
             isLoadingExpand={trackType === "actual" && isLoadingFen ? isLoadingFen(s.fen) : false}
           />
         </div>
       ))}
+      {steps.length === 0 && (
+        <div className="flex items-center">
+          <Connector stable={false} />
+          <div
+            className="flex h-[52px] w-[84px] items-center justify-center gap-1.5 rounded-md border px-2 text-center text-[10px]"
+            style={{ borderColor: "var(--line)", color: "var(--ink-soft)", backgroundColor: "var(--paper-dark)" }}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                Analysing…
+              </>
+            ) : (
+              emptyLabel
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -662,7 +747,7 @@ function DiagramNode({
   const extraCount = step.tactics.length > 1 ? step.tactics.length - 1 : 0;
 
   const bg = isBlunder
-    ? "color-mix(in srgb, var(--accent) 15%, var(--paper))"
+    ? "color-mix(in srgb, var(--coral) 12%, var(--paper-dark))"
     : tacticColor
     ? tacticColor.bg
     : active
@@ -670,7 +755,7 @@ function DiagramNode({
     : "var(--paper)";
 
   const border = isBlunder
-    ? "var(--accent)"
+    ? "var(--coral)"
     : tacticColor
     ? tacticColor.border
     : active || secondaryActive
@@ -678,7 +763,7 @@ function DiagramNode({
     : "var(--line)";
 
   const textColor = isBlunder
-    ? "var(--accent)"
+    ? "#ff9c89"
     : tacticColor
     ? tacticColor.text
     : "var(--ink)";
@@ -705,7 +790,7 @@ function DiagramNode({
         </span>
         <span
           className="mt-0.5 block text-center text-[10px] leading-none"
-          style={{ color: isBlunder ? "var(--accent)" : tacticColor ? tacticColor.text : "var(--ink-faint)" }}
+          style={{ color: isBlunder ? "#ff9c89" : tacticColor ? tacticColor.text : "var(--ink-faint)" }}
         >
           {isBlunder ? "blunder" : step.label}
         </span>
@@ -750,7 +835,7 @@ function Connector({
   isFirstBranch?: boolean;
   trackType?: Track;
 }) {
-  const color = isBlunder ? "var(--line)" : stable ? "#16a34a" : "#d97706";
+  const color = isBlunder ? "var(--line)" : stable ? "var(--accent)" : "#f59e0b";
   return (
     <div
       className="mx-0.5 h-0 w-5 shrink-0"
@@ -818,28 +903,28 @@ function TopLinesPanel({
             ? "var(--paper-dark)"
             : playerColor === "white"
             ? winPct >= 55
-              ? "color-mix(in srgb, #16a34a 15%, var(--paper))"
+              ? "color-mix(in srgb, var(--accent) 10%, var(--paper-dark))"
               : winPct <= 45
-              ? "color-mix(in srgb, var(--accent) 12%, var(--paper))"
+              ? "color-mix(in srgb, var(--coral) 10%, var(--paper-dark))"
               : "var(--paper-dark)"
             : winPct <= 45
-            ? "color-mix(in srgb, #16a34a 15%, var(--paper))"
+            ? "color-mix(in srgb, var(--accent) 10%, var(--paper-dark))"
             : winPct >= 55
-            ? "color-mix(in srgb, var(--accent) 12%, var(--paper))"
+            ? "color-mix(in srgb, var(--coral) 10%, var(--paper-dark))"
             : "var(--paper-dark)";
         const pillText =
           winPct == null
             ? "var(--ink)"
             : playerColor === "white"
             ? winPct >= 55
-              ? "#2d5016"
-              : winPct <= 45
               ? "var(--accent)"
+              : winPct <= 45
+              ? "#ff9c89"
               : "var(--ink)"
             : winPct <= 45
-            ? "#2d5016"
-            : winPct >= 55
             ? "var(--accent)"
+            : winPct >= 55
+            ? "#ff9c89"
             : "var(--ink)";
 
         return (
@@ -938,7 +1023,7 @@ function LineStatus({
   userWinProb: number | null;
 }) {
   const trackLabel = track === "engine" ? "Punishing line" : track === "actual" ? "Actual line" : "Optimal line";
-  const trackColor = track === "engine" ? "#2d5016" : track === "actual" ? "var(--accent)" : "#7c3aed";
+  const trackColor = track === "engine" ? "var(--accent)" : track === "actual" ? "var(--coral)" : "#a78bfa";
 
   return (
     <div
@@ -947,10 +1032,10 @@ function LineStatus({
         borderColor: "var(--line)",
         background:
           track === "engine"
-            ? "linear-gradient(135deg, color-mix(in srgb, #2d5016 13%, var(--paper)) 0%, var(--paper) 74%)"
+            ? "linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--paper-dark)) 0%, var(--paper) 74%)"
             : track === "actual"
-            ? "linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--paper)) 0%, var(--paper) 74%)"
-            : "linear-gradient(135deg, color-mix(in srgb, #7c3aed 10%, var(--paper)) 0%, var(--paper) 74%)",
+            ? "linear-gradient(135deg, color-mix(in srgb, var(--coral) 9%, var(--paper-dark)) 0%, var(--paper) 74%)"
+            : "linear-gradient(135deg, color-mix(in srgb, #a78bfa 9%, var(--paper-dark)) 0%, var(--paper) 74%)",
       }}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -997,9 +1082,9 @@ function ComparisonPanel({ mistake }: { mistake: MistakeAnalysisItem }) {
       </div>
       <div className="mt-3 flex items-start gap-2 text-sm" style={{ color: "var(--ink-soft)" }}>
         {mistake.actual_punished ? (
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "#2d5016" }} />
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--accent)" }} />
         ) : (
-          <XCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--accent)" }} />
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--coral)" }} />
         )}
         <span>
           {mistake.actual_punished
@@ -1014,8 +1099,8 @@ function ComparisonPanel({ mistake }: { mistake: MistakeAnalysisItem }) {
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
     <div
-      className="rounded-md border px-3 py-2"
-      style={{ borderColor: "var(--line)", backgroundColor: "rgba(244,236,216,0.72)" }}
+      className="rounded-xl border px-3 py-3"
+      style={{ borderColor: "var(--line)", background: "linear-gradient(145deg, var(--paper-raised), var(--paper-dark))", boxShadow: "inset 0 1px 0 rgba(255,255,255,.025)" }}
     >
       <div className="text-xs uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
         {label}
@@ -1034,19 +1119,19 @@ function Badge({
 }) {
   const styles = {
     red: {
-      backgroundColor: "color-mix(in srgb, var(--accent) 13%, var(--paper))",
-      color: "var(--accent)",
-      borderColor: "color-mix(in srgb, var(--accent) 36%, var(--paper))",
+      backgroundColor: "color-mix(in srgb, var(--coral) 12%, var(--paper-dark))",
+      color: "#ff9c89",
+      borderColor: "color-mix(in srgb, var(--coral) 48%, var(--line))",
     },
     amber: {
-      backgroundColor: "color-mix(in srgb, #8b6914 15%, var(--paper))",
-      color: "#8b6914",
-      borderColor: "#c4aa60",
+      backgroundColor: "color-mix(in srgb, #f59e0b 11%, var(--paper-dark))",
+      color: "#fcd34d",
+      borderColor: "color-mix(in srgb, #f59e0b 48%, var(--line))",
     },
     green: {
-      backgroundColor: "color-mix(in srgb, #2d5016 13%, var(--paper))",
-      color: "#2d5016",
-      borderColor: "#8ab578",
+      backgroundColor: "color-mix(in srgb, var(--accent) 10%, var(--paper-dark))",
+      color: "var(--accent)",
+      borderColor: "color-mix(in srgb, var(--accent) 44%, var(--line))",
     },
     ink: {
       backgroundColor: "var(--paper-dark)",
