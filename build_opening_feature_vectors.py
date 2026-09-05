@@ -1,12 +1,68 @@
 from __future__ import annotations
 
 import argparse
+import csv
+from pathlib import Path
 
 from utils.opening_feature_distribution_tools import (
     rank_calibrate_opening_group_features,
     write_feature_distribution_diagnostics_with_raw,
     write_group_features_with_raw,
 )
+
+
+POPULARITY_ENRICHMENT_COLUMNS = (
+    "lichess_position_games",
+    "lichess_position_share",
+    "lichess_parent_move_share",
+    "white_practical_gamble_raw",
+    "white_practical_gamble",
+    "white_practical_gamble_games",
+    "black_practical_gamble_raw",
+    "black_practical_gamble",
+    "black_practical_gamble_games",
+)
+
+
+def _read_existing_popularity_enrichment(path: str) -> dict[str, dict[str, str]]:
+    output = Path(path)
+    if not output.exists():
+        return {}
+    with output.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not set(POPULARITY_ENRICHMENT_COLUMNS).intersection(reader.fieldnames or []):
+            return {}
+        return {
+            str(row.get("representative_uci") or ""): {
+                column: str(row.get(column) or "")
+                for column in POPULARITY_ENRICHMENT_COLUMNS
+            }
+            for row in reader
+            if row.get("representative_uci")
+        }
+
+
+def _restore_popularity_enrichment(path: str, enrichment: dict[str, dict[str, str]]) -> None:
+    if not enrichment:
+        return
+    output = Path(path)
+    with output.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    for column in POPULARITY_ENRICHMENT_COLUMNS:
+        if column not in fieldnames:
+            fieldnames.append(column)
+    for row in rows:
+        saved = enrichment.get(str(row.get("representative_uci") or ""), {})
+        for column in POPULARITY_ENRICHMENT_COLUMNS:
+            row[column] = saved.get(column, "")
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(output)
 from utils.opening_feature_transformer import (
     BREADTH_CP_THRESHOLD,
     BREADTH_DEPTH,
@@ -124,6 +180,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    popularity_enrichment = _read_existing_popularity_enrichment(args.output)
 
     lines = load_opening_lines(args.dataset)
 
@@ -162,6 +219,7 @@ def main() -> int:
         calibrated_groups = raw_groups
 
     write_group_features_with_raw(args.output, raw_groups, calibrated_groups)
+    _restore_popularity_enrichment(args.output, popularity_enrichment)
 
     diagnostics = write_feature_distribution_diagnostics_with_raw(
         raw_groups,

@@ -1,34 +1,92 @@
-import type { GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PositionAnalysis, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, SavedReportsList, SaveReportRequest } from "./types";
+import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export class ApiRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
     this.name = "ApiRequestError";
   }
 }
 
+function cookie(name: string): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const prefix = `${encodeURIComponent(name)}=`;
+  return document.cookie.split("; ").find((item) => item.startsWith(prefix))?.slice(prefix.length);
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const csrf = !["GET", "HEAD", "OPTIONS"].includes(method) ? cookie("chess_insighter_csrf") : undefined;
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(csrf ? { "X-CSRF-Token": decodeURIComponent(csrf) } : {}),
       ...(init?.headers ?? {}),
     },
   });
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
+    let code: string | undefined;
     try {
-      const body = (await response.json()) as { message?: string; detail?: string };
+      const body = (await response.json()) as { code?: string; message?: string; detail?: string };
       message = body.message ?? body.detail ?? message;
+      code = body.code;
     } catch {
       // Use generic status message.
     }
-    throw new ApiRequestError(message, response.status);
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("chess-insighter:unauthorized"));
+    }
+    throw new ApiRequestError(message, response.status, code);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export function register(email: string, password: string) {
+  return apiFetch<RegisterResponse>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function resendVerification(registrationId: string, socketToken: string) {
+  return apiFetch<void>("/api/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ registration_id: registrationId, socket_token: socketToken }),
+  });
+}
+
+export function verifyEmail(token: string) {
+  return apiFetch<AuthUser>("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function login(email: string, password: string) {
+  return apiFetch<{ user: AuthUser }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function logout() {
+  return apiFetch<void>("/api/auth/logout", { method: "POST" });
+}
+
+export function getCurrentUser() {
+  return apiFetch<{ user: AuthUser }>("/api/auth/me");
+}
+
+export function registrationSocketUrl(registrationId: string, socketToken: string): string {
+  const url = new URL(
+    `${API_BASE}/api/auth/registrations/${encodeURIComponent(registrationId)}/status`,
+    window.location.origin,
+  );
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", socketToken);
+  return url.toString();
 }
 
 export async function getDefaultHparams(): Promise<Hparams> {
@@ -50,27 +108,52 @@ export function buildReport(request: ReportBuildRequest) {
   });
 }
 
-export function analyzeReportMistakes(cacheHash: string, request: ReportMistakesSelectionRequest) {
-  return apiFetch<ReportMistakesResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes`, {
+export function startReportBuild(request: ReportBuildRequest) {
+  return apiFetch<ReportBuildJobAccepted>("/api/report/builds", {
     method: "POST",
     body: JSON.stringify(request),
   });
 }
 
-export function getActiveReportMistakes(cacheHash: string) {
-  return apiFetch<ReportMistakesResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes`);
+export function getReportBuildStatus(buildId: string) {
+  return apiFetch<ReportBuildJobStatus>(`/api/report/builds/${encodeURIComponent(buildId)}`);
 }
 
-export function queryReportMistakeGames(cacheHash: string, request: ReportGamesCatalogRequest) {
-  return apiFetch<ReportGamesCatalogResponse>(`/api/report/${encodeURIComponent(cacheHash)}/mistakes/games/query`, {
+export function cancelReportBuild(buildId: string, keepalive = false) {
+  return apiFetch<ReportBuildJobStatus>(`/api/report/builds/${encodeURIComponent(buildId)}/cancel`, {
+    method: "POST",
+    keepalive,
+  });
+}
+
+export function reportBuildSocketUrl(buildId: string, socketToken: string): string {
+  const url = new URL(`${API_BASE}/api/report/builds/${encodeURIComponent(buildId)}/status`, window.location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", socketToken);
+  return url.toString();
+}
+
+export function analyzeReportMistakes(reportId: string, request: ReportMistakesSelectionRequest) {
+  return apiFetch<ReportMistakesResponse>(`/api/reports/${encodeURIComponent(reportId)}/mistakes`, {
     method: "POST",
     body: JSON.stringify(request),
   });
 }
 
-export function getReportMistakeDetail(cacheHash: string, analysisHash: string, mistakeId: string) {
+export function getActiveReportMistakes(reportId: string) {
+  return apiFetch<ReportMistakesResponse>(`/api/reports/${encodeURIComponent(reportId)}/mistakes`);
+}
+
+export function queryReportMistakeGames(reportId: string, request: ReportGamesCatalogRequest) {
+  return apiFetch<ReportGamesCatalogResponse>(`/api/reports/${encodeURIComponent(reportId)}/mistakes/games/query`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function getReportMistakeDetail(reportId: string, analysisHash: string, mistakeId: string) {
   return apiFetch<ReportMistakeDetailResponse>(
-    `/api/report/${encodeURIComponent(cacheHash)}/mistakes/${encodeURIComponent(analysisHash)}/${encodeURIComponent(mistakeId)}`,
+    `/api/reports/${encodeURIComponent(reportId)}/mistakes/${encodeURIComponent(analysisHash)}/${encodeURIComponent(mistakeId)}`,
   );
 }
 
@@ -81,23 +164,34 @@ export function analyzePosition(request: MistakePositionRequest) {
   });
 }
 
-export function getReportByHash(cacheHash: string) {
-  return apiFetch<ReportBuildResponse>(`/api/report/cache/${encodeURIComponent(cacheHash)}`);
+export function getReport(reportId: string) {
+  return apiFetch<ReportBuildResponse>(`/api/reports/${encodeURIComponent(reportId)}`);
 }
 
-export function getSavedReports() {
-  return apiFetch<SavedReportsList>("/api/reports/saved");
+export function getDashboard() {
+  return apiFetch<DashboardResponse>("/api/dashboard");
 }
 
-export function saveReport(request: SaveReportRequest) {
-  return apiFetch<void>("/api/reports/saved", {
+export function getPlayerReports(username: string) {
+  return apiFetch<PlayerReportsResponse>(`/api/players/${encodeURIComponent(username)}/reports`);
+}
+
+export function saveReport(reportId: string, title?: string | null) {
+  return apiFetch<ReportSummary>(`/api/reports/${encodeURIComponent(reportId)}/save`, {
     method: "POST",
-    body: JSON.stringify(request),
+    body: JSON.stringify({ title: title ?? null }),
   });
 }
 
-export function deleteSavedReport(cacheHash: string) {
-  return apiFetch<void>(`/api/reports/saved/${encodeURIComponent(cacheHash)}`, { method: "DELETE" });
+export function renameReport(reportId: string, title?: string | null) {
+  return apiFetch<ReportSummary>(`/api/reports/${encodeURIComponent(reportId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title: title ?? null }),
+  });
+}
+
+export function deleteReport(reportId: string) {
+  return apiFetch<void>(`/api/reports/${encodeURIComponent(reportId)}`, { method: "DELETE" });
 }
 
 /**

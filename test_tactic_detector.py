@@ -11,13 +11,13 @@ def themes(fen: str, uci: str, **kwargs) -> set[str]:
     return {tag.theme for tag in detect_tactics(board, move, **kwargs)}
 
 
-def test_detects_check():
+def test_does_not_emit_plain_check():
     found = themes(
         "4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1",
         "e2e7",
     )
 
-    assert "check" in found
+    assert "check" not in found
 
 
 def test_detects_double_check_and_discovered_check():
@@ -89,7 +89,7 @@ def test_non_pv_low_value_geometry_does_not_emit_fork():
         is_pv_move=False,
     )
 
-    assert "check" in found
+    assert "check" not in found
     assert "fork" not in found
 
 

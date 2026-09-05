@@ -6,3 +6,7 @@ python-chess>=1.999
 numpy>=1.26.0
 pandas>=2.2.0
 matplotlib>=3.8.0
+argon2-cffi>=25.1.0
+PyJWT>=2.10.0
+resend[async]>=2.19.0
+python-dotenv>=1.0.1

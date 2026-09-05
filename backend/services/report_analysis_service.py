@@ -37,7 +37,7 @@ from utils.opening_repository import OpeningRepository
 
 
 SIDECAR_VERSION = 1
-ANALYZER_VERSION = "mistakes-v1"
+ANALYZER_VERSION = "mistakes-v5"
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -353,7 +353,11 @@ def get_active_report_mistakes(cache_hash: str) -> ReportMistakesResponse:
         if not store.active_path.exists():
             raise FileNotFoundError("No mistakes analysis has been run for this report.")
         active = _read_json(store.active_path)
+        if active.get("analyzer_version") != ANALYZER_VERSION:
+            raise FileNotFoundError("The saved mistakes analysis uses an older analyzer version.")
         payload = _read_json(store.analysis_path(active["analysis_hash"]))
+        if payload.get("metadata", {}).get("analyzer_version") != ANALYZER_VERSION:
+            raise FileNotFoundError("The saved mistakes analysis uses an older analyzer version.")
         payload["cache_hit"] = True
         payload["metadata"]["picker_filters"] = active.get("picker_filters")
         return ReportMistakesResponse.model_validate(payload)
@@ -371,6 +375,8 @@ def get_report_mistake_detail(
         if not path.exists():
             raise FileNotFoundError("Mistakes analysis not found.")
         payload = _read_json(path)
+        if payload.get("metadata", {}).get("analyzer_version") != ANALYZER_VERSION:
+            raise FileNotFoundError("Mistakes analysis not found for the current analyzer version.")
         mistake = next(
             (item for item in payload["mistakes"] if item.get("mistake_id") == mistake_id),
             None,
@@ -492,6 +498,7 @@ def _aggregate_analysis(
             "engine_used": True,
             "engine_depth": request.engine_depth,
             "max_punishment_plies": request.max_punishment_plies,
+            "analyzer_version": ANALYZER_VERSION,
             "picker_filters": request.picker_filters,
             "created_at": _now(),
         },
@@ -520,6 +527,7 @@ def _write_active(
             "selected_game_ids": request.selected_game_ids,
             "engine_depth": request.engine_depth,
             "max_punishment_plies": request.max_punishment_plies,
+            "analyzer_version": ANALYZER_VERSION,
             "picker_filters": request.picker_filters,
             "updated_at": _now(),
         },

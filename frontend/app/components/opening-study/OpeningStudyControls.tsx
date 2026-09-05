@@ -3,10 +3,12 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { cn } from "~/lib/utils";
 import type {
+  EvaluationMetric,
   MatcherFeatureKey,
   MatchMode,
   OpeningStudyTreeNode,
   OpeningStudyWeights,
+  OpponentMoveOrdering,
   StudySimilarityType,
   TargetColor,
 } from "~/lib/types";
@@ -22,18 +24,20 @@ export type StudyControlsState = {
   targetColor: TargetColor;
   topK: number;
   opponentTopK: number;
+  opponentMoveOrdering: OpponentMoveOrdering;
   weights: Required<OpeningStudyWeights>;
   similarityType: StudySimilarityType;
   weightedMatching: boolean;
   matcherWeights: Record<MatcherFeatureKey, number>;
   matchMode: MatchMode;
+  evaluationMetric: EvaluationMetric;
 };
 
 export const DEFAULT_WEIGHTS: Required<OpeningStudyWeights> = {
   playerStyleMatch: 0.32,
   engineSoundness: 0.18,
   aggressiveness: 0.15,
-  gambleness: 0.10,
+  practicalGamble: 0.10,
   systemness: 0.13,
   memorySimplicity: 0.12,
 };
@@ -55,13 +59,22 @@ type WeightKey = keyof Required<OpeningStudyWeights>;
 // Which score-weight dimensions are active per mode.
 // Mirrors ALLOWED_WEIGHTS_BY_MODE in utils/opening_study_tree.py (camelCase keys).
 const ALLOWED_BY_MODE: Record<MatchMode, Set<WeightKey>> = {
-  style: new Set(["playerStyleMatch", "engineSoundness", "systemness", "memorySimplicity"]),
-  custom: new Set(["engineSoundness", "aggressiveness", "gambleness", "systemness", "memorySimplicity"]),
+  style: new Set(["playerStyleMatch", "engineSoundness", "practicalGamble", "systemness", "memorySimplicity"]),
+  custom: new Set(["engineSoundness", "aggressiveness", "practicalGamble", "systemness", "memorySimplicity"]),
 };
 
+function allowedFor(mode: MatchMode, evaluationMetric: EvaluationMetric): Set<WeightKey> {
+  const selected = evaluationMetric === "engine" ? "engineSoundness" : "practicalGamble";
+  return new Set(
+    [...ALLOWED_BY_MODE[mode]].filter(
+      (key) => (key !== "engineSoundness" && key !== "practicalGamble") || key === selected,
+    ),
+  );
+}
+
 const MODE_DESCRIPTIONS: Record<MatchMode, string> = {
-  style: "Finds openings that fit YOUR playing style. Aggro & Gamble are hidden — they'd double-count the same data the style match already uses.",
-  custom: "Ranks openings by objective properties (sharpness, risk, structure). Style match is hidden — use this when you want to explore outside your comfort zone.",
+  style: "Finds openings that fit YOUR playing style, using your chosen evaluation signal alongside systemness and memory.",
+  custom: "Ranks openings by objective and practical properties, including how human reply popularity differs from best defense. Style match is hidden.",
 };
 
 // Descriptions shown as tooltips on the score weight labels.
@@ -69,7 +82,7 @@ const WEIGHT_DESCRIPTIONS: Record<WeightKey, string> = {
   playerStyleMatch: "How closely this opening matches your playing style across all 9 dimensions.",
   engineSoundness: "Stockfish centipawn utility from your target color's perspective. Equal positions are 50%; losing positions drop toward 0%.",
   aggressiveness: "35 × tactical density + 25 × complexity + 20 × opp-side castling + 20 × material imbalance.",
-  gambleness: "40 × material imbalance + 35 × tactical density + 25 × complexity.",
+  practicalGamble: "How much better the position scores against popularity-weighted Lichess replies than against Stockfish's best defense.",
   systemness: "65 × (1 − entropy) + 35 × (1 − diversity) — higher means more principled, repeatable positions.",
   memorySimplicity: "55 × fewer lines + 25 × structure consistency + 20 × position predictability.",
 };
@@ -109,7 +122,7 @@ const WEIGHT_FIELDS: { key: WeightKey; label: string; color: string }[] = [
   { key: "playerStyleMatch", label: "Style",         color: "#2563eb" },
   { key: "engineSoundness",  label: "Engine",        color: "#0f766e" },
   { key: "aggressiveness",   label: "Aggro",         color: "#dc2626" },
-  { key: "gambleness",       label: "Gamble",        color: "#d97706" },
+  { key: "practicalGamble",  label: "Practical gamble", color: "#d97706" },
   { key: "systemness",       label: "System",        color: "#059669" },
   { key: "memorySimplicity", label: "Mem. simplicity", color: "#7c3aed" },
 ];
@@ -124,8 +137,9 @@ function redistributeWeights(
   changedKey: WeightKey,
   newValue: number,
   mode: MatchMode,
+  evaluationMetric: EvaluationMetric,
 ): Required<OpeningStudyWeights> {
-  const allowed = ALLOWED_BY_MODE[mode];
+  const allowed = allowedFor(mode, evaluationMetric);
   const clamped = Math.max(0, Math.min(1, newValue));
   const others = WEIGHT_FIELDS.map((f) => f.key).filter((k) => k !== changedKey && allowed.has(k));
   const sumOthers = others.reduce((s, k) => s + weights[k], 0);
@@ -149,11 +163,12 @@ function redistributeWeights(
  * When switching modes, zero disallowed keys and renormalize allowed ones
  * so they still sum to 1.0.
  */
-function applyModeToWeights(
+export function applyModeToWeights(
   weights: Required<OpeningStudyWeights>,
   newMode: MatchMode,
+  evaluationMetric: EvaluationMetric,
 ): Required<OpeningStudyWeights> {
-  const allowed = ALLOWED_BY_MODE[newMode];
+  const allowed = allowedFor(newMode, evaluationMetric);
   const next = { ...weights } as Required<OpeningStudyWeights>;
   // Zero disallowed.
   for (const { key } of WEIGHT_FIELDS) {
@@ -208,14 +223,28 @@ type Props = {
 export function OpeningStudyControls({ state, loading, onChange, onGenerate, onReset, selectedNode, playerVector }: Props) {
   const canGenerate = !loading && (state.cacheHash.trim() !== "" || state.username.trim() !== "");
 
-  const allowedKeys = ALLOWED_BY_MODE[state.matchMode];
+  const allowedKeys = allowedFor(state.matchMode, state.evaluationMetric);
 
   function handleWeightChange(key: WeightKey, newValue: number) {
-    onChange({ weights: redistributeWeights(state.weights, key, newValue, state.matchMode) });
+    onChange({ weights: redistributeWeights(state.weights, key, newValue, state.matchMode, state.evaluationMetric) });
   }
 
   function handleModeChange(newMode: MatchMode) {
-    onChange({ matchMode: newMode, weights: applyModeToWeights(state.weights, newMode) });
+    onChange({ matchMode: newMode, weights: applyModeToWeights(state.weights, newMode, state.evaluationMetric) });
+  }
+
+  function handleEvaluationMetricChange(evaluationMetric: EvaluationMetric) {
+    const selected = evaluationMetric === "engine" ? "engineSoundness" : "practicalGamble";
+    const previous = evaluationMetric === "engine" ? "practicalGamble" : "engineSoundness";
+    const transferred = {
+      ...state.weights,
+      [selected]: state.weights[selected] + state.weights[previous],
+      [previous]: 0,
+    };
+    onChange({
+      evaluationMetric,
+      weights: applyModeToWeights(transferred, state.matchMode, evaluationMetric),
+    });
   }
 
   function handleMatcherWeightChange(key: MatcherFeatureKey, newValue: number) {
@@ -234,14 +263,14 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
       <VectorSourceBadge cacheHash={state.cacheHash} />
 
       <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-        Report hash
+        Report ID
         <Input
           value={state.cacheHash}
-          placeholder="Paste from player report page"
+          placeholder="Open from a saved report"
           onChange={(event) => onChange({ cacheHash: event.target.value })}
         />
         <span className="text-[10px] text-slate-400">
-          From /report/&lt;username&gt; — ensures correct game filters.
+          Owner-bound report reference — ensures correct game filters.
         </span>
       </label>
 
@@ -301,6 +330,30 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         />
       </label>
 
+      <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+        Opponent move order
+        <div className="flex gap-2">
+          {(["engine", "popularity"] as OpponentMoveOrdering[]).map((ordering) => (
+            <button
+              key={ordering}
+              type="button"
+              onClick={() => onChange({ opponentMoveOrdering: ordering })}
+              className={cn(
+                "flex-1 rounded-md border px-2 py-1.5 text-[11px] transition-colors",
+                state.opponentMoveOrdering === ordering
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+              )}
+            >
+              {ordering === "engine" ? "Engine score" : "Popularity"}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-400">
+          Orders opponent replies by strongest engine defense or Lichess play rate.
+        </p>
+      </div>
+
       {/* Match mode toggle */}
       <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
         Scoring mode
@@ -324,13 +377,35 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         <p className="text-[10px] text-slate-400">{MODE_DESCRIPTIONS[state.matchMode]}</p>
       </div>
 
+      <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+        Evaluation signal
+        <div className="flex gap-2">
+          {(["engine", "practical"] as EvaluationMetric[]).map((metric) => (
+            <button
+              key={metric}
+              type="button"
+              onClick={() => handleEvaluationMetricChange(metric)}
+              className={cn(
+                "flex-1 rounded-md border px-2 py-1.5 text-[11px] transition-colors",
+                state.evaluationMetric === metric
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+              )}
+            >
+              {metric === "engine" ? "Engine" : "Practical gamble"}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-400">Only the selected evaluation metric contributes to Study Score.</p>
+      </div>
+
       {/* Score weights — simplex sliders: moving one redistributes the rest */}
       <div className="flex flex-col gap-1 rounded-md border border-slate-200 p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-slate-600">Score weights</span>
           <button
             type="button"
-            onClick={() => onChange({ weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, state.matchMode) })}
+            onClick={() => onChange({ weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, state.matchMode, state.evaluationMetric) })}
             className="text-[10px] text-slate-400 hover:text-slate-600"
           >
             reset

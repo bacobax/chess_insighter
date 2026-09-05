@@ -68,7 +68,7 @@ PHASE_TO_IDX = {c: i for i, c in enumerate(PHASE_CLASSES)}
 # Tactic columns (lightweight: 2 binary; stockfish adds 8 more)
 TACTIC_COLS_LIGHTWEIGHT = ["tactical", "quiet_middlegame"]
 TACTIC_THEMES_STOCKFISH = [
-    "check", "double_check", "discovered_check",
+    "double_check", "discovered_check",
     "checkmate_in_k", "fork", "absolute_pin", "skewer", "king_attraction",
 ]
 TACTIC_COLS_STOCKFISH = TACTIC_COLS_LIGHTWEIGHT + TACTIC_THEMES_STOCKFISH

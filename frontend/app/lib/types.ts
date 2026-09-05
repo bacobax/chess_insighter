@@ -145,6 +145,7 @@ export type PunishmentLineMove = {
   retained_wp_loss: number | null;
   stable_after_move: boolean;
   tactics: TacticTag[];
+  mate_in?: number | null;
 };
 
 export type MistakeAnalysisItem = {
@@ -180,6 +181,8 @@ export type MistakeAnalysisItem = {
   tactics: TacticTag[];
   actual_tactics: TacticTag[];
   user_rating?: number;
+  mate_before?: number | null;
+  mate_after?: number | null;
 };
 
 export type MistakesAnalysisSummary = {
@@ -217,6 +220,75 @@ export type ReportBuildResponse = {
   cache_hit: boolean;
   normalized_hparams: Hparams;
   report: ReportPayload;
+  report_id: string | null;
+  saved: boolean;
+  title: string | null;
+  request_params: ReportBuildRequest | null;
+};
+
+export type ReportBuildJobAccepted = {
+  build_id: string;
+  socket_token: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+};
+
+export type ReportBuildJobStatus = {
+  build_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  stage: string;
+  progress: number;
+  message: string;
+  revision: number;
+  processed: number | null;
+  total: number | null;
+  report_id: string | null;
+  error: string | null;
+};
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  created_at: string;
+  verified_at: string;
+};
+
+export type RegisterResponse = {
+  registration_id: string;
+  socket_token: string;
+  expires_at: string;
+};
+
+export type ReportSummary = {
+  id: string;
+  username: string;
+  generated_label: string;
+  title: string | null;
+  cache_hash: string;
+  games_analyzed: number;
+  request_params: ReportBuildRequest & Record<string, JsonValue>;
+  created_at: string;
+  updated_at: string;
+  saved_at: string;
+};
+
+export type DashboardPlayer = {
+  username: string;
+  report_count: number;
+  latest_report_at: string;
+  reports: ReportSummary[];
+};
+
+export type DashboardResponse = {
+  user: AuthUser;
+  report_count: number;
+  player_count: number;
+  latest_activity_at: string | null;
+  players: DashboardPlayer[];
+};
+
+export type PlayerReportsResponse = {
+  username: string;
+  reports: ReportSummary[];
 };
 
 export type SavedReportEntry = {
@@ -275,6 +347,8 @@ export type MistakePositionRequest = {
 export type TargetColor = "white" | "black";
 export type StudySimilarityType = "cosine" | "dot_product";
 export type MatchMode = "style" | "custom";
+export type EvaluationMetric = "engine" | "practical";
+export type OpponentMoveOrdering = "engine" | "popularity";
 
 export type MatcherFeatureKey =
   | "tactical_density"
@@ -291,7 +365,7 @@ export type OpeningStudyWeights = {
   playerStyleMatch?: number;
   engineSoundness?: number;
   aggressiveness?: number;
-  gambleness?: number;
+  practicalGamble?: number;
   systemness?: number;
   memorySimplicity?: number;
 };
@@ -300,6 +374,7 @@ export type OpeningStudyTreeChildrenRequest = {
   /** Preferred source: hash from a /api/report/build response. Uses the
    *  player vector computed from the exact games+filters of that report. */
   cacheHash?: string;
+  reportId?: string;
   /** Fallback: username lookup in the flat player_vectors.json cache.
    *  Ignores game filters; uses whichever vector was cached most recently. */
   username?: string;
@@ -309,11 +384,13 @@ export type OpeningStudyTreeChildrenRequest = {
   prefixUci: string[];
   topK: number;
   opponentTopK: number;
+  opponentMoveOrdering?: OpponentMoveOrdering;
   weights?: OpeningStudyWeights;
   similarityType?: StudySimilarityType;
   weightedMatching?: boolean;
   matcherWeights?: Partial<Record<MatcherFeatureKey, number>>;
   matchMode?: MatchMode;
+  evaluationMetric?: EvaluationMetric;
 };
 
 export type MetricComponent = {
@@ -335,7 +412,6 @@ export type StyleMatchComponent = {
 
 export type NodeBreakdown = {
   aggressiveness?: MetricComponent[];
-  gambleness?: MetricComponent[];
   memoryComplexity?: MetricComponent[];
   systemness?: MetricComponent[];
   engineSoundness?: MetricComponent[];
@@ -355,8 +431,13 @@ export type OpeningStudyTreeNode = {
   representativePgn?: string | null;
   playerStyleMatch: number;
   engineSoundness: number;
+  popularityScore: number;
+  popularityGames: number;
   aggressiveness: number;
-  gambleness: number;
+  practicalGamble: number | null;
+  practicalGambleRaw: number | null;
+  practicalGambleSampleSize: number;
+  practicalGambleCoverage: number;
   memoryComplexity: number;
   systemness: number;
   studyScore: number;
@@ -368,7 +449,7 @@ export type OpeningStudyTreeNode = {
     playerStyleMatch: number;
     engineSoundness: number;
     aggressiveness: number;
-    gambleness: number;
+    practicalGamble: number | null;
     memoryComplexity: number;
     systemness: number;
   };

@@ -1,5 +1,6 @@
 import type { Route } from "./+types/home";
-import { UsernameForm } from "~/components/username-form";
+import { Navigate } from "react-router";
+import { useAuth } from "~/components/auth/auth-provider";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -9,5 +10,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
-  return <UsernameForm />;
+  const { user, loading } = useAuth();
+  if (loading) return <div className="grid min-h-screen place-items-center text-sm text-[var(--ink-soft)]">Opening Chess Insighter…</div>;
+  return <Navigate to={user ? "/dashboard" : "/login"} replace />;
 }

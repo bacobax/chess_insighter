@@ -1,13 +1,13 @@
-import { useState } from "react";
-import { Link } from "react-router";
+import { useEffect, useId, useState } from "react";
+import { Link, useNavigate } from "react-router";
 import { BarChart3, Bookmark, BookmarkCheck, BookOpen, Loader2, Network, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
-import { buildReport, saveReport } from "~/lib/api";
-import type { Hparams, MetricPoint, OpeningReportGroup, ReportBuildRequest, ReportBuildResponse, ReportCharts } from "~/lib/types";
+import { cancelReportBuild, getReport, getReportBuildStatus, reportBuildSocketUrl, saveReport, startReportBuild } from "~/lib/api";
+import type { Hparams, MetricPoint, OpeningReportGroup, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportCharts } from "~/lib/types";
 import { formatPercent } from "~/lib/utils";
 import { ReportConfigForm } from "./report-config-form";
 import { MistakesReportSection } from "./mistakes-report-section";
@@ -23,13 +23,16 @@ export function PlayerReport({
   initialReport,
   initialParams,
   enableMistakes = true,
+  onBuildActivityChange,
 }: {
   username: string;
   defaultHparams: Hparams;
   initialReport?: ReportBuildResponse;
   initialParams?: PlayerReportInitialParams;
   enableMistakes?: boolean;
+  onBuildActivityChange?: (instanceId: string, buildId: string | null) => void;
 }) {
+  const buildInstanceId = useId();
   const initialBuildRequest: ReportBuildRequest | null =
     initialReport && initialParams
       ? {
@@ -65,9 +68,20 @@ export function PlayerReport({
   const [lastBuildRequest, setLastBuildRequest] = useState<ReportBuildRequest | null>(initialBuildRequest);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [buildJob, setBuildJob] = useState<ReportBuildJobAccepted | null>(null);
+  const [buildProgress, setBuildProgress] = useState<ReportBuildJobStatus | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   async function submit(overrides: Partial<Pick<ReportBuildRequest, "use_engine" | "refresh_cache">> = {}) {
     setLoading(true);
+    setElapsedSeconds(0);
+    setBuildProgress(null);
     setError(null);
     const request: ReportBuildRequest = {
       username,
@@ -82,7 +96,14 @@ export function PlayerReport({
       since_month: sinceMonth === "" ? null : sinceMonth,
     };
     try {
-      const response = await buildReport(request);
+      const accepted = await startReportBuild(request);
+      setBuildJob(accepted);
+      onBuildActivityChange?.(buildInstanceId, accepted.build_id);
+      const terminal = await waitForReportBuild(accepted, setBuildProgress);
+      if (terminal.status !== "completed" || !terminal.report_id) {
+        throw new Error(terminal.error ?? (terminal.status === "cancelled" ? "Report build cancelled." : "Could not build report."));
+      }
+      const response = await getReport(terminal.report_id);
       setReport(response);
       setLastBuildRequest(request);
       setHparams(response.normalized_hparams);
@@ -92,18 +113,26 @@ export function PlayerReport({
       setError(err instanceof Error ? err.message : "Could not build report.");
     } finally {
       setLoading(false);
+      setBuildJob(null);
+      onBuildActivityChange?.(buildInstanceId, null);
     }
   }
 
+  async function cancelActiveBuild() {
+    if (!buildJob) return;
+    setBuildProgress((current) => current ? { ...current, stage: "cancelling", message: "Cancelling analysis safely" } : current);
+    await cancelReportBuild(buildJob.build_id);
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="player-report min-w-0 space-y-5">
       <Card>
         <CardHeader>
           <CardTitle>{username}</CardTitle>
           <CardDescription>Configure the analysis run and build a cached player report.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="player-report-filters">
             <label className="text-sm">
               <span className="mb-1 block text-slate-600">Max games</span>
               <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={500} value={maxGames} onChange={(event) => setMaxGames(Number(event.target.value))} />
@@ -134,6 +163,13 @@ export function PlayerReport({
               <span className="mb-1 block text-slate-600">Since month</span>
               <input className="h-10 w-full rounded-md border px-3" type="number" min={1} max={12} value={sinceMonth} onChange={(event) => setSinceMonth(event.target.value === "" ? "" : Number(event.target.value))} placeholder="1-12" />
             </label>
+            <label className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+              <input type="checkbox" checked={refreshCache} onChange={(e) => setRefreshCache(e.target.checked)} />
+              <span>
+                <span className="block font-medium text-slate-900">Refresh cache</span>
+                <span className="block text-xs leading-4 text-slate-500">Fetch and analyze fresh data</span>
+              </span>
+            </label>
           </div>
           
           <div>
@@ -151,7 +187,6 @@ export function PlayerReport({
                 </label>
                 <div className="flex items-end gap-4 pb-2 text-sm">
                   <label className="flex items-center gap-2"><input type="checkbox" checked={useEngine} onChange={(e) => setUseEngine(e.target.checked)} /> Use engine</label>
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={refreshCache} onChange={(e) => setRefreshCache(e.target.checked)} /> Refresh cache</label>
                 </div>
               </div>
               <ReportConfigForm value={hparams} onChange={setHparams} />
@@ -162,6 +197,21 @@ export function PlayerReport({
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Build Report
           </Button>
+          {loading && buildProgress ? (
+            <div className="build-progress-panel" aria-live="polite" aria-atomic="true">
+              <div className="build-progress-copy">
+                <div><span className="folio">Live analysis</span><strong>{buildProgress.message}</strong></div>
+                <span className="build-progress-value">{Math.round(buildProgress.progress * 100)}%</span>
+              </div>
+              <Progress value={buildProgress.progress} />
+              <div className="build-progress-meta">
+                <span>{buildProgress.stage.replace(/_/g, " ")}</span>
+                <span>{formatElapsed(elapsedSeconds)}</span>
+                {buildProgress.processed != null && buildProgress.total != null ? <span>{buildProgress.processed} / {buildProgress.total}</span> : null}
+                <Button variant="outline" onClick={() => void cancelActiveBuild()}>Cancel build</Button>
+              </div>
+            </div>
+          ) : null}
           {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         </CardContent>
       </Card>
@@ -178,6 +228,51 @@ export function PlayerReport({
   );
 }
 
+function waitForReportBuild(
+  accepted: ReportBuildJobAccepted,
+  onProgress: (status: ReportBuildJobStatus) => void,
+): Promise<ReportBuildJobStatus> {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    let finished = false;
+    const handle = (snapshot: ReportBuildJobStatus) => {
+      onProgress(snapshot);
+      if (["completed", "failed", "cancelled"].includes(snapshot.status)) {
+        finished = true;
+        resolve(snapshot);
+        return true;
+      }
+      return false;
+    };
+    const connect = () => {
+      if (finished) return;
+      const socket = new WebSocket(reportBuildSocketUrl(accepted.build_id, accepted.socket_token));
+      socket.onopen = () => { attempts = 0; };
+      socket.onmessage = (event) => handle(JSON.parse(String(event.data)) as ReportBuildJobStatus);
+      socket.onerror = () => socket.close();
+      socket.onclose = () => {
+        if (finished) return;
+        window.setTimeout(async () => {
+          try {
+            const current = await getReportBuildStatus(accepted.build_id);
+            if (!handle(current) && attempts++ < 6) connect();
+            else if (!finished && attempts >= 6) reject(new Error("Lost connection to the report build."));
+          } catch (error) {
+            if (attempts++ < 6) connect(); else reject(error);
+          }
+        }, Math.min(750 * 2 ** attempts, 8000));
+      };
+    };
+    connect();
+  });
+}
+
+function formatElapsed(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
 function ReportDashboard({
   report,
   username,
@@ -192,20 +287,21 @@ function ReportDashboard({
   onRebuildMistakes: () => void;
 }) {
   const charts = report.report.charts;
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(report.saved ? "saved" : "idle");
+  const navigate = useNavigate();
+  const dashboardId = useId();
+  const skillProfileHeadingId = `${dashboardId}-skill-profile`;
+  const openingRepertoireHeadingId = `${dashboardId}-opening-repertoire`;
 
   async function handleSave() {
-    if (!buildRequest) return;
+    if (!buildRequest || !report.report_id) return;
+    const title = window.prompt("Optional report title", report.title ?? "");
+    if (title === null) return;
     setSaveState("saving");
     try {
-      const gamesAnalyzed = (report.report.metadata as Record<string, unknown>).games_selected as number ?? 0;
-      await saveReport({
-        cache_hash: report.cache_hash,
-        username,
-        games_analyzed: gamesAnalyzed,
-        request_params: buildRequest,
-      });
+      await saveReport(report.report_id, title);
       setSaveState("saved");
+      navigate(`/report/${encodeURIComponent(username)}/reports/${encodeURIComponent(report.report_id)}`);
     } catch {
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 2000);
@@ -216,8 +312,8 @@ function ReportDashboard({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 rounded-md border bg-white p-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Cache <span className="font-medium text-slate-950">{report.cache_hit ? "hit" : "miss"}</span>
-          {" · "}hash <span className="font-mono text-xs">{report.cache_hash.slice(0, 12)}</span>
+          Analysis <span className="font-medium text-slate-950">{report.cache_hit ? "restored from cache" : "computed now"}</span>
+          {report.report_id ? <>{" · "}report <span className="font-mono text-xs">{report.report_id.slice(0, 8)}</span></> : null}
         </span>
         {buildRequest ? (
           <button
@@ -238,17 +334,17 @@ function ReportDashboard({
           </button>
         ) : null}
       </div>
-      <SkillProfileSection charts={charts} />
+      <SkillProfileSection charts={charts} headingId={skillProfileHeadingId} />
       {enableMistakes ? (
         <MistakesReportSection
           username={username}
-          reportHash={report.cache_hash}
+          reportHash={report.report_id ?? report.cache_hash}
           context={report.report.analysis_context ?? null}
           reportFilters={buildRequest}
           onRebuild={onRebuildMistakes}
         />
       ) : null}
-      <OpeningRepertoireSection report={report} username={username} />
+      <OpeningRepertoireSection report={report} username={username} headingId={openingRepertoireHeadingId} />
     </div>
   );
 }
@@ -261,7 +357,7 @@ type SkillEvidence = {
   secondary?: MetricPoint[];
 };
 
-function SkillProfileSection({ charts }: { charts: ReportCharts }) {
+function SkillProfileSection({ charts, headingId }: { charts: ReportCharts; headingId: string }) {
   const [activeEvidence, setActiveEvidence] = useState("openings");
   const scoreByKey = new Map(charts.skill_profile.map((item) => [item.key, item.value]));
   const evidence: SkillEvidence[] = [
@@ -299,14 +395,14 @@ function SkillProfileSection({ charts }: { charts: ReportCharts }) {
   ];
 
   return (
-    <section aria-labelledby="skill-profile-heading" className="space-y-4 border-t border-slate-200 pt-6">
+    <section aria-labelledby={headingId} className="space-y-4 border-t border-slate-200 pt-6">
       <ReportSectionHeading
         icon={<BarChart3 className="h-5 w-5" />}
         title="Player profile"
         description="Composite skill scores first, followed by the measurements that support them."
-        headingId="skill-profile-heading"
+        headingId={headingId}
       />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
+      <div className="player-report-profile-grid">
         <SkillRadarChart data={charts.skill_profile} />
         <SkillScoreList data={charts.skill_profile} />
       </div>
@@ -340,7 +436,7 @@ function SkillProfileSection({ charts }: { charts: ReportCharts }) {
                         Profile score <span className="font-semibold" style={{ color: "var(--ink)" }}>{formatPercent(scoreByKey.get(item.key))}</span>
                       </div>
                     </div>
-                    <div className={item.secondary ? "grid gap-6 xl:grid-cols-2" : ""}>
+                    <div className={item.secondary ? "player-report-evidence-grid" : ""}>
                       <MetricBarChart
                         title={item.key === "time_management" ? "Risk indicators" : "Score components"}
                         data={item.data}
@@ -376,7 +472,7 @@ function SkillScoreList({ data }: { data: MetricPoint[] }) {
         <CardDescription>All profile dimensions on the same 0–100 scale.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="player-report-score-grid">
           {data.map((item) => (
             <div key={item.key}>
               <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
@@ -392,7 +488,15 @@ function SkillScoreList({ data }: { data: MetricPoint[] }) {
   );
 }
 
-function OpeningRepertoireSection({ report, username }: { report: ReportBuildResponse; username: string }) {
+function OpeningRepertoireSection({
+  report,
+  username,
+  headingId,
+}: {
+  report: ReportBuildResponse;
+  username: string;
+  headingId: string;
+}) {
   const charts = report.report.charts;
   const groups = charts.opening_report_groups;
   const characteristics = {
@@ -400,16 +504,16 @@ function OpeningRepertoireSection({ report, username }: { report: ReportBuildRes
     black: groups?.black?.opening_characteristics ?? charts.opening_characteristics,
     both: groups?.both?.opening_characteristics ?? charts.opening_characteristics,
   };
-  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&cacheHash=${encodeURIComponent(report.cache_hash)}`;
+  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&reportId=${encodeURIComponent(report.report_id ?? "")}`;
 
   return (
-    <section aria-labelledby="opening-repertoire-heading" className="space-y-4 border-t border-slate-200 pt-6">
+    <section aria-labelledby={headingId} className="space-y-4 border-t border-slate-200 pt-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <ReportSectionHeading
           icon={<BookOpen className="h-5 w-5" />}
           title="Opening repertoire"
           description="What appears most often and the kinds of positions reached from those openings."
-          headingId="opening-repertoire-heading"
+          headingId={headingId}
         />
         <Link to={studyUrl} className="self-start sm:self-auto">
           <Button variant="outline" size="sm">
@@ -417,7 +521,7 @@ function OpeningRepertoireSection({ report, username }: { report: ReportBuildRes
           </Button>
         </Link>
       </div>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="player-report-opening-grid">
         <FavouriteOpeningsChart data={charts.favourite_openings} />
         <Card>
           <CardHeader>
@@ -463,9 +567,9 @@ function OpeningCharacteristics({ data }: { data: OpeningReportGroup["opening_ch
   ].filter((group) => group.items.length > 0);
 
   return (
-    <div className="grid gap-5 md:grid-cols-3">
-      {groups.map((group, index) => (
-        <div key={group.title} className={index > 0 ? "md:border-l md:border-slate-200 md:pl-5" : ""}>
+    <div className="player-report-characteristics">
+      {groups.map((group) => (
+        <div key={group.title} className="player-report-characteristic-group">
           <h4 className="mb-3 text-sm font-semibold" style={{ color: "var(--ink)" }}>{group.title}</h4>
           <div className="space-y-3">
             {group.items.map((item) => (

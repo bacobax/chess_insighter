@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Chessboard } from "react-chessboard";
+import { Chess } from "chess.js";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { analyzePosition, getReportMistakeDetail } from "~/lib/api";
+import { RequireAuth } from "~/components/auth/auth-provider";
 import type { MistakeAnalysisItem, PositionAnalysis, PunishmentLineMove, TacticTag } from "~/lib/types";
 
 type Track = "engine" | "actual" | "optimal";
@@ -35,6 +37,7 @@ type BoardStep = {
   userWinProb: number | null;
   stable: boolean;
   tactics: TacticTag[];
+  mateIn: number | null;
   source: "blunder" | Track;
 };
 
@@ -48,44 +51,64 @@ const DIAGRAM_COLUMN_WIDTH_PX = 84 + 24;
 
 // ─── Tactic colour palette ────────────────────────────────────────────────────
 const TACTIC_PRIORITY = [
-  "check",
   "double_check",
   "discovered_check",
   "absolute_pin",
   "skewer",
   "fork",
-  "king_attraction",
+  "defender_deflection",
   "checkmate_in_k",
 ] as const;
 
 type TacticTheme = (typeof TACTIC_PRIORITY)[number];
 
 const THEME_COLORS: Record<TacticTheme, { bg: string; border: string; text: string; label: string }> = {
-  check:            { bg: "color-mix(in srgb, #3b82f6 14%, var(--paper-dark))", border: "#60a5fa", text: "#bfdbfe", label: "Check" },
   double_check:     { bg: "color-mix(in srgb, #22d3ee 14%, var(--paper-dark))", border: "#22d3ee", text: "#a5f3fc", label: "Double check" },
   discovered_check: { bg: "color-mix(in srgb, #8b5cf6 15%, var(--paper-dark))", border: "#a78bfa", text: "#ddd6fe", label: "Discovered check" },
   checkmate_in_k:   { bg: "color-mix(in srgb, var(--coral) 14%, var(--paper-dark))", border: "var(--coral)", text: "#ffc1b5", label: "Checkmate" },
   fork:             { bg: "color-mix(in srgb, #fbbf24 13%, var(--paper-dark))", border: "#fbbf24", text: "#fde68a", label: "Fork" },
   absolute_pin:     { bg: "color-mix(in srgb, #fb923c 14%, var(--paper-dark))", border: "#fb923c", text: "#fed7aa", label: "Pin" },
   skewer:           { bg: "color-mix(in srgb, #2dd4bf 14%, var(--paper-dark))", border: "#2dd4bf", text: "#99f6e4", label: "Skewer" },
-  king_attraction:  { bg: "color-mix(in srgb, #f472b6 14%, var(--paper-dark))", border: "#f472b6", text: "#fbcfe8", label: "King attraction" },
+  defender_deflection: { bg: "color-mix(in srgb, #f472b6 14%, var(--paper-dark))", border: "#f472b6", text: "#fbcfe8", label: "Defender deflection" },
 };
 
 function primaryTactic(tactics: TacticTag[]): TacticTheme | null {
-  if (!tactics.length) return null;
-  const themes = tactics.map((t) => t.theme as TacticTheme);
+  const themes = tacticThemes(tactics);
   for (let i = TACTIC_PRIORITY.length - 1; i >= 0; i--) {
     if (themes.includes(TACTIC_PRIORITY[i])) return TACTIC_PRIORITY[i];
   }
-  return themes[0] as TacticTheme;
+  return null;
+}
+
+function tacticThemes(tactics: TacticTag[]): TacticTheme[] {
+  const present = new Set(tactics.map((tag) => tag.theme));
+  return TACTIC_PRIORITY.filter((theme) => present.has(theme));
+}
+
+function tacticBackground(themes: TacticTheme[]): string | null {
+  if (!themes.length) return null;
+  if (themes.length === 1) return THEME_COLORS[themes[0]].bg;
+  const stops = themes.flatMap((theme, index) => {
+    const start = (index / themes.length) * 100;
+    const end = ((index + 1) / themes.length) * 100;
+    return [
+      `${THEME_COLORS[theme].bg} ${start}%`,
+      `${THEME_COLORS[theme].bg} ${end}%`,
+    ];
+  });
+  return `linear-gradient(135deg, ${stops.join(", ")})`;
 }
 
 export default function BlunderAnalysisPage() {
+  return <RequireAuth><BlunderAnalysisContent /></RequireAuth>;
+}
+
+function BlunderAnalysisContent() {
   const params = useParams();
   const [searchParams] = useSearchParams();
   const username = params.username ?? "";
   const mistakeId = params.mistakeId ?? "";
-  const cacheHash = searchParams.get("cacheHash") ?? "";
+  const reportId = params.reportId ?? "";
   const analysisHash = searchParams.get("analysisHash") ?? "";
   const [mistake, setMistake] = useState<MistakeAnalysisItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
@@ -101,18 +124,18 @@ export default function BlunderAnalysisPage() {
   // Each expanded actual-game node owns a separate optimal-line row.
   const [expandedBranches, setExpandedBranches] = useState<ExpandedBranch[]>([]);
   const [activeOptimalSourceKey, setActiveOptimalSourceKey] = useState<string | null>(null);
-  const reportUrl = `/report/${encodeURIComponent(username)}?restore=${encodeURIComponent(cacheHash)}#mistakes`;
+  const reportUrl = `/report/${encodeURIComponent(username)}/reports/${encodeURIComponent(reportId)}#mistakes`;
 
   useEffect(() => {
     let cancelled = false;
     setDetailLoading(true);
     setDetailError(null);
-    if (!cacheHash || !analysisHash || !mistakeId) {
+    if (!reportId || !analysisHash || !mistakeId) {
       setDetailLoading(false);
       setDetailError("The report, analysis, and mistake identifiers are required.");
       return () => { cancelled = true; };
     }
-    getReportMistakeDetail(cacheHash, analysisHash, mistakeId)
+    getReportMistakeDetail(reportId, analysisHash, mistakeId)
       .then((response) => {
         if (cancelled) return;
         setMistake(response.mistake);
@@ -126,7 +149,7 @@ export default function BlunderAnalysisPage() {
         if (!cancelled) setDetailLoading(false);
       });
     return () => { cancelled = true; };
-  }, [analysisHash, cacheHash, mistakeId]);
+  }, [analysisHash, reportId, mistakeId]);
 
   const engineSteps = useMemo(() => (mistake ? buildSteps(mistake, "engine") : []), [mistake]);
   const actualSteps = useMemo(() => (mistake ? buildSteps(mistake, "actual") : []), [mistake]);
@@ -250,12 +273,14 @@ export default function BlunderAnalysisPage() {
 
   const canBack = stepIndex > 0;
   const canForward = stepIndex < activeSteps.length - 1;
-  const arrow = moveArrow(step.moveUci, track);
+  const arrows = motifArrows(step, track);
 
   // Compute white win probability for the eval bar
   const userWinProb = step.userWinProb;
   const whiteWinProb =
-    userWinProb != null
+    step.mateIn != null && step.mateIn !== 0
+      ? step.mateIn > 0 ? 1 : 0
+      : userWinProb != null
       ? mistake.player_color === "white"
         ? userWinProb
         : 1 - userWinProb
@@ -323,6 +348,8 @@ export default function BlunderAnalysisPage() {
                   whiteWinProb={whiteWinProb}
                   userWinProb={userWinProb}
                   playerColor={mistake.player_color}
+                  mateIn={step.mateIn}
+                  fen={step.fen}
                 />
                 <div className="flex-1 overflow-hidden rounded-md" style={{ border: "1px solid var(--line)" }}>
                   <Chessboard
@@ -331,7 +358,7 @@ export default function BlunderAnalysisPage() {
                       boardOrientation: mistake.player_color,
                       allowDragging: false,
                       allowDrawingArrows: true,
-                      arrows: arrow ? [arrow] : [],
+                      arrows,
                       clearArrowsOnPositionChange: false,
                       showNotation: true,
                       animationDurationInMs: 180,
@@ -406,10 +433,14 @@ function EvalBar({
   whiteWinProb,
   userWinProb,
   playerColor,
+  mateIn,
+  fen,
 }: {
   whiteWinProb: number;
   userWinProb: number | null;
   playerColor: "white" | "black";
+  mateIn: number | null;
+  fen: string;
 }) {
   const whitePct = Math.round(whiteWinProb * 100);
   const blackPct = 100 - whitePct;
@@ -423,12 +454,14 @@ function EvalBar({
   const bottomColor = isFlipped ? "#1a1a1a" : "#fff";
   const topPct = isFlipped ? whitePct : blackPct;
   const bottomPct = isFlipped ? blackPct : whitePct;
+  const mateWinner = resolveMateWinner(mateIn, fen);
+  const mateAtTop = mateWinner ? (isFlipped ? mateWinner === "white" : mateWinner === "black") : false;
 
   return (
     <div
       className="flex shrink-0 flex-col overflow-hidden rounded-md"
       style={{
-        width: "22px",
+        width: "30px",
         border: "1px solid var(--line)",
         position: "relative",
       }}
@@ -455,7 +488,20 @@ function EvalBar({
         }}
       />
       {/* Annotation */}
-      {userPct != null && (
+      {mateWinner ? (
+        <div
+          className="absolute left-0 right-0 text-center text-[9px] font-black leading-none"
+          style={{
+            top: mateAtTop ? "6px" : undefined,
+            bottom: mateAtTop ? undefined : "6px",
+            color: "#fff",
+            mixBlendMode: "difference",
+          }}
+          aria-label={`Forced mate in ${Math.abs(mateIn ?? 0)} for ${mateWinner}`}
+        >
+          M{Math.abs(mateIn ?? 0)}
+        </div>
+      ) : userPct != null && (
         <div
           className="absolute bottom-1 left-0 right-0 text-center text-[9px] font-bold leading-none"
           style={{
@@ -512,8 +558,7 @@ function ForkDiagram({
     const themes = new Set<TacticTheme>();
     const expandedSteps = expandedRows.flatMap((row) => row.steps);
     for (const s of [...engineBranch, ...actualBranch, ...expandedSteps]) {
-      const t = primaryTactic(s.tactics);
-      if (t) themes.add(t);
+      for (const theme of tacticThemes(s.tactics)) themes.add(theme);
     }
     return Array.from(themes);
   }, [engineBranch, actualBranch, expandedRows]);
@@ -743,13 +788,14 @@ function DiagramNode({
   isLoadingExpand?: boolean;
 }) {
   const tactic = primaryTactic(step.tactics);
+  const themes = tacticThemes(step.tactics);
   const tacticColor = tactic ? THEME_COLORS[tactic] : null;
-  const extraCount = step.tactics.length > 1 ? step.tactics.length - 1 : 0;
+  const multiTacticBackground = tacticBackground(themes);
 
   const bg = isBlunder
     ? "color-mix(in srgb, var(--coral) 12%, var(--paper-dark))"
-    : tacticColor
-    ? tacticColor.bg
+    : multiTacticBackground
+    ? multiTacticBackground
     : active
     ? "var(--paper-dark)"
     : "var(--paper)";
@@ -775,12 +821,12 @@ function DiagramNode({
         onClick={onClick}
         className="relative flex h-[52px] w-[84px] flex-col items-center justify-center rounded-md border transition-transform hover:-translate-y-0.5"
         style={{
-          backgroundColor: bg,
+          background: bg,
           borderColor: border,
           borderWidth: active || secondaryActive ? "2px" : "1px",
           boxShadow: active ? "0 2px 8px rgba(0,0,0,0.12)" : undefined,
         }}
-        title={step.label}
+        title={themes.length ? `${step.label} · ${themes.map((theme) => THEME_COLORS[theme].label).join(", ")}` : step.label}
       >
         <span
           className="block max-w-[72px] truncate text-center text-xs font-bold leading-none"
@@ -794,12 +840,20 @@ function DiagramNode({
         >
           {isBlunder ? "blunder" : step.label}
         </span>
-        {tactic && (
+        {themes.length > 0 && (
           <span
-            className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold"
-            style={{ backgroundColor: tacticColor!.border, color: "#fff" }}
+            className="absolute -top-2 -right-2 flex min-h-4 items-center gap-0.5 rounded-full border px-1 py-0.5"
+            style={{ backgroundColor: "var(--paper-dark)", borderColor: tacticColor?.border ?? "var(--line)" }}
+            aria-label={`Tactics: ${themes.map((theme) => THEME_COLORS[theme].label).join(", ")}`}
           >
-            {extraCount > 0 ? `+${extraCount}` : "!"}
+            {themes.map((theme) => (
+              <span
+                key={theme}
+                className="block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: THEME_COLORS[theme].border }}
+                aria-hidden="true"
+              />
+            ))}
           </span>
         )}
       </button>
@@ -967,6 +1021,7 @@ function buildSteps(mistake: MistakeAnalysisItem, track: Track): BoardStep[] {
       userWinProb: mistake.win_prob_before,
       stable: false,
       tactics: [],
+      mateIn: mistake.mate_before ?? null,
       source: "blunder",
     },
     {
@@ -981,6 +1036,7 @@ function buildSteps(mistake: MistakeAnalysisItem, track: Track): BoardStep[] {
       userWinProb: mistake.win_prob_after,
       stable: false,
       tactics: [],
+      mateIn: mistake.mate_after ?? null,
       source: "blunder",
     },
   ];
@@ -1003,6 +1059,7 @@ function lineMoveToStep(move: PunishmentLineMove, track: Track): BoardStep {
     userWinProb: move.user_win_prob,
     stable: move.stable_after_move,
     tactics: move.tactics,
+    mateIn: move.mate_in ?? null,
     source: track,
   };
 }
@@ -1144,6 +1201,88 @@ function Badge({
       {children}
     </span>
   );
+}
+
+function motifArrows(step: BoardStep, track: Track): BoardArrow[] {
+  const themes = tacticThemes(step.tactics);
+  if (!themes.length) {
+    const fallback = moveArrow(step.moveUci, track);
+    return fallback ? [fallback] : [];
+  }
+
+  const primary = primaryTactic(step.tactics);
+  const orderedTags = [...step.tactics].sort((left, right) => {
+    if (left.theme === primary) return -1;
+    if (right.theme === primary) return 1;
+    return 0;
+  });
+  const arrows: BoardArrow[] = [];
+  const seen = new Set<string>();
+  const add = (start: unknown, end: unknown, color: string) => {
+    if (!isSquare(start) || !isSquare(end) || start === end) return;
+    const key = `${start}-${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    arrows.push({ startSquare: start, endSquare: end, color });
+  };
+  const addUci = (uci: unknown, color: string) => {
+    if (typeof uci === "string" && uci.length >= 4) add(uci.slice(0, 2), uci.slice(2, 4), color);
+  };
+
+  for (const tag of orderedTags) {
+    if (!(tag.theme in THEME_COLORS)) continue;
+    const color = THEME_COLORS[tag.theme as TacticTheme].border;
+    const evidence = tag.evidence ?? {};
+    addUci(tag.move_uci, color);
+    const destination = typeof tag.move_uci === "string" ? tag.move_uci.slice(2, 4) : null;
+
+    if (tag.theme === "double_check") {
+      for (const attacker of stringList(evidence.attackers)) add(attacker, evidence.king_square, color);
+    }
+    if (tag.theme === "discovered_check") {
+      for (const attacker of stringList(evidence.checking_attackers)) add(attacker, evidence.king_square, color);
+    }
+    if (tag.theme === "fork" && Array.isArray(evidence.targets)) {
+      for (const target of evidence.targets) {
+        if (target && typeof target === "object") add(destination, (target as Record<string, unknown>).square, color);
+      }
+    }
+    if (tag.theme === "absolute_pin") {
+      add(evidence.pinner_square, evidence.pinned_square, color);
+      add(evidence.pinned_square, evidence.king_square, color);
+    }
+    if (tag.theme === "skewer") {
+      add(destination, evidence.front_square, color);
+      add(evidence.front_square, evidence.rear_square, color);
+    }
+    if (tag.theme === "defender_deflection") {
+      add(evidence.defender_square, evidence.target_square, color);
+      addUci(evidence.payoff_move_uci, color);
+    }
+    if (tag.theme === "checkmate_in_k") add(destination, evidence.king_square, color);
+  }
+  return arrows;
+}
+
+function isSquare(value: unknown): value is string {
+  return typeof value === "string" && /^[a-h][1-8]$/.test(value);
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function resolveMateWinner(mateIn: number | null, fen: string): "white" | "black" | null {
+  if (mateIn == null) return null;
+  if (mateIn > 0) return "white";
+  if (mateIn < 0) return "black";
+  try {
+    const board = new Chess(fen);
+    if (!board.isCheckmate()) return null;
+    return board.turn() === "w" ? "black" : "white";
+  } catch {
+    return null;
+  }
 }
 
 function moveArrow(uci: string | null, track: Track): BoardArrow | null {

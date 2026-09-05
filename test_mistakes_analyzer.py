@@ -8,9 +8,12 @@ import chess
 from utils.game_enrichment_transformer import EnrichedGame, EnrichedMove
 from utils.mistakes_analyzer import (
     MistakeAnalyzerConfig,
+    PunishmentLineMove,
+    _annotate_line_tactics,
     analyze_mistakes,
     classify_mistake_severity,
 )
+from utils.tactic_detector import detect_tactics
 
 
 START_FEN = chess.Board().fen()
@@ -212,6 +215,190 @@ def test_actual_near_top_move_is_processed_for_tactics():
     assert isinstance(mistake.actual_line_moves[0].tactics, list)
 
 
+def test_line_tactics_suppress_plain_check_when_richer_check_theme_exists():
+    line = tactic_line(
+        "4k3/8/8/8/8/8/4B3/K3R3 w - - 0 1",
+        ["e2b5"],
+    )
+
+    annotated = _annotate_line_tactics(line, "white")
+    found = {tag.theme for tag in annotated[0].tactics}
+
+    assert "double_check" in found
+    assert "discovered_check" in found
+    assert "check" not in found
+
+
+def test_line_tactics_drop_plain_check_and_strip_user_tactics():
+    opponent_check = _annotate_line_tactics(
+        tactic_line("4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1", ["e2e7"]),
+        "white",
+    )
+    user_check = _annotate_line_tactics(
+        tactic_line(
+            "7k/8/8/8/8/8/4q3/K7 w - - 0 1",
+            ["a1b1", "e2e1", "b1a2"],
+        ),
+        "white",
+    )
+    legacy_king_attraction = _annotate_line_tactics(
+        tactic_line("6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1", ["f2f7"]),
+        "white",
+    )
+
+    assert opponent_check[0].tactics == []
+    assert user_check[1].tactics == []
+    assert "king_attraction" not in {
+        tag.theme for tag in legacy_king_attraction[0].tactics
+    }
+
+
+def test_profitable_material_tactics_stay_on_validated_setup_move():
+    cases = [
+        (
+            "fork",
+            "5q2/4k3/8/4N3/8/8/8/K7 w - - 0 1",
+            ["e5g6", "e7d6", "g6f8", "d6e5"],
+        ),
+        (
+            "absolute_pin",
+            "4k3/p3n3/8/8/8/8/8/R6K w - - 0 1",
+            ["a1e1", "a7a6", "e1e7", "e8f8"],
+        ),
+        (
+            "skewer",
+            "4q3/4k3/8/8/8/8/8/R6K w - - 0 1",
+            ["a1e1", "e7f6", "e1e8", "f6f7"],
+        ),
+    ]
+
+    for theme, fen, moves in cases:
+        annotated = _annotate_line_tactics(tactic_line(fen, moves), "white")
+        assert theme in {tag.theme for tag in annotated[0].tactics}
+        assert theme not in {tag.theme for tag in annotated[2].tactics}
+        tag = next(tag for tag in annotated[0].tactics if tag.theme == theme)
+        assert tag.move_uci == moves[0]
+        assert tag.evidence["setup_move_uci"] == moves[0]
+        assert tag.evidence["payoff_move_uci"] == moves[2]
+
+    checking_fork_setup = _annotate_line_tactics(
+        tactic_line(cases[0][1], cases[0][2]),
+        "white",
+    )[0]
+    assert "check" not in {tag.theme for tag in checking_fork_setup.tactics}
+
+
+def test_checking_fork_does_not_require_visible_payoff():
+    annotated = _annotate_line_tactics(
+        tactic_line(
+            "r6r/pp1k2B1/8/3b1R1p/4B3/8/P2q2PP/R5K1 b - - 0 1",
+            ["d2e3"],
+        ),
+        "black",
+    )
+
+    assert {tag.theme for tag in annotated[0].tactics} == {"fork"}
+    fork = annotated[0].tactics[0]
+    assert {target["square"] for target in fork.evidence["targets"]} == {
+        "e4",
+        "g1",
+    }
+
+
+def test_unprofitable_or_unanswered_skewer_is_not_emitted():
+    losing_queen = _annotate_line_tactics(
+        tactic_line(
+            "4r3/4k3/8/8/8/8/8/Q6K w - - 0 1",
+            ["a1e1", "e7f7", "e1e8", "f7e8"],
+        ),
+        "white",
+    )
+    truncated = _annotate_line_tactics(
+        tactic_line(
+            "4q3/4k3/8/8/8/8/8/R6K w - - 0 1",
+            ["a1e1", "e7f6", "e1e8"],
+        ),
+        "white",
+    )
+
+    assert all(tag.theme != "skewer" for step in losing_queen for tag in step.tactics)
+    assert all(tag.theme != "skewer" for step in truncated for tag in step.tactics)
+
+
+def test_skewer_and_deflection_stay_on_ranking_setup_not_later_check():
+    annotated = _annotate_line_tactics(
+        tactic_line(
+            "Q7/p1pk4/7p/6p1/8/6P1/1r1q2PP/5R1K w - - 1 42",
+            [
+                "f1f7",
+                "d7e6",
+                "a8e8",
+                "e6d5",
+                "e8d8",
+                "d5c4",
+                "f7c7",
+                "c4b3",
+            ],
+        ),
+        "white",
+    )
+
+    assert {tag.theme for tag in annotated[0].tactics} == {
+        "skewer",
+        "defender_deflection",
+    }
+    assert annotated[6].tactics == []
+    assert all(tag.move_uci == "f1f7" for tag in annotated[0].tactics)
+    assert all(tag.evidence["payoff_move_uci"] == "f7c7" for tag in annotated[0].tactics)
+
+
+def test_defender_deflection_requires_profitable_future_capture():
+    cases = [
+        (
+            "captured",
+            "7k/8/4q3/2Nr4/8/8/8/3R3K w - - 0 1",
+            ["c5e6", "h8h7", "d1d5", "h7h6"],
+        ),
+        (
+            "attacked_away",
+            "7k/8/4q3/3r4/8/7N/8/3R3K w - - 0 1",
+            ["h3f4", "e6e7", "d1d5", "h8h7"],
+        ),
+        (
+            "checked_away",
+            "2N3k1/p4r2/8/8/8/8/8/5R1K w - - 0 1",
+            ["c8e7", "g8h8", "f1f7", "a7a6"],
+        ),
+        (
+            "lured",
+            "7k/8/4q3/3r3N/8/8/8/3R3K w - - 0 1",
+            ["h5f6", "e6f6", "d1d5", "h8g7"],
+        ),
+    ]
+
+    for removal, fen, moves in cases:
+        annotated = _annotate_line_tactics(tactic_line(fen, moves), "white")
+        tag = next(
+            tag for tag in annotated[0].tactics if tag.theme == "defender_deflection"
+        )
+        assert all(tag.theme != "defender_deflection" for tag in annotated[2].tactics)
+        assert tag.evidence["removal"] == removal
+        assert tag.evidence["setup_move_uci"] == moves[0]
+        assert tag.evidence["payoff_move_uci"] == moves[2]
+
+
+def test_defender_deflection_is_not_emitted_without_payoff():
+    annotated = _annotate_line_tactics(
+        tactic_line(
+            "7k/8/4q3/3r4/8/7N/8/3R3K w - - 0 1",
+            ["h3f4", "e6e7", "h1g1", "h8h7"],
+        ),
+        "white",
+    )
+
+    assert all(tag.theme != "defender_deflection" for step in annotated for tag in step.tactics)
+
+
 def test_subthreshold_loss_is_not_listed_as_candidate():
     game = game_from_uci(["e2e4"])
     quiet_move = replace(game.moves[0], move_cp_loss=80, win_prob_loss=0.04)
@@ -230,6 +417,44 @@ def fens_after(moves: list[str]) -> dict[str, str]:
         board.push(move)
         fens[uci] = board.fen()
     return fens
+
+
+def tactic_line(fen: str, moves: list[str]) -> list[PunishmentLineMove]:
+    board = chess.Board(fen)
+    result: list[PunishmentLineMove] = []
+    for ply_offset, uci in enumerate(moves, start=1):
+        move = chess.Move.from_uci(uci)
+        assert move in board.legal_moves, f"illegal fixture move {uci} in {board.fen()}"
+        fen_before = board.fen()
+        side_to_move = "white" if board.turn == chess.WHITE else "black"
+        san = board.san(move)
+        raw_tactics = detect_tactics(
+            board,
+            move,
+            ply_offset=ply_offset,
+            engine_gain_cp=500,
+            is_pv_move=True,
+        )
+        board.push(move)
+        result.append(
+            PunishmentLineMove(
+                ply_offset=ply_offset,
+                side_to_move=side_to_move,
+                move_uci=uci,
+                san=san,
+                fen_before=fen_before,
+                fen_after=board.fen(),
+                eval_cp=None,
+                user_eval_cp=None,
+                user_win_prob=None,
+                top_move_gap_cp=None,
+                eval_volatility_cp=None,
+                retained_wp_loss=None,
+                stable_after_move=False,
+                tactics=raw_tactics,
+            )
+        )
+    return result
 
 
 def game_from_uci(moves: list[str]) -> EnrichedGame:

@@ -11,7 +11,7 @@ from backend.models import (
     ReportBuildRequest,
     ReportGamesCatalogRequest,
     ReportMistakesSelectionRequest,
-    SaveReportRequest,
+    ReportTitleRequest,
 )
 from backend.services import openings_service, report_analysis_service, statistics_service
 from backend.services.cache_service import stable_hash
@@ -216,28 +216,17 @@ def test_report_cache_key_does_not_include_target_color():
     assert "target_color" not in key
 
 
-def test_save_report_rejects_missing_cache_hash(monkeypatch):
-    calls = []
+def test_save_report_rejects_missing_report_id(monkeypatch):
+    class FakeReports:
+        def save(self, *_args, **_kwargs):
+            from backend.services.report_repository import ReportNotFound
 
-    class FakeCache:
-        def get(self, _cache_hash):
-            return None
+            raise ReportNotFound("Report not found")
 
-    monkeypatch.setattr(api_main, "ReportCache", lambda: FakeCache())
-    monkeypatch.setattr(api_main, "save_report_entry", lambda **kwargs: calls.append(kwargs))
-
-    with pytest.raises(HTTPException) as exc_info:
-        api_main.save_report(
-            SaveReportRequest(
-                cache_hash="missing",
-                username="Alice",
-                games_analyzed=3,
-                request_params={"username": "Alice"},
-            )
-        )
-
-    assert exc_info.value.status_code == 404
-    assert calls == []
+    monkeypatch.setattr(api_main, "ReportsRepository", lambda: FakeReports())
+    request = SimpleNamespace(state=SimpleNamespace(auth_user=SimpleNamespace(id="user-1")))
+    with pytest.raises(FileNotFoundError, match="Report not found"):
+        api_main.save_report("missing", ReportTitleRequest(title=None), request)
 
 
 def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_path):
@@ -483,6 +472,41 @@ def test_report_mistakes_rejects_missing_and_duplicate_ids(monkeypatch, tmp_path
         )
     with pytest.raises(ValueError, match="must be unique"):
         ReportMistakesSelectionRequest(selected_game_ids=["game-a", "game-a"])
+
+
+def test_report_mistakes_rejects_stale_active_analyzer_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        report_analysis_service,
+        "settings",
+        SimpleNamespace(
+            report_analysis_cache_dir=tmp_path,
+            stockfish_path="stockfish-test",
+            openings_path=settings.openings_path,
+        ),
+    )
+    report_analysis_service.initialize_report_analysis(
+        cache_hash="stale-report",
+        username="Alice",
+        raw_games=[_raw_game("game-a", 1)],
+        enriched_games=[_empty_enriched_game("game-a", 1)],
+        engine_depth=10,
+        engine_enriched=True,
+        filters={},
+        refresh=True,
+    )
+    store = report_analysis_service.ReportAnalysisStore("stale-report")
+    report_analysis_service._atomic_write_json(
+        store.analysis_path("old-analysis"),
+        {"metadata": {"analyzer_version": "mistakes-v2"}},
+    )
+    report_analysis_service._atomic_write_json(
+        store.active_path,
+        {"analysis_hash": "old-analysis", "analyzer_version": "mistakes-v2"},
+    )
+
+    assert "mistakes-v5" in str(store.per_game_path("game-a", 10, 8))
+    with pytest.raises(FileNotFoundError, match="older analyzer version"):
+        report_analysis_service.get_active_report_mistakes("stale-report")
 
 
 def test_report_without_engine_requires_rebuild(monkeypatch, tmp_path):

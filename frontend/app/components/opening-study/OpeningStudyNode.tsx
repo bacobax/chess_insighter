@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Loader2, X } from "lucide-react";
 import type { OpeningStudyTreeNode } from "~/lib/types";
 import { ZoomableBoard } from "~/components/board/BoardZoomModal";
-import { MiniChessBoard, PIECE_GLYPHS } from "./MiniChessBoard";
+import { MiniChessBoard, ThemedChessPiece } from "./MiniChessBoard";
 import { StatBarChart } from "./StatBarChart";
 
 // Compact (layout) dimensions — these drive tree spacing.
@@ -10,14 +10,15 @@ import { StatBarChart } from "./StatBarChart";
 export const NODE_WIDTH = 76;
 export const NODE_HEIGHT = 76;
 
-export const EXPANDED_NODE_WIDTH = 248;
-export const EXPANDED_NODE_HEIGHT = 270;
+export const EXPANDED_NODE_WIDTH = 458;
+export const EXPANDED_NODE_HEIGHT = 340;
+const EXPANDED_BOARD_SIZE = 280;
 // Blurred board rendered at this fixed size, centered over the container.
-const BG_BOARD_SIZE = 340;
+const BG_BOARD_SIZE = 520;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getPieceGlyph(moveSan: string, sideToMove: "white" | "black"): string {
+function getMovedPieceCode(moveSan: string, sideToMove: "white" | "black"): string {
   const movedColor = sideToMove === "white" ? "black" : "white";
   let type: string;
   if (moveSan.startsWith("O")) {
@@ -27,8 +28,7 @@ function getPieceGlyph(moveSan: string, sideToMove: "white" | "black"): string {
   } else {
     type = "P";
   }
-  const key = movedColor === "white" ? type : type.toLowerCase();
-  return PIECE_GLYPHS[key] ?? "?";
+  return movedColor === "white" ? type : type.toLowerCase();
 }
 
 function getDestLabel(moveSan: string, moveUci: string): string {
@@ -79,7 +79,8 @@ export function OpeningStudyNode({
     onHoverChange(false);
   };
 
-  const pieceGlyph = getPieceGlyph(node.moveSan, node.sideToMove);
+  const movedPieceCode = getMovedPieceCode(node.moveSan, node.sideToMove);
+  const movedPieceIsWhite = movedPieceCode === movedPieceCode.toUpperCase();
   const destLabel = getDestLabel(node.moveSan, node.moveUci);
 
   // Offset that keeps the expanded card centered over the compact square.
@@ -192,14 +193,19 @@ export function OpeningStudyNode({
           }}
         >
           <span
+            aria-hidden="true"
             style={{
-              fontSize: 30,
-              lineHeight: 1,
-              color: "#fafafa",
-              textShadow: "0 1px 6px rgba(0,0,0,0.8)",
+              display: "grid",
+              width: 42,
+              height: 42,
+              placeItems: "center",
+              borderRadius: 8,
+              backgroundColor: movedPieceIsWhite ? "#225c42" : "#c6e8d2",
+              border: "1px solid rgba(255,255,255,.16)",
+              boxShadow: "0 4px 12px rgba(0,0,0,.25)",
             }}
           >
-            {pieceGlyph}
+            <ThemedChessPiece piece={movedPieceCode} size={38} />
           </span>
           <span
             style={{
@@ -319,47 +325,49 @@ export function OpeningStudyNode({
               </span>
             </div>
 
-            {/* Board preview + opening names */}
-            <div className="flex flex-shrink-0 gap-2.5 px-3 pb-2">
-              {/* stopPropagation so clicking the board opens the zoom modal
-                  without also triggering onSelect on the parent */}
-              <div onClick={(e) => e.stopPropagation()}>
-                <ZoomableBoard
-                  fen={node.boardPreviewFen}
-                  label={node.openingNames[0] ?? node.moveSan}
-                >
-                  <MiniChessBoard fen={node.boardPreviewFen} size={88} />
-                </ZoomableBoard>
+            {/* Board and information each get their own dedicated column. */}
+            <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
+              <div className="shrink-0" style={{ width: EXPANDED_BOARD_SIZE }}>
+                {/* A closed node treats the whole preview as its expansion target.
+                    Once open, the same board becomes independently zoomable. */}
+                {expanded ? (
+                  <div onClick={(event) => event.stopPropagation()}>
+                    <ZoomableBoard
+                      fen={node.boardPreviewFen}
+                      label={node.openingNames[0] ?? node.moveSan}
+                    >
+                      <MiniChessBoard fen={node.boardPreviewFen} size={EXPANDED_BOARD_SIZE} />
+                    </ZoomableBoard>
+                  </div>
+                ) : (
+                  <div className="pointer-events-none">
+                    <MiniChessBoard fen={node.boardPreviewFen} size={EXPANDED_BOARD_SIZE} />
+                  </div>
+                )}
               </div>
-              <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                <div
-                  className="line-clamp-4 text-[9.5px] leading-snug"
-                  style={{ color: "rgba(255,255,255,0.68)" }}
-                >
-                  {node.openingNames.length > 0
-                    ? node.openingNames.join(" · ")
-                    : "—"}
-                </div>
-                <div
-                  className="mt-auto text-[8.5px]"
-                  style={{ color: "rgba(255,255,255,0.4)" }}
-                >
-                  {node.compatibleLineCount} lines
-                </div>
-              </div>
-            </div>
 
-            {/* Stat bars — on a warm paper-toned inset so existing styles read correctly */}
-            <div
-              className="mx-3 flex-shrink-0"
-              style={{
-                backgroundColor: "rgba(13,19,16,0.94)",
-                border: "1px solid rgba(33,231,131,.18)",
-                borderRadius: 8,
-                padding: "8px 10px",
-              }}
-            >
-              <StatBarChart stats={node.stats} />
+              <aside className="flex min-w-0 flex-1 flex-col" aria-label="Opening details">
+                <div
+                  className="rounded-lg border p-2.5"
+                  style={{
+                    backgroundColor: "rgba(7,12,9,.72)",
+                    borderColor: "rgba(255,255,255,.14)",
+                  }}
+                >
+                  <div
+                    className="line-clamp-4 text-[9px] font-medium leading-snug"
+                    style={{ color: "rgba(255,255,255,.82)" }}
+                  >
+                    {node.openingNames.length > 0 ? node.openingNames.join(" · ") : "Unclassified line"}
+                  </div>
+                  <div className="mt-2 text-[8px]" style={{ color: "rgba(255,255,255,.48)" }}>
+                    {node.compatibleLineCount} {node.compatibleLineCount === 1 ? "line" : "lines"}
+                  </div>
+                </div>
+
+                {/* The detail view expands only inside this rail, never across the board. */}
+                <StatBarChart stats={node.stats} />
+              </aside>
             </div>
           </div>
         )}

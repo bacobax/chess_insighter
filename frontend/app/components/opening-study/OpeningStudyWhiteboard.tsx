@@ -46,7 +46,9 @@ function nodeLabel(node: OpeningStudyTreeNode): string {
 }
 
 function isExpanded(entry: Entry): boolean {
-  return entry.children !== null && entry.children.length > 0;
+  // An empty array is a loaded leaf, and it must remain visibly open until the
+  // user explicitly collapses it. `null` alone represents a closed node.
+  return entry.children !== null;
 }
 
 // Recursively reconcile an immutable Entry tree: replaces the entry whose node
@@ -97,12 +99,13 @@ function layout(roots: Entry[]): { positioned: Positioned[]; edges: Edge[]; widt
     const visibleChildren = isExpanded(entry) ? entry.children! : [];
 
     if (visibleChildren.length === 0) {
+      const expanded = isExpanded(entry);
       return {
         positioned: [{ entry, x, y: 0, depth, order: entryOrder, siblingIndex, siblingCount }],
         edges: [],
         rootY: 0,
-        minY: 0,
-        maxY: NODE_HEIGHT,
+        minY: expanded ? -EXPANDED_OVERFLOW_Y : 0,
+        maxY: expanded ? -EXPANDED_OVERFLOW_Y + EXPANDED_NODE_HEIGHT : NODE_HEIGHT,
       };
     }
 
@@ -212,16 +215,18 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
 
   const requestBase = useCallback(
     () => ({
-      cacheHash: controls.cacheHash.trim() || undefined,
+      reportId: controls.cacheHash.trim() || undefined,
       username: controls.username.trim() || undefined,
       targetColor: controls.targetColor,
       topK: controls.topK,
       opponentTopK: controls.opponentTopK,
+      opponentMoveOrdering: controls.opponentMoveOrdering,
       weights: controls.weights,
       similarityType: controls.similarityType,
       weightedMatching: controls.weightedMatching,
       matcherWeights: controls.weightedMatching ? controls.matcherWeights : undefined,
       matchMode: controls.matchMode,
+      evaluationMetric: controls.evaluationMetric,
     }),
     [controls],
   );

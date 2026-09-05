@@ -9,11 +9,11 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 export function Button({ className, variant = "default", size = "default", style, ...props }: ButtonProps) {
   const variantStyle: React.CSSProperties =
     variant === "default"
-      ? { backgroundColor: "var(--acid)", color: "#0a0e0b", boxShadow: "0 0 0 1px rgba(220,255,66,.18), 0 10px 28px rgba(220,255,66,.08)" }
+      ? { backgroundColor: "var(--ink)", color: "var(--paper-dark)", boxShadow: "0 10px 28px rgba(0,0,0,.18)" }
       : variant === "secondary"
       ? { backgroundColor: "var(--paper-raised)", color: "var(--ink)", border: "1px solid var(--line)" }
       : variant === "outline"
-      ? { backgroundColor: "rgba(13,19,16,.64)", color: "var(--ink)", border: "1px solid var(--line)" }
+      ? { backgroundColor: "rgba(14,18,16,.64)", color: "var(--ink)", border: "1px solid var(--line)" }
       : { backgroundColor: "transparent", color: "var(--ink)" };
 
   return (

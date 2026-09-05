@@ -13,6 +13,7 @@ from utils.opening_study_tree import (
     evaluate_engine_soundness,
     get_opening_study_tree_children,
     load_player_vector_from_cache,
+    resolve_study_weights,
 )
 
 
@@ -31,6 +32,16 @@ def test_clamp01_bounds():
     assert clamp01(-1.0) == 0.0
     assert clamp01(2.0) == 1.0
     assert clamp01(0.5) == 0.5
+
+
+def test_engine_and_practical_gamble_weights_are_mutually_exclusive():
+    supplied = {"engine_soundness": 0.4, "practical_gamble": 0.6}
+    engine = resolve_study_weights(supplied, "style", "engine")
+    practical = resolve_study_weights(supplied, "style", "practical")
+    assert engine["engine_soundness"] == pytest.approx(0.4)
+    assert engine["practical_gamble"] == 0.0
+    assert practical["engine_soundness"] == 0.0
+    assert practical["practical_gamble"] == pytest.approx(0.6)
 
 
 def test_cp_to_utility_is_target_oriented_and_bounded():
@@ -71,6 +82,48 @@ def test_white_nodes_sorted_by_study_score(player_vector):
     nodes = get_opening_study_tree_children(player_vector, OPENING_VECTORS, "white", [], 5)
     scores = [node.study_score for node in nodes]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_opponent_moves_can_be_sorted_by_popularity(player_vector):
+    nodes = get_opening_study_tree_children(
+        player_vector,
+        OPENING_VECTORS,
+        "white",
+        ["e2e4"],
+        5,
+        opponent_top_k=12,
+        opponent_move_ordering="popularity",
+    )
+
+    assert nodes
+    scores = [node.popularity_score for node in nodes]
+    assert scores == sorted(scores, reverse=True)
+    assert scores[0] > 0
+
+
+def test_opponent_moves_can_be_sorted_by_engine_score(player_vector):
+    class FakeEngine:
+        def analyse(self, board, limit):
+            # From White's perspective, ...e5 is the strongest Black reply in
+            # this deterministic test. Opponent ordering should therefore put
+            # the lowest target-oriented engine utility first.
+            cp = -500 if board.peek().uci() == "e7e5" else 500
+            return {"score": chess.engine.PovScore(chess.engine.Cp(cp), chess.WHITE)}
+
+    nodes = get_opening_study_tree_children(
+        player_vector,
+        OPENING_VECTORS,
+        "white",
+        ["e2e4"],
+        5,
+        opponent_top_k=12,
+        soundness_engine=FakeEngine(),
+        opponent_move_ordering="engine",
+    )
+
+    assert nodes[0].move_uci == "e7e5"
+    scores = [node.engine_soundness for node in nodes]
+    assert scores == sorted(scores)
 
 
 def test_black_root_shows_common_white_first_moves(player_vector):
@@ -201,7 +254,7 @@ def test_engine_soundness_weight_changes_study_score():
         "player_style_match": 0.0,
         "engine_soundness": 1.0,
         "aggressiveness": 0.0,
-        "gambleness": 0.0,
+        "practical_gamble": 0.0,
         "systemness": 0.0,
         "memory_simplicity": 0.0,
     }
@@ -229,6 +282,30 @@ def test_engine_soundness_weight_changes_study_score():
     assert bad["study_score"] == pytest.approx(0.2)
     assert good["study_score"] == pytest.approx(0.8)
     assert bad["breakdown"]["engineSoundness"][0]["rawValue"] == pytest.approx(-800)
+
+
+def test_missing_practical_gamble_renormalizes_study_score():
+    weights = {
+        "player_style_match": 0.0,
+        "engine_soundness": 0.5,
+        "aggressiveness": 0.0,
+        "practical_gamble": 0.5,
+        "systemness": 0.0,
+        "memory_simplicity": 0.0,
+    }
+    missing = compute_node_metrics(
+        _base_aggregate(), _PLAYER, "white", 5, 381, weights,
+        engine_soundness=0.8,
+        practical_gamble=None,
+    )
+    available = compute_node_metrics(
+        _base_aggregate(), _PLAYER, "white", 5, 381, weights,
+        engine_soundness=0.8,
+        practical_gamble=0.2,
+    )
+
+    assert missing["study_score"] == pytest.approx(0.8)
+    assert available["study_score"] == pytest.approx(0.5)
 
 
 def test_sparse_family_no_longer_has_zero_memory_complexity():

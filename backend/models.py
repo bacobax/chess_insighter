@@ -194,7 +194,7 @@ class OpeningMatch(BaseModel):
 
 
 class OpeningMatchRequest(BaseModel):
-    cache_hash: str
+    report_id: str
     match_mode: Literal["cosine", "dot_product"] = "cosine"
     target_color: Literal["white", "black", "both"] = "both"
     limit: int = Field(default=15, ge=1, le=50)
@@ -210,7 +210,7 @@ class OpeningStudyWeights(BaseModel):
     player_style_match: float | None = Field(default=None, alias="playerStyleMatch")
     engine_soundness: float | None = Field(default=None, alias="engineSoundness")
     aggressiveness: float | None = None
-    gambleness: float | None = None
+    practical_gamble: float | None = Field(default=None, alias="practicalGamble")
     systemness: float | None = None
     memory_simplicity: float | None = Field(default=None, alias="memorySimplicity")
 
@@ -221,7 +221,7 @@ class OpeningStudyWeights(BaseModel):
             "player_style_match": self.player_style_match,
             "engine_soundness": self.engine_soundness,
             "aggressiveness": self.aggressiveness,
-            "gambleness": self.gambleness,
+            "practical_gamble": self.practical_gamble,
             "systemness": self.systemness,
             "memory_simplicity": self.memory_simplicity,
         }
@@ -233,6 +233,7 @@ class OpeningStudyTreeChildrenRequest(BaseModel):
     # vector is then loaded from the report cache, respecting the exact game
     # filters (time class, rated, date range, max games) used in that report.
     cache_hash: str | None = Field(default=None, alias="cacheHash")
+    report_id: str | None = Field(default=None, alias="reportId")
     # Fallback: resolve from the flat player_vectors.json by username. Ignores
     # game filters — uses whichever vector was most recently cached.
     username: str | None = None
@@ -242,16 +243,19 @@ class OpeningStudyTreeChildrenRequest(BaseModel):
     prefix_uci: list[str] = Field(default_factory=list, alias="prefixUci")
     top_k: int = Field(default=4, ge=1, le=20, alias="topK")
     opponent_top_k: int = Field(default=8, ge=1, le=30, alias="opponentTopK")
+    opponent_move_ordering: Literal["engine", "popularity"] = Field(
+        default="engine", alias="opponentMoveOrdering"
+    )
     weights: OpeningStudyWeights | None = None
     similarity_type: Literal["cosine", "dot_product"] = Field(default="cosine", alias="similarityType")
     weighted_matching: bool = Field(default=True, alias="weightedMatching")
     matcher_weights: dict[str, float] | None = Field(default=None, alias="matcherWeights")
-    # Match mode controls which scoring dimensions are active:
-    #   "style"  — player_style_match + engine + systemness + memory only
-    #              (aggro/gamble zeroed: they share source data with the style vector)
-    #   "custom" — engine + aggro + gamble + systemness + memory only
-    #              (player_style_match zeroed: user wants objective opening properties)
+    # Match mode controls the non-evaluation scoring dimensions. The separate
+    # evaluationMetric field selects exactly one of Engine or Practical Gamble.
+    #   "style"  — player_style_match + selected evaluation + systemness + memory
+    #   "custom" — selected evaluation + aggro + systemness + memory
     match_mode: Literal["style", "custom"] = Field(default="style", alias="matchMode")
+    evaluation_metric: Literal["engine", "practical"] = Field(default="engine", alias="evaluationMetric")
 
     model_config = {"populate_by_name": True}
 
@@ -260,7 +264,7 @@ class OpeningStudyNodeStats(BaseModel):
     playerStyleMatch: float
     engineSoundness: float
     aggressiveness: float
-    gambleness: float
+    practicalGamble: float | None = None
     memoryComplexity: float
     systemness: float
 
@@ -284,7 +288,6 @@ class StyleMatchComponent(BaseModel):
 
 class NodeBreakdown(BaseModel):
     aggressiveness: list[MetricComponent] = Field(default_factory=list)
-    gambleness: list[MetricComponent] = Field(default_factory=list)
     memoryComplexity: list[MetricComponent] = Field(default_factory=list)
     systemness: list[MetricComponent] = Field(default_factory=list)
     engineSoundness: list[MetricComponent] = Field(default_factory=list)
@@ -303,8 +306,13 @@ class OpeningStudyTreeNodeModel(BaseModel):
     representativePgn: str | None = None
     playerStyleMatch: float
     engineSoundness: float
+    popularityScore: float = 0.0
+    popularityGames: int = 0
     aggressiveness: float
-    gambleness: float
+    practicalGamble: float | None = None
+    practicalGambleRaw: float | None = None
+    practicalGambleSampleSize: int = 0
+    practicalGambleCoverage: float = 0.0
     memoryComplexity: float
     systemness: float
     studyScore: float
@@ -361,6 +369,29 @@ class ReportBuildResponse(BaseModel):
     cache_hit: bool
     normalized_hparams: JsonObject
     report: ReportPayload
+    report_id: str | None = None
+    saved: bool = False
+    title: str | None = None
+    request_params: JsonObject | None = None
+
+
+class ReportBuildJobAccepted(BaseModel):
+    build_id: str
+    socket_token: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+
+
+class ReportBuildJobStatus(BaseModel):
+    build_id: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    stage: str
+    progress: float = Field(ge=0, le=1)
+    message: str
+    revision: int
+    processed: int | None = None
+    total: int | None = None
+    report_id: str | None = None
+    error: str | None = None
 
 
 class SavedReportEntry(BaseModel):
@@ -381,6 +412,95 @@ class SaveReportRequest(BaseModel):
     username: str
     games_analyzed: int
     request_params: JsonObject
+
+
+class AuthUser(BaseModel):
+    id: str
+    email: str
+    created_at: str
+    verified_at: str
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        email = value.strip().lower()
+        if "@" not in email or email.startswith("@") or email.endswith("@"):
+            raise ValueError("Enter a valid email address")
+        return email
+
+
+class RegisterResponse(BaseModel):
+    registration_id: str
+    socket_token: str
+    expires_at: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+
+
+class ResendVerificationRequest(BaseModel):
+    registration_id: str
+    socket_token: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthSessionResponse(BaseModel):
+    user: AuthUser
+
+
+class ReportTitleRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        return title or None
+
+
+class ReportSummary(BaseModel):
+    id: str
+    username: str
+    generated_label: str
+    title: str | None = None
+    cache_hash: str
+    games_analyzed: int
+    request_params: JsonObject
+    created_at: str
+    updated_at: str
+    saved_at: str
+
+
+class PlayerReportsResponse(BaseModel):
+    username: str
+    reports: list[ReportSummary]
+
+
+class DashboardPlayer(BaseModel):
+    username: str
+    report_count: int
+    latest_report_at: str
+    reports: list[ReportSummary]
+
+
+class DashboardResponse(BaseModel):
+    user: AuthUser
+    report_count: int
+    player_count: int
+    latest_activity_at: str | None
+    players: list[DashboardPlayer]
 
 
 class MistakePositionRequest(BaseModel):

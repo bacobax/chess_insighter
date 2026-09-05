@@ -6,10 +6,12 @@ import {
   DEFAULT_MATCHER_WEIGHTS,
   DEFAULT_WEIGHTS,
   OpeningStudyControls,
+  applyModeToWeights,
   type StudyControlsState,
 } from "~/components/opening-study/OpeningStudyControls";
 import { OpeningStudyWhiteboard } from "~/components/opening-study/OpeningStudyWhiteboard";
 import type { OpeningStudyTreeNode, TargetColor } from "~/lib/types";
+import { RequireAuth } from "~/components/auth/auth-provider";
 
 export function meta() {
   return [
@@ -21,20 +23,22 @@ export function meta() {
 export default function OpeningStudyPage() {
   const [searchParams] = useSearchParams();
   const initialUsername = searchParams.get("username") ?? "";
-  const initialCacheHash = searchParams.get("cacheHash") ?? "";
+  const initialReportId = searchParams.get("reportId") ?? "";
   const initialColor = (searchParams.get("color") as TargetColor | null) ?? "white";
 
   const [controls, setControls] = useState<StudyControlsState>({
-    cacheHash: initialCacheHash,
+    cacheHash: initialReportId,
     username: initialUsername,
     targetColor: initialColor === "black" ? "black" : "white",
     topK: 4,
     opponentTopK: 8,
-    weights: { ...DEFAULT_WEIGHTS },
+    opponentMoveOrdering: "popularity",
+    weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, "style", "practical"),
     similarityType: "cosine",
     weightedMatching: true,
     matcherWeights: { ...DEFAULT_MATCHER_WEIGHTS },
     matchMode: "style",
+    evaluationMetric: "practical",
   });
   const [generationKey, setGenerationKey] = useState(0);
   const [selectedNode, setSelectedNode] = useState<OpeningStudyTreeNode | null>(null);
@@ -46,7 +50,7 @@ export default function OpeningStudyPage() {
     ? `/report/${encodeURIComponent(initialUsername)}`
     : "/";
 
-  return (
+  return <RequireAuth>{(
     <main id="main-content" className="flex h-screen w-screen flex-col" style={{ color: "var(--ink)" }}>
       <header className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-6" style={{ borderBottom: "1px solid var(--line)", background: "rgba(9,13,11,.92)", backdropFilter: "blur(16px)" }}>
         <Link to={backTarget}>
@@ -85,5 +89,5 @@ export default function OpeningStudyPage() {
         </div>
       </div>
     </main>
-  );
+  )}</RequireAuth>;
 }

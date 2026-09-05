@@ -28,6 +28,9 @@ conda run -n chess python -m pytest test_opening_study_tree.py -q
 
 # Rebuild opening feature vectors (requires Stockfish; regenerates openings_dataset/opening_feature_vectors.csv)
 conda run -n chess python build_opening_feature_vectors.py
+
+# Refresh Lichess popularity + Practical Gamble snapshot (requires LICHESS_API_TOKEN and Stockfish)
+conda run -n chess python build_opening_popularity.py
 ```
 
 ### Frontend (inside `chess_insighter/`)
@@ -128,7 +131,7 @@ All heavy computation lives here, independent of FastAPI.
 
 **`opening_study_tree.py`** — Opening Study Tree engine
 - Keywords: `get_opening_study_tree_children`, `compute_node_metrics`, `load_player_vector_from_cache`, `OpeningStudyTreeNode`, `OpeningStudyTreeRequest`, `compute_similarity`, `weighted_cosine`, `evaluate_engine_soundness`, `_root_children_for_black`, `_make_node`, `_load_opening_rows`, `_load_all_lines`, `_compute_global_priors`
-- Lazy single-level expansion; style scores: aggressiveness, gambleness, systemness, memory complexity
+- Lazy single-level expansion; scores include aggressiveness, Lichess-weighted practical gamble, systemness, and memory complexity
 
 **`custom_opening_explorer.py`** — alternative opening lookup (separate from study tree)
 

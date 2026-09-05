@@ -1,0 +1,39 @@
+{
+  "coverage": {
+    "best_move_child_positions": 4263,
+    "black_metric_positions": 7191,
+    "opening_rows_enriched": 3709,
+    "tree_positions": 7640,
+    "white_metric_positions": 7175
+  },
+  "engine": {
+    "cp_scale": 600.0,
+    "depth": 8,
+    "name": "Stockfish 18"
+  },
+  "files": {
+    "opening_vectors": "opening_feature_vectors.csv",
+    "snapshot": "opening_position_popularity.csv"
+  },
+  "filters": {
+    "minimum_covered_games": 30,
+    "moves": 50,
+    "ratings": [
+      1200,
+      1400,
+      1600,
+      1800,
+      2000
+    ],
+    "since": "2024-09",
+    "speeds": [
+      "blitz",
+      "rapid"
+    ],
+    "until": "2026-08",
+    "variant": "standard"
+  },
+  "generated_at": "2026-09-04T20:51:15.073794+00:00",
+  "schema_version": 1,
+  "source": "https://explorer.lichess.org/lichess"
+}

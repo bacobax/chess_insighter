@@ -8,7 +8,7 @@ import type { OpeningStudyTreeNode } from "~/lib/types";
 const AXES = [
   { key: "playerStyleMatch" as const, label: "Style" },
   { key: "aggressiveness" as const, label: "Aggro" },
-  { key: "gambleness" as const, label: "Gamble" },
+  { key: "practicalGamble" as const, label: "Practical" },
   { key: "memoryComplexity" as const, label: "Memory" },
   { key: "systemness" as const, label: "System" },
 ];
@@ -20,9 +20,9 @@ type Props = {
 };
 
 export function NodeRadarChart({ stats, width = 200, height = 150 }: Props) {
-  const data = AXES.map(({ key, label }) => ({
+  const data = AXES.filter(({ key }) => stats[key] != null).map(({ key, label }) => ({
     subject: label,
-    value: Math.max(0, Math.min(1, stats[key])),
+    value: Math.max(0, Math.min(1, stats[key] as number)),
   }));
 
   return (

@@ -72,6 +72,11 @@ class ReportCache:
         path = self.cache_dir / f"{cache_hash}.json"
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
+    def delete(self, cache_hash: str) -> None:
+        path = self.cache_dir / f"{cache_hash}.json"
+        if path.exists():
+            path.unlink()
+
 
 def update_player_vector_cache(
     *,

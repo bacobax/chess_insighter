@@ -75,10 +75,18 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
             matcher_weights=request.matcher_weights,
             soundness_engine=engine,
             match_mode=request.match_mode,
+            evaluation_metric=request.evaluation_metric,
+            opponent_move_ordering=request.opponent_move_ordering,
         )
 
     try:
-        if engine_path is None:
+        # Practical Gamble and move popularity are precomputed. Stockfish is
+        # needed only for Engine evaluation or Engine-based opponent ordering.
+        needs_engine = (
+            request.evaluation_metric == "engine"
+            or request.opponent_move_ordering == "engine"
+        )
+        if not needs_engine or engine_path is None:
             nodes = _compute(None)
         else:
             try:

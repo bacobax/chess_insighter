@@ -414,7 +414,7 @@ export function MistakesReportSection({
           </div>
         ) : null}
 
-        <div className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
+        <div className="mistakes-report-layout">
           <section className="space-y-4" aria-label="Analyzer controls">
             <Card>
               <CardHeader>
@@ -1607,8 +1607,8 @@ function formatGameDate(game: GameSummary | null) {
 }
 
 function mistakeDetailUrl(username: string, reportHash: string, analysisHash: string, mistakeId: string) {
-  const query = new URLSearchParams({ cacheHash: reportHash, analysisHash });
-  return `/report/${encodeURIComponent(username)}/mistake/${encodeURIComponent(mistakeId)}?${query.toString()}`;
+  const query = new URLSearchParams({ analysisHash });
+  return `/report/${encodeURIComponent(username)}/reports/${encodeURIComponent(reportHash)}/mistake/${encodeURIComponent(mistakeId)}?${query.toString()}`;
 }
 
 function numberOr(value: unknown, fallback: number) {

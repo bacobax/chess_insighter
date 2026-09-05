@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 import io
 
 import chess.pgn
@@ -41,7 +41,12 @@ def validate_username(username: str) -> None:
         raise ChessComServiceError(str(exc)) from exc
 
 
-def query_games(request: GamesQueryRequest) -> tuple[list[dict[str, Any]], bool, int]:
+def query_games(
+    request: GamesQueryRequest,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> tuple[list[dict[str, Any]], bool, int]:
     repo = ChessComRepository(request.username)
     try:
         repo.get_profile()
@@ -57,7 +62,12 @@ def query_games(request: GamesQueryRequest) -> tuple[list[dict[str, Any]], bool,
     selected: list[dict[str, Any]] = []
     time_classes = None if request.time_classes is None else set(request.time_classes)
 
-    for archive in reversed(archives):
+    archive_items = list(reversed(archives))
+    for archive_index, archive in enumerate(archive_items, start=1):
+        if cancel_check:
+            cancel_check()
+        if progress_callback:
+            progress_callback(archive_index, len(archive_items))
         if not repo._archive_in_range(
             archive,
             since_year=request.since_year,
@@ -101,6 +111,8 @@ def fetch_latest_games_for_report(
     since_month: int | None,
     until_year: int | None,
     until_month: int | None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     request = GamesQueryRequest(
         username=username,
@@ -113,7 +125,11 @@ def fetch_latest_games_for_report(
         until_year=until_year,
         until_month=until_month,
     )
-    games, _has_more, _total = query_games(request)
+    games, _has_more, _total = query_games(
+        request,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
     return games
 
 

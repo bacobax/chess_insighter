@@ -6,7 +6,7 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
     <div
       className={cn("rounded-[20px]", className)}
       style={{
-        background: "linear-gradient(145deg, rgba(27,38,32,.96), rgba(16,23,19,.98))",
+        background: "linear-gradient(145deg, var(--paper-raised), var(--paper-dark))",
         border: "1px solid var(--line)",
         boxShadow: "var(--shadow), inset 0 1px 0 rgba(255,255,255,.025)",
       }}

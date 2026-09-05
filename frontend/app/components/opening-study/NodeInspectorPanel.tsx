@@ -23,9 +23,11 @@ const STYLE_FEATURES: Array<{ key: string; label: string; color: string }> = [
 ];
 
 // Aggregate metric breakdown sections.
+type BreakdownStatKey = "engineSoundness" | "aggressiveness" | "memoryComplexity" | "systemness";
+
 const METRIC_SECTIONS: Array<{
   key: keyof NodeBreakdown;
-  statKey: keyof OpeningStudyTreeNode["stats"];
+  statKey: BreakdownStatKey;
   label: string;
   color: string;
   description: string;
@@ -44,13 +46,6 @@ const METRIC_SECTIONS: Array<{
     label: "Aggressiveness",
     color: "#dc2626",
     description: "35 × tactical density + 25 × complexity + 20 × opp. castling + 20 × material imbalance",
-  },
-  {
-    key: "gambleness",
-    statKey: "gambleness",
-    label: "Gambleness",
-    color: "#d97706",
-    description: "40 × material imbalance + 35 × tactical density + 25 × complexity",
   },
   {
     key: "memoryComplexity",
@@ -284,6 +279,46 @@ function StyleMatchBreakdownSection({
   );
 }
 
+function PracticalGambleSection({ node }: { node: OpeningStudyTreeNode }) {
+  const [open, setOpen] = useState(false);
+  const value = node.practicalGamble;
+  const label = value == null ? "—" : `${(clamp01(value) * 100).toFixed(0)}%`;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between py-0.5 text-[10px] text-slate-600 hover:text-slate-900"
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+          <span className="font-medium">Practical gamble</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="tabular-nums text-slate-400">{label}</span>
+          <ChevronDown className={cn("h-3 w-3 text-slate-400 transition-transform duration-150", open && "rotate-180")} />
+        </div>
+      </button>
+      {open && (
+        <div className="ml-3 mb-1 mt-1 text-[9px] leading-relaxed text-slate-400">
+          <p>
+            Advantage retained against popularity-weighted Lichess replies compared with Stockfish&apos;s best defense.
+          </p>
+          {value == null ? (
+            <p className="mt-1 text-amber-600">Unavailable: fewer than 30 covered games or no snapshot data.</p>
+          ) : (
+            <div className="mt-1.5 grid grid-cols-3 gap-2 rounded bg-slate-50 p-1.5">
+              <div><span className="block text-slate-500">Raw gap</span><span className="font-medium text-slate-700">+{(node.practicalGambleRaw ?? 0).toFixed(4)}</span></div>
+              <div><span className="block text-slate-500">Games</span><span className="font-medium text-slate-700">{node.practicalGambleSampleSize.toLocaleString()}</span></div>
+              <div><span className="block text-slate-500">Coverage</span><span className="font-medium text-slate-700">{(node.practicalGambleCoverage * 100).toFixed(1)}%</span></div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Props = {
   node: OpeningStudyTreeNode;
   playerVector: Record<string, number> | null;
@@ -303,6 +338,12 @@ export function NodeInspectorPanel({ node, playerVector }: Props) {
         <p className="mt-0.5 line-clamp-2 text-[10px]" style={{ color: "var(--ink-soft)" }}>
           {node.openingNames.length > 0 ? node.openingNames.join(" · ") : node.moveSan}
         </p>
+        {!node.isTargetMove && (
+          <p className="mt-1 text-[10px] tabular-nums" style={{ color: "var(--ink-faint)" }}>
+            Lichess popularity {(node.popularityScore * 100).toFixed(1)}%
+            {node.popularityGames > 0 ? ` · ${node.popularityGames.toLocaleString()} games` : " · no snapshot games"}
+          </p>
+        )}
       </div>
       <div className="flex justify-center">
         <ZoomableBoard fen={node.boardPreviewFen} label={node.openingNames[0] ?? node.moveSan}>
@@ -335,6 +376,7 @@ export function NodeInspectorPanel({ node, playerVector }: Props) {
             {bd.playerStyleMatch && bd.playerStyleMatch.length > 0 && (
               <StyleMatchBreakdownSection components={bd.playerStyleMatch} statValue={node.stats.playerStyleMatch} />
             )}
+            <PracticalGambleSection node={node} />
             {METRIC_SECTIONS.map((section) => {
               const components = bd[section.key] as MetricComponent[] | undefined;
               if (!components || components.length === 0) return null;

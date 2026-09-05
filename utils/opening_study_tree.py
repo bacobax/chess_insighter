@@ -5,8 +5,8 @@ decision tree that suggests which opening moves a given player should study,
 based on calibrated opening feature vectors and a precomputed player vector.
 
 It is **not** an engine-best-move tree. Nodes are scored on style matching,
-calibrated opening characteristics (aggressiveness, gambit volatility proxy,
-memorisation cost, systemness), and an optional bounded Stockfish soundness
+calibrated opening characteristics, Lichess-weighted practical gamble,
+memorisation cost, systemness, and an optional bounded Stockfish soundness
 utility so stylistic matches that are simply losing can be demoted.
 
 The module is intentionally dependency-light (csv, math, python-chess) and does
@@ -31,6 +31,7 @@ from utils.opening_feature_transformer import (
     MATCHER_COLUMNS_V2,
     opening_vector_for_color,
 )
+from utils.opening_popularity import move_popularity_for_board, practical_gamble_for_board
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
     "player_style_match": 0.32,
     "engine_soundness": 0.18,
     "aggressiveness": 0.15,
-    "gambleness": 0.10,
+    "practical_gamble": 0.10,
     "systemness": 0.13,
     "memory_simplicity": 0.12,
 }
@@ -70,26 +71,43 @@ ENGINE_SOUNDNESS_CP_SCALE = 600.0
 # cosine.  The backend zeroes disallowed keys so client sliders can't reintroduce
 # them when the wrong mode is active.
 #
-# "style"  — player_style_match, engine, systemness, memory.
-#             aggro + gamble excluded: they reuse the same MATCHER_COLUMNS_V2
-#             features already in the style cosine → double-counting.
-# "custom" — engine, aggro, gamble, systemness, memory.
+# "style"  — player_style_match, selected evaluation, systemness, memory.
+#             Aggressiveness is excluded because its source features already
+#             participate in the style cosine and would be double-counted.
+# "custom" — selected evaluation, aggro, systemness, memory.
 #             player_style_match excluded: objective opening properties only.
 ALLOWED_WEIGHTS_BY_MODE: dict[str, frozenset[str]] = {
     "style": frozenset({
         "player_style_match",
         "engine_soundness",
+        "practical_gamble",
         "systemness",
         "memory_simplicity",
     }),
     "custom": frozenset({
         "engine_soundness",
         "aggressiveness",
-        "gambleness",
+        "practical_gamble",
         "systemness",
         "memory_simplicity",
     }),
 }
+
+
+def resolve_study_weights(
+    weights: dict[str, float] | None,
+    match_mode: str,
+    evaluation_metric: str,
+) -> dict[str, float]:
+    """Apply mode constraints and make Engine/Practical mutually exclusive."""
+    resolved = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
+    allowed = ALLOWED_WEIGHTS_BY_MODE.get(match_mode, ALLOWED_WEIGHTS_BY_MODE["style"])
+    resolved = {key: (value if key in allowed else 0.0) for key, value in resolved.items()}
+    selected = "practical_gamble" if evaluation_metric == "practical" else "engine_soundness"
+    for key in ("engine_soundness", "practical_gamble"):
+        if key != selected:
+            resolved[key] = 0.0
+    return resolved
 
 # Common White first moves shown at the root when the target colour is Black,
 # before any style-based recommendation kicks in.
@@ -144,16 +162,21 @@ class OpeningStudyTreeNode:
     representative_pgn: str | None
     player_style_match: float
     aggressiveness: float
-    gambleness: float
+    practical_gamble: float | None
+    practical_gamble_raw: float | None
+    practical_gamble_sample_size: int
+    practical_gamble_coverage: float
     memory_complexity: float
     systemness: float
     engine_soundness: float
+    popularity_score: float
+    popularity_games: int
     study_score: float
     side_to_move: str
     target_color: str
     is_target_move: bool
     board_preview_fen: str
-    stats: dict[str, float] = field(default_factory=dict)
+    stats: dict[str, float | None] = field(default_factory=dict)
     breakdown: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -168,10 +191,15 @@ class OpeningStudyTreeNode:
             "representativePgn": self.representative_pgn,
             "playerStyleMatch": self.player_style_match,
             "aggressiveness": self.aggressiveness,
-            "gambleness": self.gambleness,
+            "practicalGamble": self.practical_gamble,
+            "practicalGambleRaw": self.practical_gamble_raw,
+            "practicalGambleSampleSize": self.practical_gamble_sample_size,
+            "practicalGambleCoverage": self.practical_gamble_coverage,
             "memoryComplexity": self.memory_complexity,
             "systemness": self.systemness,
             "engineSoundness": self.engine_soundness,
+            "popularityScore": self.popularity_score,
+            "popularityGames": self.popularity_games,
             "studyScore": self.study_score,
             "sideToMove": self.side_to_move,
             "targetColor": self.target_color,
@@ -588,6 +616,10 @@ def compute_node_metrics(
     weights: dict[str, float],
     engine_soundness: float = ENGINE_SOUNDNESS_NEUTRAL,
     engine_target_cp: float | None = None,
+    practical_gamble: float | None = None,
+    practical_gamble_raw: float | None = None,
+    practical_gamble_sample_size: int = 0,
+    practical_gamble_coverage: float = 0.0,
     similarity_type: str = "cosine",
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
@@ -621,12 +653,6 @@ def compute_node_metrics(
         + 0.25 * feat("middlegame_complexity")
         + 0.20 * feat("opposite_side_castling_tendency")
         + 0.20 * feat("material_imbalance")
-    )
-
-    gambleness = clamp01(
-        0.40 * feat("material_imbalance")
-        + 0.35 * feat("tactical_density")
-        + 0.25 * feat("middlegame_complexity")
     )
 
     structure_diversity = float(aggregate.get("structure_diversity") or 0.0)
@@ -678,17 +704,20 @@ def compute_node_metrics(
 
     style = clamp01(style)
     engine_soundness = clamp01(engine_soundness)
+    practical_gamble = clamp01(practical_gamble) if practical_gamble is not None else None
 
     w = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
-    weight_sum = sum(abs(v) for v in w.values()) or 1.0
-    study_score = (
-        w["player_style_match"] * style
-        + w["engine_soundness"] * engine_soundness
-        + w["aggressiveness"] * aggressiveness
-        + w["gambleness"] * gambleness
-        + w["systemness"] * systemness
-        + w["memory_simplicity"] * (1.0 - memory_complexity)
-    ) / weight_sum
+    score_terms: list[tuple[float, float]] = [
+        (w["player_style_match"], style),
+        (w["engine_soundness"], engine_soundness),
+        (w["aggressiveness"], aggressiveness),
+        (w["systemness"], systemness),
+        (w["memory_simplicity"], 1.0 - memory_complexity),
+    ]
+    if practical_gamble is not None:
+        score_terms.append((w["practical_gamble"], practical_gamble))
+    weight_sum = sum(abs(weight) for weight, _ in score_terms) or 1.0
+    study_score = sum(weight * value for weight, value in score_terms) / weight_sum
 
     breakdown: dict[str, Any] = {
         "aggressiveness": [
@@ -696,11 +725,6 @@ def compute_node_metrics(
             {"key": "middlegame_complexity", "label": "Complexity", "value": round(feat("middlegame_complexity"), 4), "weight": 0.25, "rawValue": round(feat("middlegame_complexity"), 4)},
             {"key": "opposite_side_castling_tendency", "label": "Opp. castling", "value": round(feat("opposite_side_castling_tendency"), 4), "weight": 0.20, "rawValue": round(feat("opposite_side_castling_tendency"), 4)},
             {"key": "material_imbalance", "label": "Material imb.", "value": round(feat("material_imbalance"), 4), "weight": 0.20, "rawValue": round(feat("material_imbalance"), 4)},
-        ],
-        "gambleness": [
-            {"key": "material_imbalance", "label": "Material imb.", "value": round(feat("material_imbalance"), 4), "weight": 0.40, "rawValue": round(feat("material_imbalance"), 4)},
-            {"key": "tactical_density", "label": "Tactical density", "value": round(feat("tactical_density"), 4), "weight": 0.35, "rawValue": round(feat("tactical_density"), 4)},
-            {"key": "middlegame_complexity", "label": "Complexity", "value": round(feat("middlegame_complexity"), 4), "weight": 0.25, "rawValue": round(feat("middlegame_complexity"), 4)},
         ],
         "memoryComplexity": [
             *(
@@ -748,7 +772,10 @@ def compute_node_metrics(
     return {
         "player_style_match": style,
         "aggressiveness": aggressiveness,
-        "gambleness": gambleness,
+        "practical_gamble": practical_gamble,
+        "practical_gamble_raw": practical_gamble_raw,
+        "practical_gamble_sample_size": max(0, int(practical_gamble_sample_size)),
+        "practical_gamble_coverage": clamp01(practical_gamble_coverage),
         "memory_complexity": memory_complexity,
         "systemness": systemness,
         "engine_soundness": engine_soundness,
@@ -810,6 +837,7 @@ def _root_children_for_black(
     rows: Sequence[dict[str, Any]],
     weights: dict[str, float],
     global_max_line: int,
+    opening_vectors_path: str,
     similarity_type: str = "cosine",
     weighted_matching: bool = True,
     matcher_weights: dict[str, float] | None = None,
@@ -818,10 +846,12 @@ def _root_children_for_black(
     soundness_engine: Any | None = None,
     soundness_depth: int = 8,
     soundness_cache: dict[str, tuple[float, float | None]] | None = None,
+    opponent_move_ordering: str = "engine",
 ) -> list[OpeningStudyTreeNode]:
     """At the root, when studying Black, surface the common White first moves
     (conditional recommendation): Black's repertoire depends on White's choice."""
     base_board = chess.Board()
+    popularity = move_popularity_for_board(base_board, opening_vectors_path)
     nodes: list[OpeningStudyTreeNode] = []
     groups: dict[str, list[dict[str, Any]]] = {}
     for move in COMMON_WHITE_FIRST_MOVES:
@@ -840,6 +870,7 @@ def _root_children_for_black(
             depth=soundness_depth,
             cache=soundness_cache,
         )
+        practical = practical_gamble_for_board(board, "black", opening_vectors_path)
         # Count the number of variation rows matching this first move.  Summing the
         # ``line_count`` field would over-count since variation subtrees overlap.
         line_count = len(grp)
@@ -849,6 +880,10 @@ def _root_children_for_black(
                 aggregate, player_vector, "black", line_count, max_line, weights,
                 engine_soundness=engine_soundness,
                 engine_target_cp=engine_target_cp,
+                practical_gamble=practical.percentile,
+                practical_gamble_raw=practical.raw,
+                practical_gamble_sample_size=practical.sample_size,
+                practical_gamble_coverage=practical.coverage,
                 similarity_type=similarity_type,
                 weighted_matching=weighted_matching,
                 matcher_weights=matcher_weights,
@@ -863,7 +898,10 @@ def _root_children_for_black(
             metrics = {
                 "player_style_match": 0.0,
                 "aggressiveness": 0.0,
-                "gambleness": 0.0,
+                "practical_gamble": practical.percentile,
+                "practical_gamble_raw": practical.raw,
+                "practical_gamble_sample_size": practical.sample_size,
+                "practical_gamble_coverage": practical.coverage,
                 "memory_complexity": 0.0,
                 "systemness": 0.0,
                 "engine_soundness": engine_soundness,
@@ -884,10 +922,11 @@ def _root_children_for_black(
                 metrics=metrics,
                 target_color="black",
                 mover_is_target=False,  # White's move, target is Black
+                popularity_score=popularity.get(move_uci, (0.0, 0))[0],
+                popularity_games=popularity.get(move_uci, (0.0, 0))[1],
             )
         )
-    # Keep the canonical opening order (e4, d4, c4, Nf3) rather than re-sorting:
-    # these are presented as fixed "pick White's first move" options.
+    _sort_study_nodes(nodes, mover_is_target=False, opponent_move_ordering=opponent_move_ordering)
     return nodes
 
 
@@ -916,12 +955,14 @@ def _make_node(
     metrics: dict[str, Any],
     target_color: str,
     mover_is_target: bool,
+    popularity_score: float = 0.0,
+    popularity_games: int = 0,
 ) -> OpeningStudyTreeNode:
     fen = board.fen()
     stats = {
         "playerStyleMatch": metrics["player_style_match"],
         "aggressiveness": metrics["aggressiveness"],
-        "gambleness": metrics["gambleness"],
+        "practicalGamble": metrics["practical_gamble"],
         "memoryComplexity": metrics["memory_complexity"],
         "systemness": metrics["systemness"],
         "engineSoundness": metrics["engine_soundness"],
@@ -937,10 +978,15 @@ def _make_node(
         representative_pgn=rep_pgn,
         player_style_match=metrics["player_style_match"],
         aggressiveness=metrics["aggressiveness"],
-        gambleness=metrics["gambleness"],
+        practical_gamble=metrics["practical_gamble"],
+        practical_gamble_raw=metrics["practical_gamble_raw"],
+        practical_gamble_sample_size=metrics["practical_gamble_sample_size"],
+        practical_gamble_coverage=metrics["practical_gamble_coverage"],
         memory_complexity=metrics["memory_complexity"],
         systemness=metrics["systemness"],
         engine_soundness=metrics["engine_soundness"],
+        popularity_score=clamp01(popularity_score),
+        popularity_games=max(0, int(popularity_games)),
         study_score=metrics["study_score"],
         side_to_move=_color_name(board.turn),
         target_color=target_color,
@@ -949,6 +995,23 @@ def _make_node(
         stats=stats,
         breakdown=metrics.get("breakdown", {}),
     )
+
+
+def _sort_study_nodes(
+    nodes: list[OpeningStudyTreeNode],
+    *,
+    mover_is_target: bool,
+    opponent_move_ordering: str,
+) -> None:
+    """Sort target moves by Study Score and opponent moves by user choice."""
+    if mover_is_target:
+        nodes.sort(key=lambda node: (node.study_score, node.popularity_score), reverse=True)
+    elif opponent_move_ordering == "popularity":
+        nodes.sort(key=lambda node: (node.popularity_score, node.popularity_games, -node.engine_soundness), reverse=True)
+    else:
+        # engine_soundness is target-oriented, so the opponent's strongest
+        # replies are the positions with the lowest utility for the target.
+        nodes.sort(key=lambda node: (node.engine_soundness, -node.popularity_score, node.move_uci))
 
 
 def get_opening_study_tree_children(
@@ -966,6 +1029,8 @@ def get_opening_study_tree_children(
     soundness_engine: Any | None = None,
     soundness_depth: int = 8,
     match_mode: str = "style",
+    evaluation_metric: str = "engine",
+    opponent_move_ordering: str = "engine",
 ) -> list[OpeningStudyTreeNode]:
     """Compute child suggestion nodes for a single prefix (one level, lazy).
 
@@ -983,14 +1048,18 @@ def get_opening_study_tree_children(
     target = (target_color or "").strip().lower()
     if target not in {"white", "black"}:
         raise ValueError(f"Invalid target color: '{target_color}'. Expected 'white' or 'black'.")
+    opponent_order = (opponent_move_ordering or "engine").strip().lower()
+    if opponent_order not in {"engine", "popularity"}:
+        raise ValueError(
+            f"Invalid opponent move ordering: '{opponent_move_ordering}'. "
+            "Expected 'engine' or 'popularity'."
+        )
 
     top_k = max(1, int(top_k))
     opp_k = max(1, int(opponent_top_k)) if opponent_top_k is not None else top_k
-    weights = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
-    # Enforce match mode: zero dimensions whose source data conflicts with the
-    # mode's intent.  This is authoritative — client-side sliders cannot override.
-    allowed = ALLOWED_WEIGHTS_BY_MODE.get(match_mode, ALLOWED_WEIGHTS_BY_MODE["style"])
-    weights = {k: (v if k in allowed else 0.0) for k, v in weights.items()}
+    # Authoritative backend enforcement: clients cannot score both evaluation
+    # signals at once or re-enable dimensions excluded by the selected mode.
+    weights = resolve_study_weights(weights, match_mode, evaluation_metric)
     player = _normalize_player_vector(player_vector)
     prefix = list(prefix_uci or [])
 
@@ -1008,11 +1077,13 @@ def get_opening_study_tree_children(
     # Dataset-level priors for coverage shrink (see compute_node_metrics).
     prior_diversity, prior_entropy = _compute_global_priors(fv_rows)
     soundness_cache: dict[str, tuple[float, float | None]] = {}
-    use_soundness_engine = soundness_engine if weights.get("engine_soundness", 0.0) > 0 else None
+    use_soundness_engine = soundness_engine if (
+        weights.get("engine_soundness", 0.0) > 0 or opponent_order == "engine"
+    ) else None
 
     if target == "black" and len(prefix) == 0:
         nodes = _root_children_for_black(
-            player, fv_rows, weights, global_max_line,
+            player, fv_rows, weights, global_max_line, opening_vectors_path,
             similarity_type=similarity_type,
             weighted_matching=weighted_matching,
             matcher_weights=matcher_weights,
@@ -1021,6 +1092,7 @@ def get_opening_study_tree_children(
             soundness_engine=use_soundness_engine,
             soundness_depth=soundness_depth,
             soundness_cache=soundness_cache,
+            opponent_move_ordering=opponent_order,
         )
         return nodes[:opp_k] if opp_k < len(nodes) else nodes
 
@@ -1065,6 +1137,7 @@ def get_opening_study_tree_children(
     max_line = global_max_line
 
     nodes: list[OpeningStudyTreeNode] = []
+    move_popularity = move_popularity_for_board(board, opening_vectors_path)
     for next_move_uci, family_fvs in groups.items():
         try:
             move = chess.Move.from_uci(next_move_uci)
@@ -1082,6 +1155,7 @@ def get_opening_study_tree_children(
             depth=soundness_depth,
             cache=soundness_cache,
         )
+        practical = practical_gamble_for_board(child_board, target, opening_vectors_path)
 
         fv_list = list(family_fvs.values())
         line_count = _group_line_count(family_fvs)
@@ -1091,6 +1165,10 @@ def get_opening_study_tree_children(
             aggregate, player, target, line_count, max_line, weights,
             engine_soundness=engine_soundness,
             engine_target_cp=engine_target_cp,
+            practical_gamble=practical.percentile,
+            practical_gamble_raw=practical.raw,
+            practical_gamble_sample_size=practical.sample_size,
+            practical_gamble_coverage=practical.coverage,
             similarity_type=similarity_type,
             weighted_matching=weighted_matching,
             matcher_weights=matcher_weights,
@@ -1116,8 +1194,14 @@ def get_opening_study_tree_children(
                 metrics=metrics,
                 target_color=target,
                 mover_is_target=mover_is_target,
+                popularity_score=move_popularity.get(next_move_uci, (0.0, 0))[0],
+                popularity_games=move_popularity.get(next_move_uci, (0.0, 0))[1],
             )
         )
 
-    nodes.sort(key=lambda node: node.study_score, reverse=True)
+    _sort_study_nodes(
+        nodes,
+        mover_is_target=mover_is_target,
+        opponent_move_ordering=opponent_order,
+    )
     return nodes[:limit]

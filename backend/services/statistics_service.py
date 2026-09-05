@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from threading import Event
+from typing import Any, Callable
 
 from backend.models import MetricPoint, ReportBuildRequest, ReportBuildResponse, ReportCharts, ReportPayload
 from backend.services.cache_service import ReportCache, report_cache_key, stable_hash, update_player_vector_cache
@@ -13,7 +15,29 @@ from backend.settings import settings
 from utils.player_statistics import PlayerStatisticsBuilder
 
 
-def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
+ProgressCallback = Callable[[str, float, str, int | None, int | None], None]
+
+
+class ReportBuildCancelled(RuntimeError):
+    pass
+
+
+def build_report(
+    request: ReportBuildRequest,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    cancel_event: Event | None = None,
+) -> ReportBuildResponse:
+    def check_cancel() -> None:
+        if cancel_event and cancel_event.is_set():
+            raise ReportBuildCancelled("Report build cancelled.")
+
+    def emit(stage: str, progress: float, message: str, processed: int | None = None, total: int | None = None) -> None:
+        check_cancel()
+        if progress_callback:
+            progress_callback(stage, progress, message, processed, total)
+
+    emit("cache", 0.02, "Checking existing analysis")
     default_hparams = load_hparams(settings.hparams_path)
     effective_hparams = deep_merge(default_hparams, request.hparams)
     validate_numeric_hparams(effective_hparams)
@@ -41,36 +65,60 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         cached = cache.get(cache_hash)
         if cached is not None:
             cached["cache_hit"] = True
+            emit("complete", 1.0, "Existing report ready")
             return ReportBuildResponse.model_validate(cached)
 
     settings.report_config_dir.mkdir(parents=True, exist_ok=True)
     hparams_path = settings.report_config_dir / f"{cache_hash}.yaml"
     hparams_path.write_text(dump_simple_yaml(effective_hparams), encoding="utf-8")
 
-    raw_games = fetch_latest_games_for_report(
-        username=request.username,
-        max_games=request.max_games,
-        time_classes=request.time_classes,
-        rated_filter=request.rated_filter,
-        since_year=request.since_year,
-        since_month=request.since_month,
-        until_year=request.until_year,
-        until_month=request.until_month,
-    )
-    if not raw_games:
-        raise ValueError("No games found for the requested username and filters.")
+    try:
+        emit("fetching_games", 0.06, "Fetching Chess.com games")
+        raw_games = fetch_latest_games_for_report(
+            username=request.username,
+            max_games=request.max_games,
+            time_classes=request.time_classes,
+            rated_filter=request.rated_filter,
+            since_year=request.since_year,
+            since_month=request.since_month,
+            until_year=request.until_year,
+            until_month=request.until_month,
+            progress_callback=lambda processed, total: emit(
+                "fetching_games",
+                0.06 + 0.09 * (processed / max(total, 1)),
+                f"Scanning Chess.com archive {processed} of {total}",
+                processed,
+                total,
+            ),
+            cancel_check=check_cancel,
+        )
+        emit("fetching_games", 0.15, f"Selected {len(raw_games)} games", len(raw_games), len(raw_games))
+        if not raw_games:
+            raise ValueError("No games found for the requested username and filters.")
 
-    enriched_games, enrichment_metadata = enrich_games(
-        raw_games,
-        engine_depth=request.engine_depth,
-        use_engine=request.use_engine,
-    )
+        def enrichment_progress(game_index: int, game_total: int, ply: int, ply_total: int) -> None:
+            game_fraction = ((game_index - 1) + (ply / max(ply_total, 1))) / max(game_total, 1)
+            emit("enriching_games", 0.15 + 0.60 * game_fraction, f"Analysing game {game_index} of {game_total}", game_index, game_total)
+
+        enriched_games, enrichment_metadata = enrich_games(
+            raw_games,
+            engine_depth=request.engine_depth,
+            use_engine=request.use_engine,
+            progress_callback=enrichment_progress,
+            cancel_check=check_cancel,
+        )
+    except Exception:
+        if cache.get(cache_hash) is None:
+            Path(hparams_path).unlink(missing_ok=True)
+        raise
     if not enriched_games:
         raise ValueError("No games could be enriched for the requested username and filters.")
 
+    emit("statistics", 0.78, "Computing player statistics")
     bundle = PlayerStatisticsBuilder(hparams_path).build(enriched_games, player_name=request.username)
     bundle_json = serializable(bundle)
     stats = bundle.global_statistics
+    emit("openings", 0.88, "Building opening analysis")
     opening_charts = build_opening_charts(bundle)
 
     metadata = {
@@ -92,6 +140,7 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         game_analysis_components=game_analysis_components(stats),
         average_time_by_complexity=average_time_by_complexity(stats),
     )
+    emit("finalizing", 0.94, "Preparing report details")
     analysis_context = initialize_report_analysis(
         cache_hash=cache_hash,
         username=request.username,
@@ -114,19 +163,26 @@ def build_report(request: ReportBuildRequest) -> ReportBuildResponse:
         ),
     )
     payload = response.model_dump()
+    emit("finalizing", 0.98, "Saving report artifact")
     cache.set(cache_hash, payload)
-    update_player_vector_cache(
-        cache_key=key,
-        vector=bundle.matcher_ready_player_vector,
-        confidence=bundle.player_profile.confidence,
-        metadata={
-            **metadata,
-            "cache_hash": cache_hash,
-            "player_name": bundle.player_profile.player_name,
-            "games_analyzed": bundle.player_profile.games_analyzed,
-            "moves_analyzed": bundle.player_profile.moves_analyzed,
-        },
-    )
+    try:
+        update_player_vector_cache(
+            cache_key=key,
+            vector=bundle.matcher_ready_player_vector,
+            confidence=bundle.player_profile.confidence,
+            metadata={
+                **metadata,
+                "cache_hash": cache_hash,
+                "player_name": bundle.player_profile.player_name,
+                "games_analyzed": bundle.player_profile.games_analyzed,
+                "moves_analyzed": bundle.player_profile.moves_analyzed,
+            },
+        )
+        emit("complete", 1.0, "Report ready")
+    except ReportBuildCancelled:
+        cache.delete(cache_hash)
+        Path(hparams_path).unlink(missing_ok=True)
+        raise
     return response
 
 

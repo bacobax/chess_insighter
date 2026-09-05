@@ -45,8 +45,9 @@ def detect_tactics(
 ) -> list[TacticTag]:
     """Detect tactical motifs created by a move.
 
-    Checks are objective and are always emitted. Richer motifs are emitted only
-    when the move belongs to an engine line or has enough engine value.
+    Plain checks are intentionally not motifs. Richer checking patterns and
+    material motifs are emitted when the move belongs to an engine line or has
+    enough engine value.
     """
 
     config = config or TacticDetectorConfig()
@@ -62,17 +63,6 @@ def detect_tactics(
     after = board.copy(stack=False)
     after.push(move)
 
-    if gives_check:
-        tags.append(
-            TacticTag(
-                theme="check",
-                move_uci=move_uci,
-                ply_offset=ply_offset,
-                confidence=1.0,
-                evidence={"king_square": _square_name(after.king(defender))},
-            )
-        )
-
     checking_attackers = _checking_attackers(after, attacker, defender)
     if len(checking_attackers) >= 2:
         tags.append(
@@ -81,7 +71,10 @@ def detect_tactics(
                 move_uci=move_uci,
                 ply_offset=ply_offset,
                 confidence=0.95,
-                evidence={"attackers": [_square_name(square) for square in checking_attackers]},
+                evidence={
+                    "attackers": [_square_name(square) for square in checking_attackers],
+                    "king_square": _square_name(after.king(defender)),
+                },
             )
         )
 
@@ -97,6 +90,7 @@ def detect_tactics(
                         _square_name(square) for square in checking_attackers
                     ],
                     "moved_piece_square": chess.square_name(move.to_square),
+                    "king_square": _square_name(after.king(defender)),
                 },
             )
         )
@@ -108,7 +102,7 @@ def detect_tactics(
                 move_uci=move_uci,
                 ply_offset=ply_offset,
                 confidence=1.0,
-                evidence={"k": int(abs(mate_in))},
+                evidence={"k": int(abs(mate_in)), "king_square": _square_name(after.king(defender))},
             )
         )
     elif after.is_checkmate():
@@ -118,7 +112,7 @@ def detect_tactics(
                 move_uci=move_uci,
                 ply_offset=ply_offset,
                 confidence=1.0,
-                evidence={"k": 1},
+                evidence={"k": 1, "king_square": _square_name(after.king(defender))},
             )
         )
 

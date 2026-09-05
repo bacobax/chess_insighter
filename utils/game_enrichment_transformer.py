@@ -207,12 +207,21 @@ class GameEnrichmentTransformer:
     # Public API
     # -----------------------------------------------------------------
 
-    def transform_games(self, games: Iterable[dict[str, Any]]) -> list[EnrichedGame]:
+    def transform_games(
+        self,
+        games: Iterable[dict[str, Any]],
+        *,
+        progress_callback: Callable[[int, int, int, int], None] | None = None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> list[EnrichedGame]:
+        game_items = list(games)
         enriched_games: list[EnrichedGame] = []
         position_analysis_cache: dict[str, EnginePositionInfo] = {}
 
         with chess.engine.SimpleEngine.popen_uci(self.stockfish_path) as engine:
-            for game_data in games:
+            for game_index, game_data in enumerate(game_items, start=1):
+                if cancel_check:
+                    cancel_check()
                 if "pgn" not in game_data:
                     continue
 
@@ -221,6 +230,11 @@ class GameEnrichmentTransformer:
                         game_data=game_data,
                         engine=engine,
                         position_analysis_cache=position_analysis_cache,
+                        progress_callback=(
+                            (lambda ply, total_plies, gi=game_index: progress_callback(gi, len(game_items), ply, total_plies))
+                            if progress_callback else None
+                        ),
+                        cancel_check=cancel_check,
                     )
                 )
 
@@ -232,6 +246,8 @@ class GameEnrichmentTransformer:
         game_data: dict[str, Any],
         engine: chess.engine.SimpleEngine,
         position_analysis_cache: Optional[dict[str, EnginePositionInfo]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], None] | None = None,
     ) -> EnrichedGame:
         pgn_text = game_data["pgn"]
         game = chess.pgn.read_game(io.StringIO(pgn_text))
@@ -259,7 +275,10 @@ class GameEnrichmentTransformer:
             "black": self._initial_clock_seconds(game_data.get("time_control")),
         }
 
+        total_plies = sum(1 for _ in game.mainline())
         for ply, child_node in enumerate(game.mainline(), start=1):
+            if cancel_check:
+                cancel_check()
             move = child_node.move
             if move is None:
                 continue
@@ -424,6 +443,8 @@ class GameEnrichmentTransformer:
             )
 
             enriched_moves.append(enriched_move)
+            if progress_callback:
+                progress_callback(ply, total_plies)
 
             if clock_after is not None:
                 previous_clock_by_color[player_color] = clock_after

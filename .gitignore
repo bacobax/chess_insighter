@@ -16,3 +16,4 @@ run_all.sh
 # OS/editor noise
 .DS_Store
 .vscode/
+.env

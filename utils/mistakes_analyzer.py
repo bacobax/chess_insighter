@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 from typing import Any
 
@@ -12,7 +12,7 @@ from utils.game_enrichment_transformer import (
     EnrichedMove,
     default_cp_to_expected_points,
 )
-from utils.tactic_detector import TacticDetectorConfig, TacticTag, detect_tactics
+from utils.tactic_detector import PIECE_VALUES, TacticDetectorConfig, TacticTag, detect_tactics
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,7 @@ class PunishmentLineMove:
     retained_wp_loss: float | None
     stable_after_move: bool
     tactics: list[TacticTag] = field(default_factory=list)
+    mate_in: int | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,8 @@ class MistakeAnalysisItem:
     tactics: list[TacticTag] = field(default_factory=list)
     actual_tactics: list[TacticTag] = field(default_factory=list)
     user_rating: int = 1500
+    mate_before: int | None = None
+    mate_after: int | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +183,12 @@ def analyze_mistakes(
             if wp_after is None and user_eval_after is not None:
                 wp_after = default_cp_to_expected_points(user_eval_after, rating)
             original_wp_loss = wp_loss or 0.0
+            mate_before = _analyse_position_cached(
+                engine, chess.Board(move.fen_before), config, analysis_cache
+            ).mate_in
+            mate_after = _analyse_position_cached(
+                engine, chess.Board(move.fen_after), config, analysis_cache
+            ).mate_in
 
             best_line_moves, stability_reached, punishment_difficulty = _build_best_line(
                 engine=engine,
@@ -249,6 +258,8 @@ def analyze_mistakes(
                     tactics=theoretical_tactics,
                     actual_tactics=actual.tactics,
                     user_rating=rating,
+                    mate_before=mate_before,
+                    mate_after=mate_after,
                 )
             )
 
@@ -368,6 +379,7 @@ def _build_best_line(
                 retained_wp_loss=retained_loss,
                 stable_after_move=stable_after_move,
                 tactics=tactics,
+                mate_in=post_info.mate_in,
             )
         )
 
@@ -375,7 +387,11 @@ def _build_best_line(
             stability_reached = True
             break
 
-    return line, stability_reached, min(1.0, punishment_difficulty)
+    return (
+        _annotate_line_tactics(line, opponent_color),
+        stability_reached,
+        min(1.0, punishment_difficulty),
+    )
 
 
 def _evaluate_actual_punishment(
@@ -401,8 +417,8 @@ def _evaluate_actual_punishment(
             actual_move_uci=None,
         )
 
-    tactics: list[TacticTag] = []
     actual_line_moves: list[PunishmentLineMove] = []
+    accepted_tactic_plies: set[int] = set()
     preserved_opponent_moves = 0
     punishment_requirement_satisfied = False
     tactic_config = TacticDetectorConfig(min_engine_gain_cp=config.tactic_min_engine_gain_cp)
@@ -414,6 +430,11 @@ def _evaluate_actual_punishment(
         board = chess.Board(actual_move.fen_before)
         move = chess.Move.from_uci(actual_move.uci)
         if move not in board.legal_moves:
+            actual_line_moves, accepted_tactics = _finalize_actual_tactics(
+                actual_line_moves,
+                opponent_color,
+                accepted_tactic_plies,
+            )
             return ActualPunishment(
                 actual_punished=False,
                 actual_punishing_moves_played=preserved_opponent_moves,
@@ -421,7 +442,7 @@ def _evaluate_actual_punishment(
                 best_move_uci=None,
                 actual_move_uci=actual_move.uci,
                 actual_line_moves=actual_line_moves,
-                tactics=tactics,
+                tactics=accepted_tactics,
             )
 
         info = _analyse_position_cached(engine, board, config, analysis_cache)
@@ -443,7 +464,6 @@ def _evaluate_actual_punishment(
             and actual_user_eval is not None
             and actual_user_eval <= best_user_eval + config.actual_eval_tolerance_cp
         )
-        is_pv_for_tactics = exact_top or within_eval_tolerance
         engine_gain_cp = _engine_gain_against_user(
             before_user_eval=_orient_cp(info.eval_cp, target_color),
             after_user_eval=actual_user_eval,
@@ -454,7 +474,10 @@ def _evaluate_actual_punishment(
             ply_offset=ply_offset,
             engine_gain_cp=engine_gain_cp,
             mate_in=info.mate_in if exact_top else None,
-            is_pv_move=is_pv_for_tactics,
+            # The actual continuation itself supplies the execution proof. Keep
+            # geometric candidates even for a non-top move, then validate them
+            # against the whole line below.
+            is_pv_move=True,
             config=tactic_config,
         )
         actual_line_moves.append(
@@ -478,6 +501,7 @@ def _evaluate_actual_punishment(
                     config=config,
                 ),
                 tactics=move_tactics,
+                mate_in=post_info.mate_in,
             )
         )
 
@@ -491,6 +515,11 @@ def _evaluate_actual_punishment(
         if not (exact_top or within_eval_tolerance or retains_loss):
             if punishment_requirement_satisfied:
                 break
+            actual_line_moves, accepted_tactics = _finalize_actual_tactics(
+                actual_line_moves,
+                opponent_color,
+                accepted_tactic_plies,
+            )
             return ActualPunishment(
                 actual_punished=False,
                 actual_punishing_moves_played=preserved_opponent_moves,
@@ -498,14 +527,19 @@ def _evaluate_actual_punishment(
                 best_move_uci=info.best_move_uci,
                 actual_move_uci=actual_move.uci,
                 actual_line_moves=actual_line_moves,
-                tactics=tactics,
+                tactics=accepted_tactics,
             )
 
         preserved_opponent_moves += 1
-        tactics.extend(move_tactics)
+        accepted_tactic_plies.add(ply_offset)
         if preserved_opponent_moves >= required_opponent_moves:
             punishment_requirement_satisfied = True
 
+    actual_line_moves, accepted_tactics = _finalize_actual_tactics(
+        actual_line_moves,
+        opponent_color,
+        accepted_tactic_plies,
+    )
     return ActualPunishment(
         actual_punished=punishment_requirement_satisfied,
         actual_punishing_moves_played=preserved_opponent_moves,
@@ -513,8 +547,373 @@ def _evaluate_actual_punishment(
         best_move_uci=None,
         actual_move_uci=None,
         actual_line_moves=actual_line_moves,
-        tactics=tactics,
+        tactics=accepted_tactics,
     )
+
+
+_IMMEDIATE_TACTIC_THEMES = {
+    "double_check",
+    "discovered_check",
+    "checkmate_in_k",
+}
+_MATERIAL_TACTIC_THEMES = {"fork", "absolute_pin", "skewer"}
+
+
+def _annotate_line_tactics(
+    line: list[PunishmentLineMove],
+    opponent_color: str,
+) -> list[PunishmentLineMove]:
+    """Validate tactic candidates against a complete visible continuation.
+
+    ``detect_tactics`` remains the single-position detector used by the offline
+    label builder. Mistake analysis deliberately treats its material motifs as
+    candidates, emits them on the setup move only after a later payoff proves
+    them, and drops the legacy king-attraction motif. A checking fork is already
+    forcing: the king must answer the check while the second target remains
+    attacked, so it does not depend on the payoff fitting in the visible line.
+    """
+    if not line:
+        return []
+
+    opponent = chess.WHITE if opponent_color == "white" else chess.BLACK
+    tags_by_index: list[list[TacticTag]] = [[] for _ in line]
+
+    for index, step in enumerate(line):
+        if step.side_to_move != opponent_color:
+            continue
+        tags_by_index[index].extend(
+            tag for tag in step.tactics if tag.theme in _IMMEDIATE_TACTIC_THEMES
+        )
+
+    for payoff_index, payoff_step in enumerate(line):
+        if payoff_step.side_to_move != opponent_color:
+            continue
+        payoff_board = chess.Board(payoff_step.fen_before)
+        payoff_move = _line_move(payoff_board, payoff_step.move_uci)
+        if payoff_move is None or not payoff_board.is_capture(payoff_move):
+            continue
+        captured_square = _captured_square(payoff_board, payoff_move)
+        captured_piece = payoff_board.piece_at(captured_square)
+        if captured_piece is None or captured_piece.color == opponent:
+            continue
+
+        for theme in _MATERIAL_TACTIC_THEMES:
+            for setup_index in range(payoff_index - 1, -1, -1):
+                setup_step = line[setup_index]
+                if setup_step.side_to_move != opponent_color:
+                    continue
+                candidate = next(
+                    (tag for tag in setup_step.tactics if tag.theme == theme),
+                    None,
+                )
+                if candidate is None or not _candidate_matches_payoff(
+                    candidate,
+                    line,
+                    setup_index,
+                    payoff_index,
+                    captured_square,
+                ):
+                    continue
+                if not _profitable_material_window(
+                    line,
+                    setup_index,
+                    payoff_index,
+                    opponent,
+                ):
+                    continue
+                tags_by_index[setup_index].append(
+                    _validated_material_tag(
+                        candidate,
+                        setup_step,
+                        payoff_step,
+                        captured_square,
+                        captured_piece,
+                    )
+                )
+                break
+
+        deflection = _defender_deflection_tag(
+            line,
+            payoff_index,
+            captured_square,
+            captured_piece,
+            opponent,
+        )
+        if deflection is not None:
+            setup_index, tag = deflection
+            tags_by_index[setup_index].append(tag)
+
+    annotated: list[PunishmentLineMove] = []
+    for step, tags in zip(line, tags_by_index):
+        if not any(tag.theme == "fork" for tag in tags):
+            tags.extend(
+                tag for tag in step.tactics if _is_checking_fork_candidate(tag)
+            )
+        tags = [
+            tag for tag in _dedupe_line_tags(tags) if tag.theme != "check"
+        ]
+        annotated.append(replace(step, tactics=tags))
+    return annotated
+
+
+def _is_checking_fork_candidate(tag: TacticTag) -> bool:
+    if tag.theme != "fork":
+        return False
+    targets = tag.evidence.get("targets", [])
+    if not isinstance(targets, list):
+        return False
+    pieces = {
+        str(target.get("piece"))
+        for target in targets
+        if isinstance(target, dict)
+    }
+    return "king" in pieces and any(piece != "king" for piece in pieces)
+
+
+def _finalize_actual_tactics(
+    line: list[PunishmentLineMove],
+    opponent_color: str,
+    accepted_plies: set[int],
+) -> tuple[list[PunishmentLineMove], list[TacticTag]]:
+    annotated = _annotate_line_tactics(line, opponent_color)
+    accepted = [
+        tag
+        for step in annotated
+        if step.side_to_move == opponent_color and step.ply_offset in accepted_plies
+        for tag in step.tactics
+        if tag.evidence.get("payoff_ply_offset") in {None, *accepted_plies}
+    ]
+    return annotated, accepted
+
+
+def _line_move(board: chess.Board, move_uci: str) -> chess.Move | None:
+    try:
+        move = chess.Move.from_uci(move_uci)
+    except ValueError:
+        return None
+    return move if move in board.legal_moves else None
+
+
+def _captured_square(board: chess.Board, move: chess.Move) -> chess.Square:
+    if board.is_en_passant(move):
+        return chess.square(chess.square_file(move.to_square), chess.square_rank(move.from_square))
+    return move.to_square
+
+
+def _candidate_matches_payoff(
+    candidate: TacticTag,
+    line: list[PunishmentLineMove],
+    setup_index: int,
+    payoff_index: int,
+    captured_square: chess.Square,
+) -> bool:
+    captured_name = chess.square_name(captured_square)
+    if candidate.theme == "fork":
+        target_names = {
+            str(target.get("square"))
+            for target in candidate.evidence.get("targets", [])
+            if isinstance(target, dict)
+        }
+        return captured_name in target_names
+    if candidate.theme == "absolute_pin":
+        return captured_name == candidate.evidence.get("pinned_square")
+    if candidate.theme == "skewer":
+        if captured_name != candidate.evidence.get("rear_square"):
+            return False
+        front_name = candidate.evidence.get("front_square")
+        if not isinstance(front_name, str):
+            return False
+        front_square = chess.parse_square(front_name)
+        setup_board = chess.Board(line[setup_index].fen_after)
+        payoff_board = chess.Board(line[payoff_index].fen_before)
+        return setup_board.piece_at(front_square) != payoff_board.piece_at(front_square)
+    return False
+
+
+def _validated_material_tag(
+    candidate: TacticTag,
+    setup_step: PunishmentLineMove,
+    payoff_step: PunishmentLineMove,
+    captured_square: chess.Square,
+    captured_piece: chess.Piece,
+) -> TacticTag:
+    return TacticTag(
+        theme=candidate.theme,
+        move_uci=setup_step.move_uci,
+        ply_offset=setup_step.ply_offset,
+        confidence=candidate.confidence,
+        evidence={
+            **candidate.evidence,
+            "setup_move_uci": setup_step.move_uci,
+            "setup_ply_offset": setup_step.ply_offset,
+            "payoff_move_uci": payoff_step.move_uci,
+            "payoff_ply_offset": payoff_step.ply_offset,
+            "payoff_square": chess.square_name(captured_square),
+            "payoff_piece": chess.piece_name(captured_piece.piece_type),
+        },
+    )
+
+
+def _profitable_material_window(
+    line: list[PunishmentLineMove],
+    setup_index: int,
+    payoff_index: int,
+    opponent: chess.Color,
+) -> bool:
+    payoff_after = chess.Board(line[payoff_index].fen_after)
+    if payoff_after.is_checkmate():
+        return False
+    if payoff_index + 1 < len(line):
+        reply = line[payoff_index + 1]
+        if reply.side_to_move == _color_name(opponent):
+            return False
+        end_board = chess.Board(reply.fen_after)
+    elif payoff_after.is_game_over():
+        end_board = payoff_after
+    else:
+        return False
+
+    start_board = chess.Board(line[setup_index].fen_before)
+    return _material_balance(end_board, opponent) > _material_balance(start_board, opponent)
+
+
+def _material_balance(board: chess.Board, color: chess.Color) -> int:
+    own = sum(
+        len(board.pieces(piece_type, color)) * value
+        for piece_type, value in PIECE_VALUES.items()
+        if piece_type != chess.KING
+    )
+    theirs = sum(
+        len(board.pieces(piece_type, not color)) * value
+        for piece_type, value in PIECE_VALUES.items()
+        if piece_type != chess.KING
+    )
+    return own - theirs
+
+
+def _defender_deflection_tag(
+    line: list[PunishmentLineMove],
+    payoff_index: int,
+    captured_square: chess.Square,
+    captured_piece: chess.Piece,
+    opponent: chess.Color,
+) -> tuple[int, TacticTag] | None:
+    defender_color = not opponent
+    for setup_index in range(payoff_index - 1, -1, -1):
+        setup_step = line[setup_index]
+        if setup_step.side_to_move != _color_name(opponent):
+            continue
+        setup_before = chess.Board(setup_step.fen_before)
+        original_target = setup_before.piece_at(captured_square)
+        if original_target != captured_piece or original_target.color != defender_color:
+            continue
+        setup_move = _line_move(setup_before, setup_step.move_uci)
+        if setup_move is None:
+            continue
+        setup_after = chess.Board(setup_step.fen_after)
+
+        for defender_square in setup_before.attackers(defender_color, captured_square):
+            if defender_square == captured_square:
+                continue
+            defender_piece = setup_before.piece_at(defender_square)
+            if defender_piece is None:
+                continue
+            removal = _defender_removal_kind(
+                line,
+                setup_index,
+                setup_before,
+                setup_after,
+                setup_move,
+                defender_square,
+                defender_piece,
+                captured_square,
+                opponent,
+            )
+            if removal is None or not _profitable_material_window(
+                line,
+                setup_index,
+                payoff_index,
+                opponent,
+            ):
+                continue
+            payoff_step = line[payoff_index]
+            return (
+                setup_index,
+                TacticTag(
+                    theme="defender_deflection",
+                    move_uci=setup_step.move_uci,
+                    ply_offset=setup_step.ply_offset,
+                    confidence=0.85,
+                    evidence={
+                        "setup_move_uci": setup_step.move_uci,
+                        "setup_ply_offset": setup_step.ply_offset,
+                        "payoff_move_uci": payoff_step.move_uci,
+                        "payoff_ply_offset": payoff_step.ply_offset,
+                        "defender_square": chess.square_name(defender_square),
+                        "defender_piece": chess.piece_name(defender_piece.piece_type),
+                        "target_square": chess.square_name(captured_square),
+                        "target_piece": chess.piece_name(captured_piece.piece_type),
+                        "removal": removal,
+                    },
+                ),
+            )
+    return None
+
+
+def _defender_removal_kind(
+    line: list[PunishmentLineMove],
+    setup_index: int,
+    setup_before: chess.Board,
+    setup_after: chess.Board,
+    setup_move: chess.Move,
+    defender_square: chess.Square,
+    defender_piece: chess.Piece,
+    target_square: chess.Square,
+    opponent: chess.Color,
+) -> str | None:
+    if setup_before.is_capture(setup_move) and _captured_square(setup_before, setup_move) == defender_square:
+        return "captured"
+    if setup_index + 1 >= len(line):
+        return None
+    response_step = line[setup_index + 1]
+    if response_step.side_to_move == _color_name(opponent):
+        return None
+    response_before = chess.Board(response_step.fen_before)
+    response_move = _line_move(response_before, response_step.move_uci)
+    if response_move is None:
+        return None
+    response_after = chess.Board(response_step.fen_after)
+    moved_defender = response_move.from_square == defender_square
+    still_defends = (
+        moved_defender
+        and response_move.to_square
+        in response_after.attackers(not opponent, target_square)
+    )
+    if not moved_defender or still_defends:
+        return None
+
+    lured = (
+        response_move.to_square == setup_move.to_square
+        and response_before.is_capture(response_move)
+    )
+    if lured:
+        return "lured"
+    if defender_piece.piece_type == chess.KING and setup_after.is_check():
+        return "checked_away"
+    if setup_after.is_attacked_by(opponent, defender_square):
+        return "attacked_away"
+    return None
+
+
+def _dedupe_line_tags(tags: list[TacticTag]) -> list[TacticTag]:
+    seen: set[str] = set()
+    result: list[TacticTag] = []
+    for tag in tags:
+        if tag.theme in seen or tag.theme == "king_attraction":
+            continue
+        seen.add(tag.theme)
+        result.append(tag)
+    return result
 
 
 def _analyse_position_cached(
@@ -547,6 +946,7 @@ def _analyse_position(
             top_move_gap_cp=0,
             eval_volatility_cp=0.0,
             legal_move_count=legal_count,
+            mate_in=0 if board.is_checkmate() else None,
         )
 
     raw = engine.analyse(
@@ -892,10 +1292,12 @@ def _build_line_from_pv(
                 retained_wp_loss=None,
                 stable_after_move=volatility_stable and top_gap_stable,
                 tactics=tactics,
+                mate_in=post_info.mate_in,
             )
         )
 
-    return line
+    opponent_color = "black" if player_color == "white" else "white"
+    return _annotate_line_tactics(line, opponent_color)
 
 
 def analyse_position_lines(
