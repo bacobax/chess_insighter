@@ -52,8 +52,11 @@ The repo is split into a Python backend and a React frontend; they communicate o
 FastAPI app serving endpoints under `/api/`. The request/response surface is fully defined in Pydantic models (`backend/models.py`). Services live in `backend/services/` and are called from route handlers in `backend/main.py` via `run_in_threadpool` (all computation is CPU-bound and synchronous).
 
 Key conventions:
-- Settings (paths, CORS regex, Stockfish path) are in `backend/settings.py` as a frozen `Settings` dataclass, importable everywhere as `settings`.
-- Report data is cached to `.cache/reports/<hash>.json`; the hash is a deterministic digest of request parameters.
+- Settings (dataset paths, MongoDB URI, CORS regex, Stockfish path) are in `backend/settings.py` as a frozen `Settings` dataclass, importable everywhere as `settings`.
+- **All app persistence is in MongoDB Atlas** (`MONGODB_URI` + `MONGODB_DB` in `.env`, never committed). Structured state (users, sessions, reports, …) uses regular collections; large payloads go through the zlib-compressed JSON blob store in `mongo_service.py` (`artifacts` collection, keyed by `namespace` + `key`).
+- Report data is cached under blob namespace `reports`, keyed by a deterministic digest of request parameters.
+- Tests never touch Atlas: the autouse `mongo_db` fixture in `conftest.py` swaps in a fresh `mongomock` database per test via `mongo_service.use_database`.
+- `.cache/` is no longer read by the backend. Only offline build checkpoints (`.cache/opening_popularity*` from `build_opening_popularity.py`) still live there; `migrate_cache_to_mongo.py` is the idempotent one-off importer for legacy `.cache/` state.
 - Opening feature rows are loaded once and cached in memory with `@lru_cache(maxsize=1)` in `backend/services/openings_service.py`.
 
 #### API endpoints (`backend/main.py`)
@@ -69,8 +72,7 @@ Key conventions:
 | `/api/mistakes/position` | POST | `mistakes_service.analyse_position` |
 | `/api/openings/matches` | POST | `openings_service.top_opening_matches` |
 | `/api/opening-study-tree/children` | POST | `opening_study_service.opening_study_tree_children` |
-| `/api/reports/saved` | GET/POST | `saved_reports_service` |
-| `/api/reports/saved/{hash}` | DELETE | `saved_reports_service` |
+| `/api/reports/{id}` (+ `/save`, PATCH, DELETE) | GET/POST/PATCH/DELETE | `report_repository.ReportsRepository` |
 | `/api/training-plans/builds` | POST (+ `GET /{id}`, `POST /{id}/cancel`, WS `/{id}/status`) | `training_plan_service.run_training_plan_job` |
 | `/api/players/{username}/training-plan` | GET | `training_plan_service.TrainingPlanStore` |
 | `/api/players/{username}/training-plan/cards/{card_id}/review` | POST | `TrainingPlanStore.review` |
@@ -79,7 +81,7 @@ Key conventions:
 
 **`cache_service.py`** — deterministic caching
 - Keywords: `stable_hash`, `report_cache_key`, `ReportCache`, `update_player_vector_cache`, `dataset_identity`
-- Caches reports to `.cache/reports/<hash>.json`; player vectors to `.cache/player_vectors.json`
+- `ReportCache` stores reports in blob namespace `reports`; `MongoPlayerVectorCache` stores player vectors in namespace `player_vectors`
 
 **`chesscom_service.py`** — Chess.com API client
 - Keywords: `query_games`, `fetch_latest_games_for_report`, `summarize_game`, `validate_username`, `UnknownChessComUser`, `ChessComServiceError`, `normalize_result`, `pgn_opening`
@@ -105,13 +107,17 @@ Key conventions:
 - Keywords: `opening_feature_rows`, `top_opening_matches`, `weighted_cosine_similarity`, `unweighted_cosine_similarity`, `weighted_dot_product_similarity`, `structure_distribution_similarity`, `build_opening_charts`, `top_opening_features`, `favourite_openings`, `find_opening_family_row`, `uci_to_fen`
 - Loads `openings_dataset/opening_feature_vectors.csv` once via `@lru_cache(maxsize=1)`
 
-**`saved_reports_service.py`** — saved report persistence
-- Keywords: `SavedReportsIndex`, `save_report_entry`, `_now_iso`
-- Stores a JSON index in `.cache/saved_reports.json`
+**`mongo_service.py`** — MongoDB Atlas access
+- Keywords: `get_database`, `use_database`, `blob_put`, `blob_get`, `blob_exists`, `blob_delete_prefix`, `BLOBS`
+- Lazily creates one `MongoClient` and ensures indexes; blob helpers store zlib-compressed JSON
+
+**`auth_service.py` / `report_repository.py`** — users, email verifications, sessions, reports, target players and audit events as native MongoDB collections (`_id` = record `id`; reads project out `_id`)
+
+**`report_analysis_service.py`** — `ReportAnalysisStore` keeps per-game raw/enriched/analysis sidecars as `BlobRef`s (path-like keys `<hash>/raw/<id>.json`) in namespace `report_analysis` (or `training_analysis`)
 
 **`training_plan_service.py`** — training plan builds (no report needed)
 - Keywords: `build_training_plan_for_player`, `run_training_plan_job`, `TrainingPlanStore`, `is_standard_game`
-- Fetches the last N standard games, enriches + runs `analyze_mistakes` per game (cached under `.cache/training_analysis/`), then calls `utils/training_plan.build_training_plan`; latest plan per account+player stored in `.cache/training_plans/`
+- Fetches the last N standard games, enriches + runs `analyze_mistakes` per game (cached in blob namespace `training_analysis`), then calls `utils/training_plan.build_training_plan`; latest plan per account+player stored in blob namespace `training_plans`
 
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`
@@ -159,7 +165,7 @@ All heavy computation lives here, independent of FastAPI.
 **`player_feature_transformer.py`** — aggregates enriched games into a player vector
 - Keywords: `PlayerProfile`, player vector aggregation
 
-**`player_vector_cache.py`** — `.cache/player_vectors.json` load/store keyed by content hash
+**`player_vector_cache.py`** — JSON-file player vector cache keyed by content hash (CLI use; the backend uses `MongoPlayerVectorCache`)
 
 **`player_statistics.py`** — statistics bundle types
 - Keywords: `PlayerStatisticsBundle`, `PlayerStatisticsBuilder`

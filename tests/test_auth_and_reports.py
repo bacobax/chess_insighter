@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -9,44 +8,42 @@ from fastapi.testclient import TestClient
 from backend import main as api_main
 from backend.models import ReportBuildRequest
 from backend.services.auth_service import AuthRepository, InvalidSession, InvalidVerification
-from backend.services.database_service import DatabaseCorruptionError, JsonDatabase
 from backend.services.report_repository import ReportNotFound, ReportsRepository
 from backend.services.report_build_job_service import BuildJobNotFound, InMemoryReportBuildJobStore
 from backend.settings import settings
 
 
-def test_json_database_is_versioned_atomic_and_fails_closed(tmp_path):
-    path = tmp_path / "app_db.json"
-    database = JsonDatabase(path)
-    database.transaction(lambda data: data["audit_events"].append({"id": "one"}))
+def test_mongo_blob_store_roundtrips_compressed_json(mongo_db):
+    from backend.services import mongo_service
 
-    stored = json.loads(path.read_text(encoding="utf-8"))
-    assert stored["schema_version"] == 1
-    assert stored["audit_events"] == [{"id": "one"}]
-    assert not list(tmp_path.glob("*.tmp"))
+    payload = {"games": [{"ply": 1, "eval": None}], "nested": {"1": 2.5}}
+    mongo_service.blob_put("reports", "abc", payload)
+    assert mongo_service.blob_get("reports", "abc") == payload
+    stored = mongo_db["artifacts"].find_one({"_id": "reports:abc"})
+    assert isinstance(stored["data"], bytes)
+    mongo_service.blob_put("report_analysis", "abc/raw/1.json", {"a": 1})
+    mongo_service.blob_put("report_analysis", "abcd/raw/1.json", {"a": 2})
+    assert mongo_service.blob_delete_prefix("report_analysis", "abc/") == 1
+    assert mongo_service.blob_exists("report_analysis", "abcd/raw/1.json")
 
-    path.write_text("not json", encoding="utf-8")
-    with pytest.raises(DatabaseCorruptionError):
-        database.read()
 
-
-def test_registration_verification_login_and_revocable_jwt(tmp_path):
-    repository = AuthRepository(JsonDatabase(tmp_path / "app_db.json"))
+def test_registration_verification_login_and_revocable_jwt():
+    repository = AuthRepository()
     registration, verification_token, _email = repository.prepare_registration(
         "Member@Example.com",
         "correct horse battery staple",
     )
 
     assert repository.registration_status(registration.registration_id, registration.socket_token) == "pending"
-    stored = repository.database.read()
-    assert stored["users"][0]["email"] == "member@example.com"
-    assert stored["users"][0]["password_hash"] != "correct horse battery staple"
-    assert stored["email_verifications"][0]["token_digest"] != verification_token
+    stored_user = repository.db.users.find_one({})
+    assert stored_user["email"] == "member@example.com"
+    assert stored_user["password_hash"] != "correct horse battery staple"
+    assert repository.db.email_verifications.find_one({})["token_digest"] != verification_token
 
     verified = repository.verify_email(verification_token)
     assert verified.email == "member@example.com"
     assert repository.verify_email(verification_token).id == verified.id
-    assert [event["kind"] for event in repository.database.read()["audit_events"]].count("auth.email_verified") == 1
+    assert repository.db.audit_events.count_documents({"kind": "auth.email_verified"}) == 1
     assert repository.registration_status(registration.registration_id, registration.socket_token) == "verified"
 
     user, _stored = repository.authenticate("member@example.com", "correct horse battery staple")
@@ -62,8 +59,8 @@ def test_registration_verification_login_and_revocable_jwt(tmp_path):
         repository.resolve_session(encoded)
 
 
-def test_superseded_pending_verification_never_activates(tmp_path):
-    repository = AuthRepository(JsonDatabase(tmp_path / "app_db.json"))
+def test_superseded_pending_verification_never_activates():
+    repository = AuthRepository()
     first, first_token, _ = repository.prepare_registration("member@example.com", "correct horse battery staple")
     second, second_token, _ = repository.prepare_registration("member@example.com", "a different secure password")
 
@@ -113,15 +110,14 @@ def test_ephemeral_build_jobs_are_owner_bound_monotonic_and_cancellable():
     assert store.snapshot(job).stage == "cancelling"
 
 
-def test_reports_are_owner_bound_grouped_and_manually_saved(tmp_path):
-    database = JsonDatabase(tmp_path / "app_db.json")
-    auth = AuthRepository(database)
+def test_reports_are_owner_bound_grouped_and_manually_saved():
+    auth = AuthRepository()
     registration, token, _email = auth.prepare_registration("one@example.com", "correct horse battery staple")
     owner = auth.verify_email(token)
     registration_two, token_two, _email_two = auth.prepare_registration("two@example.com", "correct horse battery staple")
     other = auth.verify_email(token_two)
     cache = FakeArtifactCache()
-    reports = ReportsRepository(database, cache)  # type: ignore[arg-type]
+    reports = ReportsRepository(cache=cache)  # type: ignore[arg-type]
     response = SimpleNamespace(cache_hash="hash-one", report=SimpleNamespace(metadata={"games_selected": 20}))
 
     first = reports.record_build(owner_id=owner.id, request=report_request("Hikaru"), response=response)
@@ -143,9 +139,7 @@ def test_reports_are_owner_bound_grouped_and_manually_saved(tmp_path):
     assert cache.deleted == ["hash-one"]
 
 
-def test_auth_http_cookie_csrf_and_verified_websocket(monkeypatch, tmp_path):
-    previous_path = settings.app_database_path
-    object.__setattr__(settings, "app_database_path", tmp_path / "app_db.json")
+def test_auth_http_cookie_csrf_and_verified_websocket(monkeypatch):
     sent: dict[str, str] = {}
 
     async def fake_send(*, recipient: str, token: str):
@@ -191,4 +185,3 @@ def test_auth_http_cookie_csrf_and_verified_websocket(monkeypatch, tmp_path):
         assert client.get("/api/auth/me").status_code == 401
     finally:
         client.close()
-        object.__setattr__(settings, "app_database_path", previous_path)

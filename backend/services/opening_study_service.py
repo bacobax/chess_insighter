@@ -6,12 +6,13 @@ from typing import Any
 import chess.engine
 
 from backend.models import OpeningStudyTreeChildrenRequest
-from backend.services.cache_service import ReportCache
+from backend.services.cache_service import MongoPlayerVectorCache, ReportCache
 from backend.settings import settings
 from utils.opening_study_tree import (
     PlayerVectorFeatureMismatch,
     get_opening_study_tree_children,
     load_player_vector_from_cache,
+    select_player_vector,
 )
 
 def _resolve_opening_vectors_path(request: OpeningStudyTreeChildrenRequest) -> str:
@@ -28,7 +29,7 @@ def _resolve_player_vector(request: OpeningStudyTreeChildrenRequest) -> tuple[di
     1. cache_hash — load from the report cache produced by /api/report/build.
        This is the correct path: the vector was computed from the specific games
        and filters the user configured (time class, rated, date range, etc.).
-    2. username — fall back to the flat player_vectors.json cache. Fast, but
+    2. username — fall back to the flat player-vector cache (MongoDB). Fast, but
        ignores game filters; uses whichever computation happened to be cached
        most recently for that username.
     """
@@ -49,9 +50,11 @@ def _resolve_player_vector(request: OpeningStudyTreeChildrenRequest) -> tuple[di
             )
         return {str(k): float(v) for k, v in vector.items() if v is not None}, f"report:{request.cache_hash[:12]}"
 
-    # Flat-cache fallback.
-    cache_path = request.player_vector_cache_path or str(settings.player_vector_cache_path)
-    vector = load_player_vector_from_cache(cache_path, request.username)
+    # Flat-cache fallback: an explicit JSON file path wins, otherwise the MongoDB player-vector cache.
+    if request.player_vector_cache_path:
+        vector = load_player_vector_from_cache(request.player_vector_cache_path, request.username)
+    else:
+        vector = select_player_vector(MongoPlayerVectorCache().entries(), request.username)
     return vector, f"flat-cache:username={request.username}"
 
 

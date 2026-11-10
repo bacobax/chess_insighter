@@ -16,12 +16,14 @@ dependencies = [
     "PyJWT>=2.10.0",
     "resend[async]>=2.19.0",
     "python-dotenv>=1.0.1",
+    "pymongo>=4.18.3",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",  # required by fastapi.testclient
+    "mongomock>=4.3.0",
 ]
 # Position style encoder training pipeline (train_encoder.py, run_sweep.py)
 ml = [

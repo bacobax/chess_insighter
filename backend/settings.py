@@ -18,14 +18,8 @@ class Settings:
     hparams_path: Path = ROOT_DIR / "config/global_statistics_hparams.yaml"
     openings_path: Path = ROOT_DIR / "openings_dataset/all.tsv"
     opening_vectors_path: Path = ROOT_DIR / "openings_dataset/opening_feature_vectors.csv"
-    report_cache_dir: Path = ROOT_DIR / ".cache/reports"
-    report_analysis_cache_dir: Path = ROOT_DIR / ".cache/report_analysis"
-    report_config_dir: Path = ROOT_DIR / ".cache/report_configs"
-    player_vector_cache_path: Path = ROOT_DIR / ".cache/player_vectors.json"
-    saved_reports_path: Path = ROOT_DIR / ".cache/saved_reports.json"
-    app_database_path: Path = ROOT_DIR / ".cache/app_db.json"
-    training_plan_dir: Path = ROOT_DIR / ".cache/training_plans"
-    training_analysis_cache_dir: Path = ROOT_DIR / ".cache/training_analysis"
+    mongodb_uri: str | None = os.environ.get("MONGODB_URI")
+    mongodb_db: str = os.environ.get("MONGODB_DB", "chess_insighter")
     cors_origin_regex: str = r"^http://(localhost|127\.0\.0\.1):\d+$"
     frontend_url: str = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
     auth_jwt_secret: str = os.environ.get("AUTH_JWT_SECRET", "development-only-change-me-before-deploying")

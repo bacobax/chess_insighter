@@ -4,6 +4,9 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
+from pymongo import ReturnDocument
+from pymongo.database import Database
+
 from backend.models import (
     DashboardPlayer,
     DashboardResponse,
@@ -13,7 +16,9 @@ from backend.models import (
 )
 from backend.services.auth_service import AuthRepository, iso, now_utc, parse_iso
 from backend.services.cache_service import ReportCache
-from backend.services.database_service import JsonDatabase
+from backend.services.mongo_service import get_database
+
+NO_ID = {"_id": 0}
 
 
 class ReportNotFound(FileNotFoundError):
@@ -65,8 +70,8 @@ def summary(record: dict[str, Any]) -> ReportSummary:
 
 
 class ReportsRepository:
-    def __init__(self, database: JsonDatabase | None = None, cache: ReportCache | None = None):
-        self.database = database or JsonDatabase()
+    def __init__(self, database: Database | None = None, cache: ReportCache | None = None):
+        self.db = database if database is not None else get_database()
         self.cache = cache or ReportCache()
 
     def record_build(
@@ -79,70 +84,49 @@ class ReportsRepository:
         current = now_utc()
         user_key = username_key(request.username)
         request_dump = request.model_dump()
-
-        def operation(data: dict[str, Any]) -> dict[str, Any]:
-            self._expire_drafts(data, current)
-            existing = next(
-                (
-                    item
-                    for item in data["reports"]
-                    if item["owner_id"] == owner_id and item["cache_hash"] == response.cache_hash
-                ),
-                None,
-            )
-            if existing is not None:
-                existing.update(
-                    username=request.username,
-                    username_key=user_key,
-                    generated_label=generated_report_label(request),
-                    request_params=request_dump,
-                    games_analyzed=games_analyzed(response),
-                    updated_at=iso(current),
-                )
-                return dict(existing)
-            record = {
-                "id": str(uuid4()),
-                "owner_id": owner_id,
-                "username": request.username,
-                "username_key": user_key,
-                "cache_hash": response.cache_hash,
-                "request_params": request_dump,
-                "generated_label": generated_report_label(request),
-                "title": None,
-                "games_analyzed": games_analyzed(response),
-                "status": "draft",
-                "created_at": iso(current),
-                "updated_at": iso(current),
-                "saved_at": None,
-                "draft_expires_at": iso(current + timedelta(hours=24)),
-            }
-            data["reports"].append(record)
-            return dict(record)
-
-        return self.database.transaction(operation)
+        self._expire_drafts(current)
+        refreshed = {
+            "username": request.username,
+            "username_key": user_key,
+            "generated_label": generated_report_label(request),
+            "request_params": request_dump,
+            "games_analyzed": games_analyzed(response),
+            "updated_at": iso(current),
+        }
+        report_id = str(uuid4())
+        record = self.db.reports.find_one_and_update(
+            {"owner_id": owner_id, "cache_hash": response.cache_hash},
+            {
+                "$set": refreshed,
+                "$setOnInsert": {
+                    "_id": report_id,
+                    "id": report_id,
+                    "owner_id": owner_id,
+                    "cache_hash": response.cache_hash,
+                    "title": None,
+                    "status": "draft",
+                    "created_at": iso(current),
+                    "saved_at": None,
+                    "draft_expires_at": iso(current + timedelta(hours=24)),
+                },
+            },
+            projection=NO_ID,
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return dict(record)
 
     def get_record(self, owner_id: str, report_id: str, *, saved_only: bool = False) -> dict[str, Any]:
-        data = self.database.read()
-        record = next(
-            (
-                item
-                for item in data["reports"]
-                if item["id"] == report_id
-                and item["owner_id"] == owner_id
-                and (not saved_only or item["status"] == "saved")
-            ),
-            None,
-        )
+        query: dict[str, Any] = {"_id": report_id, "owner_id": owner_id}
+        if saved_only:
+            query["status"] = "saved"
+        record = self.db.reports.find_one(query, NO_ID)
         if record is None:
             raise ReportNotFound("Report not found")
         return record
 
     def get_by_cache_hash(self, owner_id: str, cache_hash: str) -> dict[str, Any]:
-        data = self.database.read()
-        record = next(
-            (item for item in data["reports"] if item["owner_id"] == owner_id and item["cache_hash"] == cache_hash),
-            None,
-        )
+        record = self.db.reports.find_one({"owner_id": owner_id, "cache_hash": cache_hash}, NO_ID)
         if record is None:
             raise ReportNotFound("Report not found")
         return record
@@ -162,106 +146,82 @@ class ReportsRepository:
 
     def save(self, owner_id: str, report_id: str, title: str | None) -> ReportSummary:
         current = now_utc()
-
-        def operation(data: dict[str, Any]) -> ReportSummary:
-            record = next(
-                (item for item in data["reports"] if item["id"] == report_id and item["owner_id"] == owner_id),
-                None,
-            )
-            if record is None:
-                raise ReportNotFound("Report not found")
-            record.update(status="saved", title=title, saved_at=record.get("saved_at") or iso(current), updated_at=iso(current))
-            record["draft_expires_at"] = None
-            target = next(
-                (
-                    item
-                    for item in data["target_players"]
-                    if item["owner_id"] == owner_id and item["username_key"] == record["username_key"]
-                ),
-                None,
-            )
-            if target is None:
-                data["target_players"].append(
-                    {
-                        "id": str(uuid4()),
-                        "owner_id": owner_id,
-                        "username": record["username"],
-                        "username_key": record["username_key"],
-                        "created_at": iso(current),
-                        "updated_at": iso(current),
-                    }
-                )
-            else:
-                target.update(username=record["username"], updated_at=iso(current))
-            data["audit_events"].append(
-                {"id": str(uuid4()), "kind": "report.saved", "user_id": owner_id, "report_id": report_id, "created_at": iso(current)}
-            )
-            return summary(record)
-
-        return self.database.transaction(operation)
+        existing = self.get_record(owner_id, report_id)
+        record = self.db.reports.find_one_and_update(
+            {"_id": report_id, "owner_id": owner_id},
+            {
+                "$set": {
+                    "status": "saved",
+                    "title": title,
+                    "saved_at": existing.get("saved_at") or iso(current),
+                    "updated_at": iso(current),
+                    "draft_expires_at": None,
+                }
+            },
+            projection=NO_ID,
+            return_document=ReturnDocument.AFTER,
+        )
+        if record is None:
+            raise ReportNotFound("Report not found")
+        target_id = str(uuid4())
+        self.db.target_players.update_one(
+            {"owner_id": owner_id, "username_key": record["username_key"]},
+            {
+                "$set": {"username": record["username"], "updated_at": iso(current)},
+                "$setOnInsert": {
+                    "_id": target_id,
+                    "id": target_id,
+                    "owner_id": owner_id,
+                    "username_key": record["username_key"],
+                    "created_at": iso(current),
+                },
+            },
+            upsert=True,
+        )
+        self.db.audit_events.insert_one(
+            {
+                "_id": (event_id := str(uuid4())),
+                "id": event_id,
+                "kind": "report.saved",
+                "user_id": owner_id,
+                "report_id": report_id,
+                "created_at": iso(current),
+            }
+        )
+        return summary(record)
 
     def rename(self, owner_id: str, report_id: str, title: str | None) -> ReportSummary:
-        current = now_utc()
-
-        def operation(data: dict[str, Any]) -> ReportSummary:
-            record = next(
-                (
-                    item
-                    for item in data["reports"]
-                    if item["id"] == report_id and item["owner_id"] == owner_id and item["status"] == "saved"
-                ),
-                None,
-            )
-            if record is None:
-                raise ReportNotFound("Report not found")
-            record.update(title=title, updated_at=iso(current))
-            return summary(record)
-
-        return self.database.transaction(operation)
+        record = self.db.reports.find_one_and_update(
+            {"_id": report_id, "owner_id": owner_id, "status": "saved"},
+            {"$set": {"title": title, "updated_at": iso(now_utc())}},
+            projection=NO_ID,
+            return_document=ReturnDocument.AFTER,
+        )
+        if record is None:
+            raise ReportNotFound("Report not found")
+        return summary(record)
 
     def delete(self, owner_id: str, report_id: str) -> None:
-        cache_hash: str | None = None
-
-        def operation(data: dict[str, Any]) -> bool:
-            nonlocal cache_hash
-            record = next((item for item in data["reports"] if item["id"] == report_id and item["owner_id"] == owner_id), None)
-            if record is None:
-                raise ReportNotFound("Report not found")
-            cache_hash = record["cache_hash"]
-            data["reports"].remove(record)
-            has_player_reports = any(
-                item["owner_id"] == owner_id
-                and item["username_key"] == record["username_key"]
-                and item["status"] == "saved"
-                for item in data["reports"]
-            )
-            if not has_player_reports:
-                data["target_players"][:] = [
-                    item
-                    for item in data["target_players"]
-                    if not (item["owner_id"] == owner_id and item["username_key"] == record["username_key"])
-                ]
-            still_referenced = any(item["cache_hash"] == cache_hash for item in data["reports"])
-            return not still_referenced
-
-        purge_artifact = self.database.transaction(operation)
-        if purge_artifact and cache_hash:
+        record = self.db.reports.find_one_and_delete({"_id": report_id, "owner_id": owner_id}, projection=NO_ID)
+        if record is None:
+            raise ReportNotFound("Report not found")
+        has_player_reports = self.db.reports.count_documents(
+            {"owner_id": owner_id, "username_key": record["username_key"], "status": "saved"}, limit=1
+        )
+        if not has_player_reports:
+            self.db.target_players.delete_many({"owner_id": owner_id, "username_key": record["username_key"]})
+        cache_hash = record["cache_hash"]
+        if cache_hash and not self.db.reports.count_documents({"cache_hash": cache_hash}, limit=1):
             self.cache.delete(cache_hash)
 
     def list_player(self, owner_id: str, username: str) -> list[ReportSummary]:
-        key = username_key(username)
-        data = self.database.read()
-        rows = [
-            summary(item)
-            for item in data["reports"]
-            if item["owner_id"] == owner_id and item["username_key"] == key and item["status"] == "saved"
-        ]
-        return sorted(rows, key=lambda item: item.saved_at, reverse=True)
+        rows = self.db.reports.find(
+            {"owner_id": owner_id, "username_key": username_key(username), "status": "saved"}, NO_ID
+        )
+        return sorted((summary(item) for item in rows), key=lambda item: item.saved_at, reverse=True)
 
     def dashboard(self, owner_id: str) -> DashboardResponse:
-        database = self.database.read()
-        user = next(item for item in database["users"] if item["id"] == owner_id)
-        rows = [item for item in database["reports"] if item["owner_id"] == owner_id and item["status"] == "saved"]
+        rows = list(self.db.reports.find({"owner_id": owner_id, "status": "saved"}, NO_ID))
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             grouped.setdefault(row["username_key"], []).append(row)
@@ -279,19 +239,21 @@ class ReportsRepository:
         players.sort(key=lambda item: item.latest_report_at, reverse=True)
         latest = max((item["saved_at"] for item in rows), default=None)
         return DashboardResponse(
-            user=AuthRepository(self.database).resolve_user(owner_id),
+            user=AuthRepository(self.db).resolve_user(owner_id),
             report_count=len(rows),
             player_count=len(players),
             latest_activity_at=latest,
             players=players,
         )
 
-    @staticmethod
-    def _expire_drafts(data: dict[str, Any], current) -> None:
-        data["reports"][:] = [
-            item
-            for item in data["reports"]
-            if item["status"] == "saved"
-            or not item.get("draft_expires_at")
-            or parse_iso(item["draft_expires_at"]) > current
+    def _expire_drafts(self, current) -> None:
+        stale = [
+            item["_id"]
+            for item in self.db.reports.find(
+                {"status": {"$ne": "saved"}, "draft_expires_at": {"$nin": [None, ""]}},
+                {"_id": 1, "draft_expires_at": 1},
+            )
+            if parse_iso(item["draft_expires_at"]) <= current
         ]
+        if stale:
+            self.db.reports.delete_many({"_id": {"$in": stale}, "status": {"$ne": "saved"}})

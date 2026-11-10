@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.services.mongo_service import blob_delete, blob_get, blob_items, blob_put
 from backend.settings import settings
 from utils.player_vector_cache import CachedPlayerVector, PlayerVectorCache
 
@@ -57,25 +58,60 @@ def report_cache_key(
     }
 
 
+REPORTS_NAMESPACE = "reports"
+PLAYER_VECTORS_NAMESPACE = "player_vectors"
+
+
 class ReportCache:
-    def __init__(self, cache_dir: Path = settings.report_cache_dir):
-        self.cache_dir = cache_dir
+    """Full report payloads, keyed by the deterministic report cache hash."""
 
     def get(self, cache_hash: str) -> dict[str, Any] | None:
-        path = self.cache_dir / f"{cache_hash}.json"
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return blob_get(REPORTS_NAMESPACE, cache_hash)
 
     def set(self, cache_hash: str, payload: dict[str, Any]) -> None:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        path = self.cache_dir / f"{cache_hash}.json"
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        blob_put(REPORTS_NAMESPACE, cache_hash, payload)
 
     def delete(self, cache_hash: str) -> None:
-        path = self.cache_dir / f"{cache_hash}.json"
-        if path.exists():
-            path.unlink()
+        blob_delete(REPORTS_NAMESPACE, cache_hash)
+
+
+class MongoPlayerVectorCache(PlayerVectorCache):
+    """``PlayerVectorCache`` backed by MongoDB instead of ``player_vectors.json``."""
+
+    def __init__(self) -> None:
+        pass
+
+    def get(self, key: dict[str, Any]) -> CachedPlayerVector | None:
+        entry = blob_get(PLAYER_VECTORS_NAMESPACE, self.key_id(key))
+        if entry is None:
+            return None
+        return CachedPlayerVector(
+            vector=entry["vector"],
+            feature_order=list(entry["feature_order"]),
+            metadata=dict(entry.get("metadata", {})),
+            confidence=dict(entry.get("confidence", {})),
+            cache_key=dict(entry["cache_key"]),
+            created_at=str(entry["created_at"]),
+            cache_hit=True,
+        )
+
+    def set(self, value: CachedPlayerVector) -> None:
+        blob_put(
+            PLAYER_VECTORS_NAMESPACE,
+            self.key_id(value.cache_key),
+            {
+                "vector": value.vector,
+                "feature_order": value.feature_order,
+                "metadata": value.metadata,
+                "confidence": value.confidence,
+                "cache_key": value.cache_key,
+                "created_at": value.created_at,
+            },
+            username=str(value.cache_key.get("username") or "").strip().lower(),
+        )
+
+    def entries(self) -> dict[str, Any]:
+        return dict(blob_items(PLAYER_VECTORS_NAMESPACE))
 
 
 def update_player_vector_cache(
@@ -85,7 +121,6 @@ def update_player_vector_cache(
     confidence: dict[str, float],
     metadata: dict[str, Any],
 ) -> None:
-    cache = PlayerVectorCache(settings.player_vector_cache_path)
     value = CachedPlayerVector(
         vector=vector,
         feature_order=list(vector.keys()),
@@ -94,4 +129,4 @@ def update_player_vector_cache(
         cache_key=cache_key,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    cache.set(value)
+    MongoPlayerVectorCache().set(value)

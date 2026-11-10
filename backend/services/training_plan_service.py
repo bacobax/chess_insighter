@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import threading
 from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -12,9 +11,11 @@ import chess.pgn
 
 from backend.models import TrainingCardReviewRequest, TrainingPlanBuildRequest, TrainingPlanResponse
 from backend.services.cache_service import stable_hash
+from backend.services.mongo_service import blob_get, blob_put
 from backend.services.chesscom_service import fetch_latest_games_for_report
 from backend.services.openings_service import serializable
 from backend.services.report_analysis_service import (
+    TRAINING_ANALYSIS_NAMESPACE,
     ReportAnalysisStore,
     _atomic_write_json,
     _dataclass_payload,
@@ -39,6 +40,9 @@ class TrainingPlanCancelled(RuntimeError):
     pass
 
 
+TRAINING_PLANS_NAMESPACE = "training_plans"
+
+
 class TrainingPlanNotFound(FileNotFoundError):
     pass
 
@@ -50,17 +54,14 @@ def _now() -> str:
 class TrainingPlanStore:
     """Latest plan per (account, Chess.com player), with review state on its cards."""
 
-    def __init__(self, root: Path | None = None):
-        self.root = root or settings.training_plan_dir
-
-    def path(self, owner_id: str, username: str) -> Path:
-        return self.root / stable_hash({"owner": owner_id}) / f"{stable_hash({'username': username_key(username)})}.json"
+    def key(self, owner_id: str, username: str) -> str:
+        return f"{stable_hash({'owner': owner_id})}/{stable_hash({'username': username_key(username)})}"
 
     def get(self, owner_id: str, username: str) -> dict[str, Any]:
-        path = self.path(owner_id, username)
-        if not path.exists():
+        plan = blob_get(TRAINING_PLANS_NAMESPACE, self.key(owner_id, username))
+        if plan is None:
             raise TrainingPlanNotFound("No training plan has been built for this player yet.")
-        return _read_json(path)
+        return plan
 
     def find(self, owner_id: str, username: str) -> dict[str, Any] | None:
         try:
@@ -69,7 +70,13 @@ class TrainingPlanStore:
             return None
 
     def save(self, owner_id: str, username: str, plan: dict[str, Any]) -> None:
-        _atomic_write_json(self.path(owner_id, username), plan)
+        blob_put(
+            TRAINING_PLANS_NAMESPACE,
+            self.key(owner_id, username),
+            plan,
+            owner_id=owner_id,
+            username_key=username_key(username),
+        )
 
     def review(self, owner_id: str, username: str, card_id: str, request: TrainingCardReviewRequest) -> dict[str, Any]:
         with _LOCK:
@@ -148,7 +155,7 @@ def build_training_plan_for_player(
 
     analysis = ReportAnalysisStore(
         stable_hash({"training": username_key(request.username)}),
-        root=settings.training_analysis_cache_dir,
+        namespace=TRAINING_ANALYSIS_NAMESPACE,
     )
     config = MistakeAnalyzerConfig(engine_depth=request.engine_depth)
     transformer = GameEnrichmentTransformer(

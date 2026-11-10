@@ -542,7 +542,12 @@ def load_player_vector_from_cache(
         raise ValueError(f"Player vector cache is not valid JSON: {path}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"Unexpected player vector cache format: {path}")
+    return select_player_vector(data, username)
 
+
+def select_player_vector(entries: dict[str, Any], username: str | None) -> dict[str, float]:
+    """Pick the most recent vector for ``username`` from cache entries keyed by an opaque hash."""
+    data = entries
     candidates = []
     for entry in data.values():
         if not isinstance(entry, dict):

@@ -229,7 +229,7 @@ def test_save_report_rejects_missing_report_id(monkeypatch):
         api_main.save_report("missing", ReportTitleRequest(title=None), request)
 
 
-def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_path):
+def test_build_report_computes_once_and_returns_opening_groups(monkeypatch):
     calls = {"fetch": 0, "enrich": 0, "build": 0}
 
     class FakeCache:
@@ -311,23 +311,17 @@ def test_build_report_computes_once_and_returns_opening_groups(monkeypatch, tmp_
             sidecar_id="test-sidecar",
         ),
     )
-    previous_report_config_dir = settings.report_config_dir
-    object.__setattr__(settings, "report_config_dir", tmp_path)
-    try:
-        response = statistics_service.build_report(
-            ReportBuildRequest(username="Alice", hparams={}, max_games=1, use_engine=False)
-        )
-    finally:
-        object.__setattr__(settings, "report_config_dir", previous_report_config_dir)
+    response = statistics_service.build_report(
+        ReportBuildRequest(username="Alice", hparams={}, max_games=1, use_engine=False)
+    )
 
     assert calls == {"fetch": 1, "enrich": 1, "build": 1}
     assert set(response.report.charts.opening_report_groups) == {"white", "black", "both"}
     assert response.report.analysis_context is not None
 
 
-def test_report_mistakes_reuses_report_work_and_updates_incrementally(monkeypatch, tmp_path):
+def test_report_mistakes_reuses_report_work_and_updates_incrementally(monkeypatch):
     service_settings = SimpleNamespace(
-        report_analysis_cache_dir=tmp_path,
         stockfish_path="stockfish-test",
         openings_path=settings.openings_path,
     )
@@ -445,12 +439,11 @@ def test_report_mistakes_reuses_report_work_and_updates_incrementally(monkeypatc
     assert active.metadata["engine_depth"] == 12
 
 
-def test_report_mistakes_rejects_missing_and_duplicate_ids(monkeypatch, tmp_path):
+def test_report_mistakes_rejects_missing_and_duplicate_ids(monkeypatch):
     monkeypatch.setattr(
         report_analysis_service,
         "settings",
         SimpleNamespace(
-            report_analysis_cache_dir=tmp_path,
             stockfish_path="stockfish-test",
             openings_path=settings.openings_path,
         ),
@@ -474,12 +467,11 @@ def test_report_mistakes_rejects_missing_and_duplicate_ids(monkeypatch, tmp_path
         ReportMistakesSelectionRequest(selected_game_ids=["game-a", "game-a"])
 
 
-def test_report_mistakes_rejects_stale_active_analyzer_cache(monkeypatch, tmp_path):
+def test_report_mistakes_rejects_stale_active_analyzer_cache(monkeypatch):
     monkeypatch.setattr(
         report_analysis_service,
         "settings",
         SimpleNamespace(
-            report_analysis_cache_dir=tmp_path,
             stockfish_path="stockfish-test",
             openings_path=settings.openings_path,
         ),
@@ -509,11 +501,11 @@ def test_report_mistakes_rejects_stale_active_analyzer_cache(monkeypatch, tmp_pa
         report_analysis_service.get_active_report_mistakes("stale-report")
 
 
-def test_report_without_engine_requires_rebuild(monkeypatch, tmp_path):
+def test_report_without_engine_requires_rebuild(monkeypatch):
     monkeypatch.setattr(
         report_analysis_service,
         "settings",
-        SimpleNamespace(report_analysis_cache_dir=tmp_path, stockfish_path=None, openings_path=settings.openings_path),
+        SimpleNamespace(stockfish_path=None, openings_path=settings.openings_path),
     )
     report_analysis_service.initialize_report_analysis(
         cache_hash="fallback-report",
@@ -532,12 +524,11 @@ def test_report_without_engine_requires_rebuild(monkeypatch, tmp_path):
         )
 
 
-def test_report_mistake_id_is_stable_and_detail_is_directly_loadable(monkeypatch, tmp_path):
+def test_report_mistake_id_is_stable_and_detail_is_directly_loadable(monkeypatch):
     monkeypatch.setattr(
         report_analysis_service,
         "settings",
         SimpleNamespace(
-            report_analysis_cache_dir=tmp_path,
             stockfish_path="stockfish-test",
             openings_path=settings.openings_path,
         ),
@@ -593,12 +584,11 @@ def test_report_mistake_id_is_stable_and_detail_is_directly_loadable(monkeypatch
     assert detail.metadata["selected_game_ids"] == ["game-a"]
 
 
-def test_report_refresh_replaces_analysis_sidecar(monkeypatch, tmp_path):
+def test_report_refresh_replaces_analysis_sidecar(monkeypatch):
     monkeypatch.setattr(
         report_analysis_service,
         "settings",
         SimpleNamespace(
-            report_analysis_cache_dir=tmp_path,
             stockfish_path="stockfish-test",
             openings_path=settings.openings_path,
         ),

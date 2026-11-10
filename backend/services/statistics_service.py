@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from threading import Event
 from typing import Any, Callable
 
@@ -68,54 +69,50 @@ def build_report(
             emit("complete", 1.0, "Existing report ready")
             return ReportBuildResponse.model_validate(cached)
 
-    settings.report_config_dir.mkdir(parents=True, exist_ok=True)
-    hparams_path = settings.report_config_dir / f"{cache_hash}.yaml"
-    hparams_path.write_text(dump_simple_yaml(effective_hparams), encoding="utf-8")
+    emit("fetching_games", 0.06, "Fetching Chess.com games")
+    raw_games = fetch_latest_games_for_report(
+        username=request.username,
+        max_games=request.max_games,
+        time_classes=request.time_classes,
+        rated_filter=request.rated_filter,
+        since_year=request.since_year,
+        since_month=request.since_month,
+        until_year=request.until_year,
+        until_month=request.until_month,
+        progress_callback=lambda processed, total: emit(
+            "fetching_games",
+            0.06 + 0.09 * (processed / max(total, 1)),
+            f"Scanning Chess.com archive {processed} of {total}",
+            processed,
+            total,
+        ),
+        cancel_check=check_cancel,
+    )
+    emit("fetching_games", 0.15, f"Selected {len(raw_games)} games", len(raw_games), len(raw_games))
+    if not raw_games:
+        raise ValueError("No games found for the requested username and filters.")
 
-    try:
-        emit("fetching_games", 0.06, "Fetching Chess.com games")
-        raw_games = fetch_latest_games_for_report(
-            username=request.username,
-            max_games=request.max_games,
-            time_classes=request.time_classes,
-            rated_filter=request.rated_filter,
-            since_year=request.since_year,
-            since_month=request.since_month,
-            until_year=request.until_year,
-            until_month=request.until_month,
-            progress_callback=lambda processed, total: emit(
-                "fetching_games",
-                0.06 + 0.09 * (processed / max(total, 1)),
-                f"Scanning Chess.com archive {processed} of {total}",
-                processed,
-                total,
-            ),
-            cancel_check=check_cancel,
-        )
-        emit("fetching_games", 0.15, f"Selected {len(raw_games)} games", len(raw_games), len(raw_games))
-        if not raw_games:
-            raise ValueError("No games found for the requested username and filters.")
+    def enrichment_progress(game_index: int, game_total: int, ply: int, ply_total: int) -> None:
+        game_fraction = ((game_index - 1) + (ply / max(ply_total, 1))) / max(game_total, 1)
+        emit("enriching_games", 0.15 + 0.60 * game_fraction, f"Analysing game {game_index} of {game_total}", game_index, game_total)
 
-        def enrichment_progress(game_index: int, game_total: int, ply: int, ply_total: int) -> None:
-            game_fraction = ((game_index - 1) + (ply / max(ply_total, 1))) / max(game_total, 1)
-            emit("enriching_games", 0.15 + 0.60 * game_fraction, f"Analysing game {game_index} of {game_total}", game_index, game_total)
-
-        enriched_games, enrichment_metadata = enrich_games(
-            raw_games,
-            engine_depth=request.engine_depth,
-            use_engine=request.use_engine,
-            progress_callback=enrichment_progress,
-            cancel_check=check_cancel,
-        )
-    except Exception:
-        if cache.get(cache_hash) is None:
-            Path(hparams_path).unlink(missing_ok=True)
-        raise
+    enriched_games, enrichment_metadata = enrich_games(
+        raw_games,
+        engine_depth=request.engine_depth,
+        use_engine=request.use_engine,
+        progress_callback=enrichment_progress,
+        cancel_check=check_cancel,
+    )
     if not enriched_games:
         raise ValueError("No games could be enriched for the requested username and filters.")
 
     emit("statistics", 0.78, "Computing player statistics")
-    bundle = PlayerStatisticsBuilder(hparams_path).build(enriched_games, player_name=request.username)
+    # PlayerStatisticsBuilder takes a file path, so the effective hparams go to a scratch file
+    # that only lives for this call.
+    with tempfile.TemporaryDirectory(prefix="report-hparams-") as scratch:
+        hparams_path = Path(scratch) / f"{cache_hash}.yaml"
+        hparams_path.write_text(dump_simple_yaml(effective_hparams), encoding="utf-8")
+        bundle = PlayerStatisticsBuilder(hparams_path).build(enriched_games, player_name=request.username)
     bundle_json = serializable(bundle)
     stats = bundle.global_statistics
     emit("openings", 0.88, "Building opening analysis")
@@ -181,7 +178,6 @@ def build_report(
         emit("complete", 1.0, "Report ready")
     except ReportBuildCancelled:
         cache.delete(cache_hash)
-        Path(hparams_path).unlink(missing_ok=True)
         raise
     return response
 

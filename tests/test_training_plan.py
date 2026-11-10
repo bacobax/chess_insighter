@@ -202,8 +202,8 @@ def test_review_card_ladder_and_retirement():
     assert card["interval_days"] == 1 and card["retired"] is False
 
 
-def test_training_plan_store_review_roundtrip(tmp_path):
-    store = TrainingPlanStore(tmp_path)
+def test_training_plan_store_review_roundtrip():
+    store = TrainingPlanStore()
     store.save("owner", "Me", {"cards": [{"card_id": "c1", "interval_days": 0, "streak": 0, "reviews": 0}]})
     updated = store.review("owner", "me", "c1", TrainingCardReviewRequest(grade="good", label="missed_threat", note="  saw it late "))
     assert updated["interval_days"] == 1 and updated["note"] == "saw it late"
@@ -217,16 +217,13 @@ def test_is_standard_game_filters_variants_and_short_games():
     assert not is_standard_game({"rules": "chess", "pgn": "1. e4 e5 2. Qh5 Nc6 *"})
 
 
-def test_training_plan_http_endpoints(monkeypatch, tmp_path):
+def test_training_plan_http_endpoints(monkeypatch):
     from fastapi.testclient import TestClient
 
     from backend import main as api_main
     from backend.services.auth_service import AuthRepository
     from backend.settings import settings
 
-    previous = (settings.app_database_path, settings.training_plan_dir)
-    object.__setattr__(settings, "app_database_path", tmp_path / "app_db.json")
-    object.__setattr__(settings, "training_plan_dir", tmp_path / "plans")
     sent: dict[str, str] = {}
 
     async def fake_send(*, recipient: str, token: str):
@@ -272,8 +269,6 @@ def test_training_plan_http_endpoints(monkeypatch, tmp_path):
         assert client.post("/api/training/opening-drill", json={"line": "1.e4 Ke2", "side": "white"}, headers=csrf).status_code == 400
     finally:
         client.close()
-        object.__setattr__(settings, "app_database_path", previous[0])
-        object.__setattr__(settings, "training_plan_dir", previous[1])
 
 
 def test_opening_drill_varies_opponent_within_the_repertoire_slot():

@@ -4,8 +4,6 @@ from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
-from pathlib import Path
-import shutil
 import threading
 from typing import Any
 from uuid import uuid4
@@ -23,6 +21,7 @@ from backend.models import (
     ReportMistakesSelectionRequest,
 )
 from backend.services.cache_service import stable_hash
+from backend.services.mongo_service import blob_delete_prefix, blob_exists, blob_get, blob_put
 from backend.services.chesscom_service import query_games, summarize_game, summarize_games
 from backend.services.openings_service import serializable
 from backend.settings import settings
@@ -38,6 +37,8 @@ from utils.opening_repository import OpeningRepository
 
 SIDECAR_VERSION = 1
 ANALYZER_VERSION = "mistakes-v5"
+REPORT_ANALYSIS_NAMESPACE = "report_analysis"
+TRAINING_ANALYSIS_NAMESPACE = "training_analysis"
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -55,15 +56,45 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    temporary.replace(path)
+class BlobRef:
+    """A path-like handle to one JSON document in the MongoDB blob store.
+
+    ``ref / "part"`` builds child keys; a ref used as a directory (``store.root``)
+    can be removed recursively with ``delete_tree``.
+    """
+
+    def __init__(self, namespace: str, key: str):
+        self.namespace = namespace
+        self.key = key
+
+    def __truediv__(self, part: str) -> "BlobRef":
+        return BlobRef(self.namespace, f"{self.key}/{part}")
+
+    def __repr__(self) -> str:
+        return f"BlobRef({self.namespace!r}, {self.key!r})"
+
+    def exists(self) -> bool:
+        return blob_exists(self.namespace, self.key)
+
+    def read(self) -> Any:
+        payload = blob_get(self.namespace, self.key)
+        if payload is None:
+            raise FileNotFoundError(f"Missing analysis artifact: {self.namespace}:{self.key}")
+        return payload
+
+    def write(self, payload: Any) -> None:
+        blob_put(self.namespace, self.key, payload)
+
+    def delete_tree(self) -> int:
+        return blob_delete_prefix(self.namespace, f"{self.key}/")
 
 
-def _read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+def _atomic_write_json(ref: BlobRef, payload: Any) -> None:
+    ref.write(payload)
+
+
+def _read_json(ref: BlobRef) -> Any:
+    return ref.read()
 
 
 def _game_identifier(game: Any) -> str | None:
@@ -88,16 +119,16 @@ def _mistake_id(mistake: dict[str, Any]) -> str:
 
 
 class ReportAnalysisStore:
-    def __init__(self, cache_hash: str, root: Path | None = None):
+    def __init__(self, cache_hash: str, namespace: str = REPORT_ANALYSIS_NAMESPACE):
         self.cache_hash = cache_hash
-        self.root = (root or settings.report_analysis_cache_dir) / cache_hash
+        self.root = BlobRef(namespace, cache_hash)
 
     @property
-    def manifest_path(self) -> Path:
+    def manifest_path(self) -> BlobRef:
         return self.root / "manifest.json"
 
     @property
-    def active_path(self) -> Path:
+    def active_path(self) -> BlobRef:
         return self.root / "active.json"
 
     def lock(self) -> threading.RLock:
@@ -117,13 +148,13 @@ class ReportAnalysisStore:
         manifest["updated_at"] = _now()
         _atomic_write_json(self.manifest_path, manifest)
 
-    def raw_path(self, game_id: str) -> Path:
+    def raw_path(self, game_id: str) -> BlobRef:
         return self.root / "raw" / f"{_artifact_key(game_id)}.json"
 
-    def enriched_path(self, game_id: str, depth: int) -> Path:
+    def enriched_path(self, game_id: str, depth: int) -> BlobRef:
         return self.root / "enriched" / f"depth-{depth}" / f"{_artifact_key(game_id)}.json"
 
-    def per_game_path(self, game_id: str, depth: int, plies: int) -> Path:
+    def per_game_path(self, game_id: str, depth: int, plies: int) -> BlobRef:
         return (
             self.root
             / "per_game"
@@ -132,7 +163,7 @@ class ReportAnalysisStore:
             / f"{_artifact_key(game_id)}.json"
         )
 
-    def analysis_path(self, analysis_hash: str) -> Path:
+    def analysis_path(self, analysis_hash: str) -> BlobRef:
         return self.root / "analyses" / f"{analysis_hash}.json"
 
 
@@ -149,8 +180,8 @@ def initialize_report_analysis(
 ) -> ReportAnalysisContext:
     store = ReportAnalysisStore(cache_hash)
     with store.lock():
-        if refresh and store.root.exists():
-            shutil.rmtree(store.root)
+        if refresh:
+            store.root.delete_tree()
 
         raw_by_id = {
             identifier: game
@@ -542,7 +573,7 @@ def _dataclass_payload(value: Any) -> dict[str, Any]:
     raise TypeError(f"Unsupported enriched game payload: {type(value).__name__}")
 
 
-def _load_enriched(path: Path) -> EnrichedGame:
+def _load_enriched(path: BlobRef) -> EnrichedGame:
     payload = _read_json(path)
     moves = []
     for move in payload.pop("moves"):
