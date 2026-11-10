@@ -284,11 +284,11 @@ Route declarations live in `frontend/app/routes.ts`.
 
 After completing any code change, always ask the user which of these three actions to take:
 
-1. **Commit** — draft a commit message and ask the user to confirm it before running `git commit`.
-2. **Branch + Commit** — ask the user which branch to base off of, suggest a new branch name, draft a commit message, and ask the user to confirm before creating the branch and committing.
+1. **Commit** — when the user says "commit", write the commit message yourself and run `git commit` directly, without asking to confirm the message. Push only if the user also asks to push (e.g. "commit and push").
+2. **Branch + Commit** — ask the user which branch to base off of and suggest a new branch name; once they pick, write the commit message yourself and create the branch and commit without asking to confirm the message.
 3. **Do nothing** — leave the working tree as-is.
 
-Never commit or create branches without explicit user approval.
+Never commit or create branches without the user choosing one of these. Never add a `Co-Authored-By` line (or any other attribution trailer) to commit messages.
 
 ## Feature Flags / Important Invariants
 

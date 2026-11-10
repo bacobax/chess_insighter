@@ -335,6 +335,7 @@ function ReportDashboard({
         ) : null}
       </div>
       <SkillProfileSection charts={charts} headingId={skillProfileHeadingId} />
+      <OpeningRepertoireSection report={report} username={username} headingId={openingRepertoireHeadingId} />
       {enableMistakes ? (
         <MistakesReportSection
           username={username}
@@ -344,7 +345,6 @@ function ReportDashboard({
           onRebuild={onRebuildMistakes}
         />
       ) : null}
-      <OpeningRepertoireSection report={report} username={username} headingId={openingRepertoireHeadingId} />
     </div>
   );
 }
