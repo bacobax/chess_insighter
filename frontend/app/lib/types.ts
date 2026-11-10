@@ -464,3 +464,162 @@ export type OpeningStudyTreeChildrenResponse = {
   vectorSource?: string | null;
   playerVector?: Record<string, number> | null;
 };
+
+export type TrainingTimeClass = "bullet" | "blitz" | "rapid" | "daily";
+
+export type TrainingPlanBuildRequest = {
+  username: string;
+  max_games: number;
+  time_classes: TrainingTimeClass[] | null;
+  engine_depth: number;
+};
+
+export type TrainingProcessTag = {
+  tag: string;
+  title: string;
+  count: number;
+  rate_per_100: number;
+  share: number;
+  avg_wp_loss: number | null;
+};
+
+export type TrainingWeakness = TrainingProcessTag & {
+  definition: string;
+  training: string;
+  secondary: string;
+};
+
+export type TrainingContextRow = { bucket: string; moves: number; errors: number; rate_per_100: number };
+
+export type TrainingDiagnosis = {
+  moves_analyzed: number;
+  error_count: number;
+  blunder_count: number;
+  rate_per_100: number;
+  process_tags: TrainingProcessTag[];
+  top_weaknesses: TrainingWeakness[];
+  domains: { domain: "opening" | "middlegame_tactics" | "middlegame_positional" | "endgame"; count: number; share: number }[];
+  motifs: { motif: string; count: number; games: number; own_block: boolean }[];
+  context: Record<string, TrainingContextRow[]>;
+  insights: { headline: string; detail: string }[];
+};
+
+export type TrainingOpeningPlayed = {
+  slot: string;
+  slot_label: string;
+  choice: string;
+  name: string;
+  eco: string | null;
+  moves: string;
+  games: number;
+  score: number;
+  avg_eval_at_15: number | null;
+  first_error_move: number | null;
+  verdict: "fix_first" | "middlegame" | "keep" | "consolidate" | "ignore";
+};
+
+export type TrainingOpeningRecommendation = {
+  slot: string;
+  slot_label: string;
+  name: string;
+  line: string;
+  learn_depth: string;
+  why: string;
+  plans: string | null;
+  trap: string | null;
+  your_games: number;
+  your_score: number | null;
+  replaces: string[];
+};
+
+export type TrainingBlock = { kind: string; label: string; minutes: number; text: string };
+
+export type TrainingDay = {
+  day: string;
+  focus: string;
+  session: string;
+  weakness: string | null;
+  blocks: TrainingBlock[];
+  minutes: number;
+};
+
+export type TrainingCard = {
+  card_id: string;
+  game_url: string | null;
+  game_end_time: number | null;
+  opponent: string | null;
+  player_color: "white" | "black";
+  move_number: number;
+  ply: number;
+  fen_before: string;
+  played_san: string;
+  played_uci: string;
+  best_san: string | null;
+  best_uci: string | null;
+  refutation_san: string[];
+  wp_loss: number | null;
+  severity: string;
+  process: string;
+  domain: string;
+  motifs: string[];
+  clock_fraction: number | null;
+  eval_before_cp: number | null;
+  due_on: string;
+  interval_days: number;
+  streak: number;
+  reviews: number;
+  retired: boolean;
+  label: string | null;
+  note: string | null;
+};
+
+export type TrainingPlan = {
+  id: string;
+  username: string;
+  request_params: TrainingPlanBuildRequest;
+  created_at: string;
+  updated_at: string;
+  metadata: {
+    username: string;
+    games_analyzed: number;
+    moves_analyzed: number;
+    rating: number | null;
+    time_classes: Record<string, number>;
+    score: number;
+    created_on: string;
+    reevaluate_on: string;
+    games_removed: number;
+    engine_depth: number | null;
+    requested_games: number | null;
+    requested_time_classes: string[] | null;
+  };
+  diagnosis: TrainingDiagnosis;
+  repertoire: {
+    mode: "simple" | "theory";
+    reasons: string[];
+    played: TrainingOpeningPlayed[];
+    recommended: TrainingOpeningRecommendation[];
+  };
+  routine: {
+    base_minutes: number;
+    days: TrainingDay[];
+    puzzle_split: { mixed: number; themed: number; themed_motifs: string[] };
+    rules: string[];
+  };
+  cards: TrainingCard[];
+};
+
+export type TrainingCardReviewRequest = {
+  grade: "again" | "hard" | "good";
+  label?: string | null;
+  note?: string | null;
+};
+
+export type OpeningDrillLine = {
+  moves: string[];
+  user_color: "white" | "black";
+  eco: string | null;
+  variation: string | null;
+  deviates_at: number | null;
+  opponent_choices: { ply: number; san: string; share: number | null; main_line: boolean; alternatives: { san: string; share: number }[] }[];
+};

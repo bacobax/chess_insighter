@@ -71,6 +71,9 @@ Key conventions:
 | `/api/opening-study-tree/children` | POST | `opening_study_service.opening_study_tree_children` |
 | `/api/reports/saved` | GET/POST | `saved_reports_service` |
 | `/api/reports/saved/{hash}` | DELETE | `saved_reports_service` |
+| `/api/training-plans/builds` | POST (+ `GET /{id}`, `POST /{id}/cancel`, WS `/{id}/status`) | `training_plan_service.run_training_plan_job` |
+| `/api/players/{username}/training-plan` | GET | `training_plan_service.TrainingPlanStore` |
+| `/api/players/{username}/training-plan/cards/{card_id}/review` | POST | `TrainingPlanStore.review` |
 
 #### Backend services (`backend/services/`)
 
@@ -106,6 +109,10 @@ Key conventions:
 - Keywords: `SavedReportsIndex`, `save_report_entry`, `_now_iso`
 - Stores a JSON index in `.cache/saved_reports.json`
 
+**`training_plan_service.py`** — training plan builds (no report needed)
+- Keywords: `build_training_plan_for_player`, `run_training_plan_job`, `TrainingPlanStore`, `is_standard_game`
+- Fetches the last N standard games, enriches + runs `analyze_mistakes` per game (cached under `.cache/training_analysis/`), then calls `utils/training_plan.build_training_plan`; latest plan per account+player stored in `.cache/training_plans/`
+
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`
 - Orchestrates `enrichment_service` → `global_statistics_transformer` → formats into `ReportBuildResponse`
@@ -140,6 +147,12 @@ All heavy computation lives here, independent of FastAPI.
 
 **`opening_feature_distribution_tools.py`** — feature calibration utilities
 - Keywords: `rank_calibrate_opening_group_features`, `empirical_cdf_values`, `write_group_features_with_raw`, `distribution_stats`
+
+#### Training plan
+
+**`training_plan.py`** — error diagnosis, short repertoire and weekly routine from enriched games + mistakes
+- Keywords: `build_training_plan`, `classify_process`, `TrainingPlanConfig`, `SIMPLE_REPERTOIRE`, `review_card`, `PROCESS_INFO`
+- Process tags (`missed_threat`, `miscalculation`, `time_trouble`, …) use the analyzer's 0–1 win-probability scale; flashcards follow a 1 → 3 → 7 → 21 day ladder
 
 #### Player profile
 

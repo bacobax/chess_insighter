@@ -7,6 +7,7 @@ import { Progress } from "~/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { FavouriteOpeningsChart, MetricBarChart, SkillRadarChart } from "~/components/charts/report-charts";
 import { cancelReportBuild, getReport, getReportBuildStatus, reportBuildSocketUrl, saveReport, startReportBuild } from "~/lib/api";
+import { waitForBuild } from "~/lib/build-jobs";
 import type { Hparams, MetricPoint, OpeningReportGroup, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportCharts } from "~/lib/types";
 import { formatPercent } from "~/lib/utils";
 import { ReportConfigForm } from "./report-config-form";
@@ -99,7 +100,7 @@ export function PlayerReport({
       const accepted = await startReportBuild(request);
       setBuildJob(accepted);
       onBuildActivityChange?.(buildInstanceId, accepted.build_id);
-      const terminal = await waitForReportBuild(accepted, setBuildProgress);
+      const terminal = await waitForBuild(accepted, setBuildProgress, reportBuildSocketUrl, getReportBuildStatus);
       if (terminal.status !== "completed" || !terminal.report_id) {
         throw new Error(terminal.error ?? (terminal.status === "cancelled" ? "Report build cancelled." : "Could not build report."));
       }
@@ -226,45 +227,6 @@ export function PlayerReport({
       ) : null}
     </div>
   );
-}
-
-function waitForReportBuild(
-  accepted: ReportBuildJobAccepted,
-  onProgress: (status: ReportBuildJobStatus) => void,
-): Promise<ReportBuildJobStatus> {
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    let finished = false;
-    const handle = (snapshot: ReportBuildJobStatus) => {
-      onProgress(snapshot);
-      if (["completed", "failed", "cancelled"].includes(snapshot.status)) {
-        finished = true;
-        resolve(snapshot);
-        return true;
-      }
-      return false;
-    };
-    const connect = () => {
-      if (finished) return;
-      const socket = new WebSocket(reportBuildSocketUrl(accepted.build_id, accepted.socket_token));
-      socket.onopen = () => { attempts = 0; };
-      socket.onmessage = (event) => handle(JSON.parse(String(event.data)) as ReportBuildJobStatus);
-      socket.onerror = () => socket.close();
-      socket.onclose = () => {
-        if (finished) return;
-        window.setTimeout(async () => {
-          try {
-            const current = await getReportBuildStatus(accepted.build_id);
-            if (!handle(current) && attempts++ < 6) connect();
-            else if (!finished && attempts >= 6) reject(new Error("Lost connection to the report build."));
-          } catch (error) {
-            if (attempts++ < 6) connect(); else reject(error);
-          }
-        }, Math.min(750 * 2 ** attempts, 8000));
-      };
-    };
-    connect();
-  });
 }
 
 function formatElapsed(seconds: number): string {

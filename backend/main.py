@@ -38,6 +38,12 @@ from backend.models import (
     ReportBuildJobAccepted,
     ReportBuildJobStatus,
     ReportSummary,
+    OpeningDrillLine,
+    OpeningDrillRequest,
+    TrainingCard,
+    TrainingCardReviewRequest,
+    TrainingPlanBuildRequest,
+    TrainingPlanResponse,
 )
 from backend.services.auth_service import (
     AuthError,
@@ -61,8 +67,15 @@ from backend.services.openings_service import top_opening_matches_from_cached_re
 from backend.services.statistics_service import build_report
 from backend.services.report_build_job_service import (
     BuildJobNotFound,
+    InMemoryReportBuildJobStore,
     report_build_jobs,
     run_report_build_job,
+    training_plan_jobs,
+)
+from backend.services.training_plan_service import (
+    TrainingPlanNotFound,
+    TrainingPlanStore,
+    run_training_plan_job,
 )
 from backend.services.report_analysis_service import (
     ReportAnalysisUnavailable,
@@ -72,6 +85,8 @@ from backend.services.report_analysis_service import (
     query_report_games,
 )
 from backend.settings import settings
+from utils.opening_drill import parse_line_text, sample_drill_line
+from utils.opening_popularity import companion_path_for
 
 
 app = FastAPI(title="Chess Insighter API", version="0.1.0")
@@ -166,6 +181,11 @@ async def email_delivery_handler(_request, exc: EmailDeliveryUnavailable):
 @app.exception_handler(ReportNotFound)
 async def report_not_found_handler(_request, _exc: ReportNotFound):
     return JSONResponse(status_code=404, content={"code": "report_not_found", "message": "Report not found"})
+
+
+@app.exception_handler(TrainingPlanNotFound)
+async def training_plan_not_found_handler(_request, exc: TrainingPlanNotFound):
+    return JSONResponse(status_code=404, content={"code": "training_plan_not_found", "message": str(exc)})
 
 
 @app.exception_handler(BuildJobNotFound)
@@ -328,6 +348,15 @@ async def cancel_report_build(build_id: str, request: Request) -> ReportBuildJob
 
 @app.websocket("/api/report/builds/{build_id}/status")
 async def report_build_status_socket(websocket: WebSocket, build_id: str, token: str) -> None:
+    await _stream_build_status(websocket, report_build_jobs, build_id, token)
+
+
+async def _stream_build_status(
+    websocket: WebSocket,
+    store: InMemoryReportBuildJobStore,
+    build_id: str,
+    token: str,
+) -> None:
     try:
         origin = websocket.headers.get("origin")
         if origin and origin != settings.frontend_url and re.fullmatch(settings.cors_origin_regex, origin) is None:
@@ -336,17 +365,17 @@ async def report_build_status_socket(websocket: WebSocket, build_id: str, token:
         if not encoded:
             raise InvalidSession("Sign in to continue.")
         user, _session = await run_in_threadpool(AuthRepository().resolve_session, encoded)
-        job = report_build_jobs.authorize_socket(build_id, user.id, token)
+        job = store.authorize_socket(build_id, user.id, token)
     except (InvalidSession, BuildJobNotFound):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
-    report_build_jobs.subscribe(job)
+    store.subscribe(job)
     revision = -1
     try:
         while True:
-            snapshot = report_build_jobs.snapshot(job)
+            snapshot = store.snapshot(job)
             if snapshot.revision != revision:
                 await websocket.send_json(snapshot.model_dump())
                 revision = snapshot.revision
@@ -357,7 +386,7 @@ async def report_build_status_socket(websocket: WebSocket, build_id: str, token:
     except WebSocketDisconnect:
         return
     finally:
-        report_build_jobs.unsubscribe(job)
+        store.unsubscribe(job)
 
 
 @app.exception_handler(ReportAnalysisUnavailable)
@@ -483,3 +512,55 @@ def rename_report(report_id: str, body: ReportTitleRequest, request: Request) ->
 @app.delete("/api/reports/{report_id}", status_code=204)
 def delete_report(report_id: str, request: Request) -> None:
     ReportsRepository().delete(request_user(request).id, report_id)
+
+
+@app.post("/api/training-plans/builds", response_model=ReportBuildJobAccepted, status_code=202)
+async def start_training_plan_build(
+    body: TrainingPlanBuildRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> ReportBuildJobAccepted:
+    accepted, job = training_plan_jobs.create(request_user(request).id, body)
+    background_tasks.add_task(run_training_plan_job, job)
+    return accepted
+
+
+@app.get("/api/training-plans/builds/{build_id}", response_model=ReportBuildJobStatus)
+async def training_plan_build_status(build_id: str, request: Request) -> ReportBuildJobStatus:
+    job = training_plan_jobs.get(build_id, request_user(request).id)
+    return training_plan_jobs.snapshot(job)
+
+
+@app.post("/api/training-plans/builds/{build_id}/cancel", response_model=ReportBuildJobStatus)
+async def cancel_training_plan_build(build_id: str, request: Request) -> ReportBuildJobStatus:
+    job = training_plan_jobs.get(build_id, request_user(request).id)
+    training_plan_jobs.cancel(job)
+    return training_plan_jobs.snapshot(job)
+
+
+@app.websocket("/api/training-plans/builds/{build_id}/status")
+async def training_plan_build_status_socket(websocket: WebSocket, build_id: str, token: str) -> None:
+    await _stream_build_status(websocket, training_plan_jobs, build_id, token)
+
+
+@app.get("/api/players/{username}/training-plan", response_model=TrainingPlanResponse)
+def player_training_plan(username: str, request: Request) -> TrainingPlanResponse:
+    return TrainingPlanResponse.model_validate(TrainingPlanStore().get(request_user(request).id, username))
+
+
+@app.post("/api/players/{username}/training-plan/cards/{card_id}/review", response_model=TrainingCard)
+def review_training_card(username: str, card_id: str, body: TrainingCardReviewRequest, request: Request) -> TrainingCard:
+    return TrainingCard.model_validate(TrainingPlanStore().review(request_user(request).id, username, card_id, body))
+
+
+@app.post("/api/training/opening-drill", response_model=OpeningDrillLine)
+async def opening_drill_line(body: OpeningDrillRequest) -> OpeningDrillLine:
+    def build() -> dict:
+        return sample_drill_line(
+            parse_line_text(body.line),
+            body.side,
+            popularity_path=companion_path_for(settings.opening_vectors_path),
+            openings_path=settings.openings_path,
+            variations=body.variations,
+        )
+    return OpeningDrillLine.model_validate(await run_in_threadpool(build))

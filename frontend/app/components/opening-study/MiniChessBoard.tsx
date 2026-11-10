@@ -37,8 +37,34 @@ function parsePlacement(fen: string): string[][] {
   return board.slice(0, 8);
 }
 
-export function MiniChessBoard({ fen, size = 116 }: { fen: string | null; size?: number }) {
-  const board = useMemo(() => (fen ? parsePlacement(fen) : null), [fen]);
+export type SquareHighlight = "from" | "to" | "best";
+
+const HIGHLIGHT_SHADOW: Record<SquareHighlight, string> = {
+  from: "inset 0 0 0 3px #ff6a4d",
+  to: "inset 0 0 0 999px rgba(255,106,77,.45)",
+  best: "inset 0 0 0 3px #21e783",
+};
+
+export function MiniChessBoard({
+  fen,
+  size = 116,
+  highlights,
+  flipped = false,
+  label,
+}: {
+  fen: string | null;
+  size?: number;
+  /** Optional square marks keyed by algebraic square, e.g. { e2: "from", e4: "to" }. */
+  highlights?: Record<string, SquareHighlight>;
+  /** Show the board from Black's side. */
+  flipped?: boolean;
+  label?: string;
+}) {
+  const board = useMemo(() => {
+    if (!fen) return null;
+    const placement = parsePlacement(fen);
+    return flipped ? placement.map((row) => [...row].reverse()).reverse() : placement;
+  }, [fen, flipped]);
   if (!board) {
     return (
       <div
@@ -52,16 +78,20 @@ export function MiniChessBoard({ fen, size = 116 }: { fen: string | null; size?:
   return (
     <div
       className="grid overflow-hidden rounded-md border border-slate-200"
+      role={label ? "img" : undefined}
+      aria-label={label}
       style={{ width: size, height: size, gridTemplateColumns: "repeat(8, 1fr)", gridTemplateRows: "repeat(8, 1fr)" }}
     >
       {board.flatMap((row, r) =>
         row.map((piece, c) => {
           const isLight = (r + c) % 2 === 0;
+          const square = flipped ? `${"hgfedcba"[c]}${r + 1}` : `${"abcdefgh"[c]}${8 - r}`;
+          const mark = highlights?.[square];
           return (
             <div
               key={`${r}-${c}`}
               className={isLight ? "bg-[#c6e8d2]" : "bg-[#225c42]"}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, boxShadow: mark ? HIGHLIGHT_SHADOW[mark] : undefined }}
             >
               {piece ? <ThemedChessPiece piece={piece} size={size / 8} /> : null}
             </div>

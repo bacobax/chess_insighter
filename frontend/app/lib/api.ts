@@ -1,4 +1,4 @@
-import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary } from "./types";
+import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillLine, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -15,10 +15,12 @@ function cookie(name: string): string | undefined {
   return document.cookie.split("; ").find((item) => item.startsWith(prefix))?.slice(prefix.length);
 }
 
+const SERVER_UNREACHABLE = "Can't reach the Chess Insighter server. Check that the backend is running on port 8000, then try again.";
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const csrf = !["GET", "HEAD", "OPTIONS"].includes(method) ? cookie("chess_insighter_csrf") : undefined;
-  const response = await fetch(`${API_BASE}${path}`, {
+  const request = () => fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: "include",
     headers: {
@@ -27,6 +29,20 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
+  let response: Response;
+  try {
+    response = await request();
+  } catch {
+    // The browser rejects with a bare "Failed to fetch" when the backend is down or
+    // restarting (e.g. a --reload after a code change). Reads are safe to retry once.
+    if (method !== "GET") throw new ApiRequestError(SERVER_UNREACHABLE, 0, "network_error");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      response = await request();
+    } catch {
+      throw new ApiRequestError(SERVER_UNREACHABLE, 0, "network_error");
+    }
+  }
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
     let code: string | undefined;
@@ -215,4 +231,51 @@ export async function fetchOpeningStudyChildren(
       (node): OpeningStudyTreeNode => ({ ...node, id: node.prefixUci.join("/") }),
     ),
   };
+}
+
+export function startTrainingPlanBuild(request: TrainingPlanBuildRequest) {
+  return apiFetch<ReportBuildJobAccepted>("/api/training-plans/builds", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function getTrainingPlanBuildStatus(buildId: string) {
+  return apiFetch<ReportBuildJobStatus>(`/api/training-plans/builds/${encodeURIComponent(buildId)}`);
+}
+
+export function cancelTrainingPlanBuild(buildId: string) {
+  return apiFetch<ReportBuildJobStatus>(`/api/training-plans/builds/${encodeURIComponent(buildId)}/cancel`, { method: "POST" });
+}
+
+export function trainingPlanBuildSocketUrl(buildId: string, socketToken: string): string {
+  const url = new URL(`${API_BASE}/api/training-plans/builds/${encodeURIComponent(buildId)}/status`, window.location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", socketToken);
+  return url.toString();
+}
+
+/** Resolves to null when no plan has been built for this player yet. */
+export async function getTrainingPlan(username: string): Promise<TrainingPlan | null> {
+  try {
+    return await apiFetch<TrainingPlan>(`/api/players/${encodeURIComponent(username)}/training-plan`);
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+export function reviewTrainingCard(username: string, cardId: string, request: TrainingCardReviewRequest) {
+  return apiFetch<TrainingCard>(
+    `/api/players/${encodeURIComponent(username)}/training-plan/cards/${encodeURIComponent(cardId)}/review`,
+    { method: "POST", body: JSON.stringify(request) },
+  );
+}
+
+/** A drill line for a repertoire opening; the opponent's replies are sampled from popular Lichess moves. */
+export function getOpeningDrillLine(line: string, side: "white" | "black", variations: boolean) {
+  return apiFetch<OpeningDrillLine>("/api/training/opening-drill", {
+    method: "POST",
+    body: JSON.stringify({ line, side, variations }),
+  });
 }

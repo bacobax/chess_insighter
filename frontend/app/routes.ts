@@ -10,6 +10,8 @@ export default [
   route("report/:username/reports/new", "routes/report.$username.reports.new.tsx"),
   route("report/:username/reports/:reportId/mistake/:mistakeId", "routes/report.$username.mistake.$mistakeId.tsx"),
   route("report/:username/reports/:reportId", "routes/report.$username.reports.$reportId.tsx"),
+  route("report/:username/training/session", "routes/training.$username.session.tsx"),
+  route("report/:username/training", "routes/training.$username.tsx"),
   route("report/:username", "routes/player-dossier.tsx"),
   route("opening-study", "routes/opening-study.tsx"),
 ] satisfies RouteConfig;

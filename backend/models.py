@@ -520,3 +520,221 @@ class MistakePositionRequest(BaseModel):
 class MistakePositionResponse(BaseModel):
     top_lines: list[JsonObject]
     optimal_line: list[JsonObject]
+
+
+class TrainingPlanBuildRequest(BaseModel):
+    username: str
+    max_games: int = Field(default=80, ge=10, le=150)
+    time_classes: list[Literal["bullet", "blitz", "rapid", "daily"]] | None = None
+    engine_depth: int = Field(default=12, ge=6, le=22)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        username = value.strip()
+        if not username:
+            raise ValueError("username is required")
+        return username
+
+    @field_validator("time_classes")
+    @classmethod
+    def normalize_time_classes(cls, value: list[str] | None) -> list[str] | None:
+        return sorted(set(value)) or None if value else None
+
+
+class TrainingProcessTag(BaseModel):
+    tag: str
+    title: str
+    count: int
+    rate_per_100: float
+    share: float
+    avg_wp_loss: float | None = None
+
+
+class TrainingWeakness(TrainingProcessTag):
+    definition: str
+    training: str
+    secondary: str
+
+
+class TrainingDomainCount(BaseModel):
+    domain: Literal["opening", "middlegame_tactics", "middlegame_positional", "endgame"]
+    count: int
+    share: float
+
+
+class TrainingMotif(BaseModel):
+    motif: str
+    count: int
+    games: int
+    own_block: bool
+
+
+class TrainingContextRow(BaseModel):
+    bucket: str
+    moves: int
+    errors: int
+    rate_per_100: float
+
+
+class TrainingInsight(BaseModel):
+    headline: str
+    detail: str
+
+
+class TrainingDiagnosis(BaseModel):
+    moves_analyzed: int
+    error_count: int
+    blunder_count: int
+    rate_per_100: float
+    process_tags: list[TrainingProcessTag]
+    top_weaknesses: list[TrainingWeakness]
+    domains: list[TrainingDomainCount]
+    motifs: list[TrainingMotif]
+    context: dict[str, list[TrainingContextRow]]
+    insights: list[TrainingInsight]
+
+
+class TrainingOpeningPlayed(BaseModel):
+    slot: str
+    slot_label: str
+    choice: str
+    name: str
+    eco: str | None = None
+    moves: str
+    games: int
+    score: float
+    avg_eval_at_15: int | None = None
+    first_error_move: int | None = None
+    verdict: Literal["fix_first", "middlegame", "keep", "consolidate", "ignore"]
+
+
+class TrainingOpeningRecommendation(BaseModel):
+    slot: str
+    slot_label: str
+    name: str
+    line: str
+    learn_depth: str
+    why: str
+    plans: str | None = None
+    trap: str | None = None
+    your_games: int
+    your_score: float | None = None
+    replaces: list[str]
+
+
+class TrainingRepertoire(BaseModel):
+    mode: Literal["simple", "theory"]
+    reasons: list[str]
+    played: list[TrainingOpeningPlayed]
+    recommended: list[TrainingOpeningRecommendation]
+
+
+class TrainingBlock(BaseModel):
+    kind: str
+    label: str
+    minutes: int
+    text: str
+
+
+class TrainingDay(BaseModel):
+    day: str
+    focus: str
+    session: str
+    weakness: str | None = None
+    blocks: list[TrainingBlock]
+    minutes: int
+
+
+class TrainingRoutine(BaseModel):
+    base_minutes: int
+    days: list[TrainingDay]
+    puzzle_split: JsonObject
+    rules: list[str]
+
+
+class TrainingCard(BaseModel):
+    card_id: str
+    game_url: str | None = None
+    game_end_time: int | None = None
+    opponent: str | None = None
+    player_color: Literal["white", "black"]
+    move_number: int
+    ply: int
+    fen_before: str
+    played_san: str
+    played_uci: str
+    best_san: str | None = None
+    best_uci: str | None = None
+    refutation_san: list[str]
+    wp_loss: float | None = None
+    severity: str
+    process: str
+    domain: str
+    motifs: list[str]
+    clock_fraction: float | None = None
+    eval_before_cp: int | None = None
+    due_on: str
+    interval_days: int
+    streak: int
+    reviews: int
+    retired: bool
+    label: str | None = None
+    note: str | None = None
+
+
+class TrainingPlanMetadata(BaseModel):
+    username: str
+    games_analyzed: int
+    moves_analyzed: int
+    rating: int | None = None
+    time_classes: dict[str, int]
+    score: float
+    created_on: str
+    reevaluate_on: str
+    games_removed: int = 0
+    engine_depth: int | None = None
+    requested_games: int | None = None
+    requested_time_classes: list[str] | None = None
+
+
+class TrainingPlanResponse(BaseModel):
+    id: str
+    username: str
+    request_params: JsonObject
+    created_at: str
+    updated_at: str
+    metadata: TrainingPlanMetadata
+    diagnosis: TrainingDiagnosis
+    repertoire: TrainingRepertoire
+    routine: TrainingRoutine
+    cards: list[TrainingCard]
+
+
+class TrainingCardReviewRequest(BaseModel):
+    grade: Literal["again", "hard", "good"]
+    label: str | None = Field(default=None, max_length=40)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class OpeningDrillRequest(BaseModel):
+    line: str = Field(min_length=2, max_length=400)
+    side: Literal["white", "black"]
+    variations: bool = True
+
+
+class OpeningDrillChoice(BaseModel):
+    ply: int
+    san: str
+    share: float | None = None
+    main_line: bool
+    alternatives: list[JsonObject]
+
+
+class OpeningDrillLine(BaseModel):
+    moves: list[str]
+    user_color: Literal["white", "black"]
+    eco: str | None = None
+    variation: str | None = None
+    deviates_at: int | None = None
+    opponent_choices: list[OpeningDrillChoice]

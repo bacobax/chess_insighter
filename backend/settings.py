@@ -24,6 +24,8 @@ class Settings:
     player_vector_cache_path: Path = ROOT_DIR / ".cache/player_vectors.json"
     saved_reports_path: Path = ROOT_DIR / ".cache/saved_reports.json"
     app_database_path: Path = ROOT_DIR / ".cache/app_db.json"
+    training_plan_dir: Path = ROOT_DIR / ".cache/training_plans"
+    training_analysis_cache_dir: Path = ROOT_DIR / ".cache/training_analysis"
     cors_origin_regex: str = r"^http://(localhost|127\.0\.0\.1):\d+$"
     frontend_url: str = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
     auth_jwt_secret: str = os.environ.get("AUTH_JWT_SECRET", "development-only-change-me-before-deploying")

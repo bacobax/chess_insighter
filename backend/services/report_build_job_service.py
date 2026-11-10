@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from backend.models import ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest
+from pydantic import BaseModel
+
+from backend.models import ReportBuildJobAccepted, ReportBuildJobStatus
 
 
 TERMINAL = {"completed", "failed", "cancelled"}
@@ -23,7 +25,7 @@ class BuildJob:
     id: str
     owner_id: str
     socket_digest: str
-    request: ReportBuildRequest
+    request: BaseModel
     status: str = "queued"
     stage: str = "queued"
     progress: float = 0.0
@@ -41,13 +43,16 @@ class BuildJob:
 
 
 class InMemoryReportBuildJobStore:
-    """Ephemeral single-process build state behind a replaceable store interface."""
+    """Ephemeral single-process build state behind a replaceable store interface.
+
+    Shared by report builds and training plan builds; ``report_id`` carries the
+    id of whatever the job produced."""
 
     def __init__(self) -> None:
         self._jobs: dict[str, BuildJob] = {}
         self._lock = threading.RLock()
 
-    def create(self, owner_id: str, request: ReportBuildRequest) -> tuple[ReportBuildJobAccepted, BuildJob]:
+    def create(self, owner_id: str, request: BaseModel) -> tuple[ReportBuildJobAccepted, BuildJob]:
         token = secrets.token_urlsafe(32)
         job = BuildJob(
             id=str(uuid4()),
@@ -148,6 +153,7 @@ class InMemoryReportBuildJobStore:
 
 
 report_build_jobs = InMemoryReportBuildJobStore()
+training_plan_jobs = InMemoryReportBuildJobStore()
 
 
 def run_report_build_job(job: BuildJob) -> None:
