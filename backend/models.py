@@ -720,7 +720,6 @@ class TrainingCardReviewRequest(BaseModel):
 class OpeningDrillRequest(BaseModel):
     line: str = Field(min_length=2, max_length=400)
     side: Literal["white", "black"]
-    variations: bool = True
 
 
 class OpeningDrillChoice(BaseModel):
@@ -732,9 +731,16 @@ class OpeningDrillChoice(BaseModel):
 
 
 class OpeningDrillLine(BaseModel):
+    id: str
+    probability: float
+    main_line: bool
     moves: list[str]
     user_color: Literal["white", "black"]
     eco: str | None = None
     variation: str | None = None
     deviates_at: int | None = None
     opponent_choices: list[OpeningDrillChoice]
+
+
+class OpeningDrillCatalog(BaseModel):
+    lines: list[OpeningDrillLine]

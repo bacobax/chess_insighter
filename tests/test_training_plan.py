@@ -265,7 +265,10 @@ def test_training_plan_http_endpoints(monkeypatch, tmp_path):
         assert client.post("/api/players/me/training-plan/cards/missing/review", json={"grade": "good"}, headers=csrf).status_code == 404
 
         drill = client.post("/api/training/opening-drill", json={"line": "1.e4 e5 2.Nf3 Nf6 3.Nxe5 d6", "side": "black"}, headers=csrf)
-        assert drill.status_code == 200 and drill.json()["moves"][:2] == ["e4", "e5"]
+        assert drill.status_code == 200
+        lines = drill.json()["lines"]
+        assert lines[0]["main_line"] and lines[0]["moves"] == ["e4", "e5", "Nf3", "Nf6", "Nxe5", "d6"]
+        assert len({line["id"] for line in lines}) == len(lines) > 1
         assert client.post("/api/training/opening-drill", json={"line": "1.e4 Ke2", "side": "white"}, headers=csrf).status_code == 400
     finally:
         client.close()
@@ -299,3 +302,16 @@ def test_opening_drill_varies_opponent_within_the_repertoire_slot():
 
     with pytest.raises(ValueError):
         sample_drill_line(["e4", "Ke2", "Kxe8"], "white", **paths)
+
+
+def test_drill_catalog_lists_each_line_once_with_probabilities():
+    from backend.settings import settings
+    from utils.opening_drill import drill_catalog
+    from utils.opening_popularity import companion_path_for
+
+    line = SIMPLE_REPERTOIRE["white"]["line"]
+    catalog = drill_catalog(line, "white", popularity_path=companion_path_for(settings.opening_vectors_path), openings_path=settings.openings_path)
+    assert catalog[0]["main_line"] and catalog[0]["moves"] == line
+    assert len({item["id"] for item in catalog}) == len(catalog) >= 5
+    assert abs(sum(item["probability"] for item in catalog) - 1) < 0.01
+    assert all(item["moves"][:2] == ["e4", "e5"] for item in catalog)  # Black's first reply is pinned

@@ -38,7 +38,7 @@ from backend.models import (
     ReportBuildJobAccepted,
     ReportBuildJobStatus,
     ReportSummary,
-    OpeningDrillLine,
+    OpeningDrillCatalog,
     OpeningDrillRequest,
     TrainingCard,
     TrainingCardReviewRequest,
@@ -85,7 +85,7 @@ from backend.services.report_analysis_service import (
     query_report_games,
 )
 from backend.settings import settings
-from utils.opening_drill import parse_line_text, sample_drill_line
+from utils.opening_drill import drill_catalog, parse_line_text
 from utils.opening_popularity import companion_path_for
 
 
@@ -553,14 +553,13 @@ def review_training_card(username: str, card_id: str, body: TrainingCardReviewRe
     return TrainingCard.model_validate(TrainingPlanStore().review(request_user(request).id, username, card_id, body))
 
 
-@app.post("/api/training/opening-drill", response_model=OpeningDrillLine)
-async def opening_drill_line(body: OpeningDrillRequest) -> OpeningDrillLine:
-    def build() -> dict:
-        return sample_drill_line(
+@app.post("/api/training/opening-drill", response_model=OpeningDrillCatalog)
+async def opening_drill_catalog(body: OpeningDrillRequest) -> OpeningDrillCatalog:
+    def build() -> list[dict]:
+        return drill_catalog(
             parse_line_text(body.line),
             body.side,
             popularity_path=companion_path_for(settings.opening_vectors_path),
             openings_path=settings.openings_path,
-            variations=body.variations,
         )
-    return OpeningDrillLine.model_validate(await run_in_threadpool(build))
+    return OpeningDrillCatalog(lines=await run_in_threadpool(build))

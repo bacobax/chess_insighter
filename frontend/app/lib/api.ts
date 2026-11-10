@@ -1,4 +1,4 @@
-import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillLine, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
+import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillCatalog, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -272,10 +272,10 @@ export function reviewTrainingCard(username: string, cardId: string, request: Tr
   );
 }
 
-/** A drill line for a repertoire opening; the opponent's replies are sampled from popular Lichess moves. */
-export function getOpeningDrillLine(line: string, side: "white" | "black", variations: boolean) {
-  return apiFetch<OpeningDrillLine>("/api/training/opening-drill", {
+/** Every drill line for a repertoire opening, the opponent's replies branching over popular Lichess moves. */
+export function getOpeningDrillCatalog(line: string, side: "white" | "black") {
+  return apiFetch<OpeningDrillCatalog>("/api/training/opening-drill", {
     method: "POST",
-    body: JSON.stringify({ line, side, variations }),
+    body: JSON.stringify({ line, side }),
   });
 }
