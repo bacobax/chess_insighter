@@ -4,9 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import {
   DEFAULT_MATCHER_WEIGHTS,
+  DEFAULT_EVALUATION_THRESHOLDS,
   DEFAULT_WEIGHTS,
   OpeningStudyControls,
-  applyModeToWeights,
   type StudyControlsState,
 } from "~/components/opening-study/OpeningStudyControls";
 import { OpeningStudyWhiteboard } from "~/components/opening-study/OpeningStudyWhiteboard";
@@ -33,12 +33,13 @@ export default function OpeningStudyPage() {
     topK: 4,
     opponentTopK: 8,
     opponentMoveOrdering: "popularity",
-    weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, "style", "practical"),
+    weights: { ...DEFAULT_WEIGHTS },
     similarityType: "cosine",
     weightedMatching: true,
     matcherWeights: { ...DEFAULT_MATCHER_WEIGHTS },
     matchMode: "style",
     evaluationMetric: "practical",
+    evaluationThresholds: { ...DEFAULT_EVALUATION_THRESHOLDS },
   });
   const [generationKey, setGenerationKey] = useState(0);
   const [selectedNode, setSelectedNode] = useState<OpeningStudyTreeNode | null>(null);

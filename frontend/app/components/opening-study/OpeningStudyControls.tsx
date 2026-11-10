@@ -31,15 +31,21 @@ export type StudyControlsState = {
   matcherWeights: Record<MatcherFeatureKey, number>;
   matchMode: MatchMode;
   evaluationMetric: EvaluationMetric;
+  evaluationThresholds: Record<EvaluationMetric, number>;
 };
 
 export const DEFAULT_WEIGHTS: Required<OpeningStudyWeights> = {
   playerStyleMatch: 0.32,
-  engineSoundness: 0.18,
+  engineSoundness: 0,
   aggressiveness: 0.15,
-  practicalGamble: 0.10,
+  practicalGamble: 0,
   systemness: 0.13,
   memorySimplicity: 0.12,
+};
+
+export const DEFAULT_EVALUATION_THRESHOLDS: Record<EvaluationMetric, number> = {
+  engine: 0.18,
+  practical: 0.10,
 };
 
 export const DEFAULT_MATCHER_WEIGHTS: Record<MatcherFeatureKey, number> = {
@@ -54,35 +60,28 @@ export const DEFAULT_MATCHER_WEIGHTS: Record<MatcherFeatureKey, number> = {
   endgame_likelihood_proxy: 0.40,
 };
 
-type WeightKey = keyof Required<OpeningStudyWeights>;
+type WeightKey = "playerStyleMatch" | "aggressiveness" | "systemness" | "memorySimplicity";
 
 // Which score-weight dimensions are active per mode.
 // Mirrors ALLOWED_WEIGHTS_BY_MODE in utils/opening_study_tree.py (camelCase keys).
 const ALLOWED_BY_MODE: Record<MatchMode, Set<WeightKey>> = {
-  style: new Set(["playerStyleMatch", "engineSoundness", "practicalGamble", "systemness", "memorySimplicity"]),
-  custom: new Set(["engineSoundness", "aggressiveness", "practicalGamble", "systemness", "memorySimplicity"]),
+  style: new Set(["playerStyleMatch", "systemness", "memorySimplicity"]),
+  custom: new Set(["aggressiveness", "systemness", "memorySimplicity"]),
 };
 
-function allowedFor(mode: MatchMode, evaluationMetric: EvaluationMetric): Set<WeightKey> {
-  const selected = evaluationMetric === "engine" ? "engineSoundness" : "practicalGamble";
-  return new Set(
-    [...ALLOWED_BY_MODE[mode]].filter(
-      (key) => (key !== "engineSoundness" && key !== "practicalGamble") || key === selected,
-    ),
-  );
+function allowedFor(mode: MatchMode): Set<WeightKey> {
+  return ALLOWED_BY_MODE[mode];
 }
 
 const MODE_DESCRIPTIONS: Record<MatchMode, string> = {
-  style: "Finds openings that fit YOUR playing style, using your chosen evaluation signal alongside systemness and memory.",
-  custom: "Ranks openings by objective and practical properties, including how human reply popularity differs from best defense. Style match is hidden.",
+  style: "Ranks feasible openings by YOUR playing style, systemness, and memory simplicity.",
+  custom: "Ranks feasible openings by aggressiveness, systemness, and memory simplicity. Style match is hidden.",
 };
 
 // Descriptions shown as tooltips on the score weight labels.
 const WEIGHT_DESCRIPTIONS: Record<WeightKey, string> = {
   playerStyleMatch: "How closely this opening matches your playing style across all 9 dimensions.",
-  engineSoundness: "Stockfish centipawn utility from your target color's perspective. Equal positions are 50%; losing positions drop toward 0%.",
   aggressiveness: "35 × tactical density + 25 × complexity + 20 × opp-side castling + 20 × material imbalance.",
-  practicalGamble: "How much better the position scores against popularity-weighted Lichess replies than against Stockfish's best defense.",
   systemness: "65 × (1 − entropy) + 35 × (1 − diversity) — higher means more principled, repeatable positions.",
   memorySimplicity: "55 × fewer lines + 25 × structure consistency + 20 × position predictability.",
 };
@@ -120,72 +119,28 @@ const MATCHER_FEATURE_FIELDS: Array<{ key: MatcherFeatureKey; label: string; col
 
 const WEIGHT_FIELDS: { key: WeightKey; label: string; color: string }[] = [
   { key: "playerStyleMatch", label: "Style",         color: "#2563eb" },
-  { key: "engineSoundness",  label: "Engine",        color: "#0f766e" },
   { key: "aggressiveness",   label: "Aggro",         color: "#dc2626" },
-  { key: "practicalGamble",  label: "Practical gamble", color: "#d97706" },
   { key: "systemness",       label: "System",        color: "#059669" },
   { key: "memorySimplicity", label: "Mem. simplicity", color: "#7c3aed" },
 ];
 
-/**
- * Move one weight to `newValue` and redistribute the delta proportionally
- * among the other ALLOWED weights so their sum stays exactly 1.0.
- * Disallowed keys are kept at 0 and never touched.
- */
-function redistributeWeights(
+function setWeightLevel(
   weights: Required<OpeningStudyWeights>,
   changedKey: WeightKey,
   newValue: number,
-  mode: MatchMode,
-  evaluationMetric: EvaluationMetric,
 ): Required<OpeningStudyWeights> {
-  const allowed = allowedFor(mode, evaluationMetric);
   const clamped = Math.max(0, Math.min(1, newValue));
-  const others = WEIGHT_FIELDS.map((f) => f.key).filter((k) => k !== changedKey && allowed.has(k));
-  const sumOthers = others.reduce((s, k) => s + weights[k], 0);
-  const remaining = 1 - clamped;
-
-  const next = { ...weights, [changedKey]: clamped } as Required<OpeningStudyWeights>;
-
-  if (sumOthers <= 0) {
-    const each = remaining / others.length;
-    for (const k of others) next[k] = Math.max(0, each);
-  } else {
-    for (const k of others) {
-      next[k] = Math.max(0, (weights[k] / sumOthers) * remaining);
-    }
-  }
-
-  return next;
+  return { ...weights, [changedKey]: clamped };
 }
 
-/**
- * When switching modes, zero disallowed keys and renormalize allowed ones
- * so they still sum to 1.0.
- */
-export function applyModeToWeights(
+function effectiveWeight(
   weights: Required<OpeningStudyWeights>,
-  newMode: MatchMode,
-  evaluationMetric: EvaluationMetric,
-): Required<OpeningStudyWeights> {
-  const allowed = allowedFor(newMode, evaluationMetric);
-  const next = { ...weights } as Required<OpeningStudyWeights>;
-  // Zero disallowed.
-  for (const { key } of WEIGHT_FIELDS) {
-    if (!allowed.has(key)) next[key] = 0;
-  }
-  // Renormalize allowed to sum = 1.
-  const sum = WEIGHT_FIELDS.filter(({ key }) => allowed.has(key)).reduce((s, { key }) => s + next[key], 0);
-  if (sum <= 0) {
-    // Fallback: equal split.
-    const each = 1 / allowed.size;
-    for (const key of allowed) next[key] = each;
-  } else {
-    for (const key of allowed) {
-      next[key] = next[key] / sum;
-    }
-  }
-  return next;
+  key: WeightKey,
+  allowed: Set<WeightKey>,
+): number {
+  if (!allowed.has(key)) return 0;
+  const total = [...allowed].reduce((sum, allowedKey) => sum + weights[allowedKey], 0);
+  return total > 0 ? weights[key] / total : 1 / allowed.size;
 }
 
 function VectorSourceBadge({ cacheHash }: { cacheHash: string }) {
@@ -223,28 +178,18 @@ type Props = {
 export function OpeningStudyControls({ state, loading, onChange, onGenerate, onReset, selectedNode, playerVector }: Props) {
   const canGenerate = !loading && (state.cacheHash.trim() !== "" || state.username.trim() !== "");
 
-  const allowedKeys = allowedFor(state.matchMode, state.evaluationMetric);
+  const allowedKeys = allowedFor(state.matchMode);
 
   function handleWeightChange(key: WeightKey, newValue: number) {
-    onChange({ weights: redistributeWeights(state.weights, key, newValue, state.matchMode, state.evaluationMetric) });
+    onChange({ weights: setWeightLevel(state.weights, key, newValue) });
   }
 
   function handleModeChange(newMode: MatchMode) {
-    onChange({ matchMode: newMode, weights: applyModeToWeights(state.weights, newMode, state.evaluationMetric) });
+    onChange({ matchMode: newMode });
   }
 
   function handleEvaluationMetricChange(evaluationMetric: EvaluationMetric) {
-    const selected = evaluationMetric === "engine" ? "engineSoundness" : "practicalGamble";
-    const previous = evaluationMetric === "engine" ? "practicalGamble" : "engineSoundness";
-    const transferred = {
-      ...state.weights,
-      [selected]: state.weights[selected] + state.weights[previous],
-      [previous]: 0,
-    };
-    onChange({
-      evaluationMetric,
-      weights: applyModeToWeights(transferred, state.matchMode, evaluationMetric),
-    });
+    onChange({ evaluationMetric });
   }
 
   function handleMatcherWeightChange(key: MatcherFeatureKey, newValue: number) {
@@ -378,7 +323,7 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
       </div>
 
       <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-        Evaluation signal
+        Feasibility constraint
         <div className="flex gap-2">
           {(["engine", "practical"] as EvaluationMetric[]).map((metric) => (
             <button
@@ -396,37 +341,67 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
             </button>
           ))}
         </div>
-        <p className="text-[10px] text-slate-400">Only the selected evaluation metric contributes to Study Score.</p>
+        <p className="text-[10px] text-slate-400">
+          Player moves below the selected threshold are excluded before ranking.
+        </p>
+        <label className="mt-1 flex flex-col gap-0.5">
+          <span className="flex items-center justify-between text-[11px]">
+            <span>{state.evaluationMetric === "engine" ? "Minimum engine soundness" : "Minimum practical gamble"}</span>
+            <span className="tabular-nums text-slate-500">
+              {Math.round(state.evaluationThresholds[state.evaluationMetric] * 100)}%
+            </span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={state.evaluationThresholds[state.evaluationMetric]}
+            onChange={(event) => onChange({
+              evaluationThresholds: {
+                ...state.evaluationThresholds,
+                [state.evaluationMetric]: Number(event.target.value),
+              },
+            })}
+            className="accent-slate-900"
+          />
+        </label>
       </div>
 
-      {/* Score weights — simplex sliders: moving one redistributes the rest */}
+      {/* Independent raw levels; the backend normalizes active levels by their sum. */}
       <div className="flex flex-col gap-1 rounded-md border border-slate-200 p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-slate-600">Score weights</span>
           <button
             type="button"
-            onClick={() => onChange({ weights: applyModeToWeights({ ...DEFAULT_WEIGHTS }, state.matchMode, state.evaluationMetric) })}
+            onClick={() => onChange({ weights: { ...DEFAULT_WEIGHTS } })}
             className="text-[10px] text-slate-400 hover:text-slate-600"
           >
             reset
           </button>
         </div>
+        <p className="mb-1 text-[10px] text-slate-400">
+          Levels are independent. Effective weights are normalized from the active levels.
+        </p>
 
         {WEIGHT_FIELDS.map(({ key, label, color }) => {
           const active = allowedKeys.has(key);
-          const pct = Math.round(state.weights[key] * 100);
+          const levelPct = Math.round(state.weights[key] * 100);
+          const effectivePct = Math.round(effectiveWeight(state.weights, key, allowedKeys) * 100);
           return (
             <div key={key} className={cn("flex flex-col gap-0.5", !active && "opacity-35")}>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="font-medium text-slate-600" title={active ? WEIGHT_DESCRIPTIONS[key] : "Disabled in this mode"}>{label}</span>
-                <span className="tabular-nums text-slate-500">{active ? `${pct}%` : "—"}</span>
+                <span className="tabular-nums text-slate-500">
+                  {active ? `${levelPct} · ${effectivePct}% weight` : "—"}
+                </span>
               </div>
               <div className="relative flex items-center">
                 {/* Filled track behind the native slider */}
                 <div className="pointer-events-none absolute left-0 top-1/2 h-1.5 w-full -translate-y-1/2 overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full rounded-full transition-[width] duration-75"
-                    style={{ width: `${pct}%`, backgroundColor: active ? color : "#94a3b8" }}
+                    style={{ width: `${levelPct}%`, backgroundColor: active ? color : "#94a3b8" }}
                   />
                 </div>
                 <input
@@ -457,12 +432,13 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full">
           {WEIGHT_FIELDS.map(({ key, color }) => {
             const active = allowedKeys.has(key);
+            const normalized = effectiveWeight(state.weights, key, allowedKeys);
             return (
               <div
                 key={key}
                 className="h-full transition-[flex] duration-75"
-                style={{ flex: state.weights[key], backgroundColor: active ? color : "transparent" }}
-                title={`${WEIGHT_FIELDS.find((f) => f.key === key)?.label}: ${Math.round(state.weights[key] * 100)}%`}
+                style={{ flex: normalized, backgroundColor: active ? color : "transparent" }}
+                title={`${WEIGHT_FIELDS.find((f) => f.key === key)?.label}: ${Math.round(normalized * 100)}% effective weight`}
               />
             );
           })}

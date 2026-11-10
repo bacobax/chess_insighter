@@ -294,5 +294,5 @@ Never commit or create branches without explicit user approval.
 
 - `opening_study_tree.py` is **additive**: it must not affect the existing opening explorer or report pipeline.
 - Player vectors in the cache use **generalized** (non-color-prefixed) feature names. Color-specific comparison is done by reading `white_*`/`black_*` columns from the opening CSV, not by storing separate player vectors per color.
-- The study-score formula weights are normalized by their sum inside `compute_node_metrics`, so unnormalized weights in API requests still produce valid `[0, 1]` scores.
+- Engine/Practical Gamble is a hard threshold applied only to the player's candidate moves. The remaining active soft-ranking weights are normalized by their sum in `resolve_study_weights`, so independent, unnormalized slider levels in API requests still produce valid `[0, 1]` scores.
 - `_load_opening_rows` in the study tree is `@lru_cache(maxsize=8)` keyed by file path string — safe for the lifetime of the process but will not see CSV changes without a restart.

@@ -13,6 +13,7 @@ from utils.opening_study_tree import (
     evaluate_engine_soundness,
     get_opening_study_tree_children,
     load_player_vector_from_cache,
+    passes_evaluation_threshold,
     resolve_study_weights,
 )
 
@@ -34,14 +35,74 @@ def test_clamp01_bounds():
     assert clamp01(0.5) == 0.5
 
 
-def test_engine_and_practical_gamble_weights_are_mutually_exclusive():
-    supplied = {"engine_soundness": 0.4, "practical_gamble": 0.6}
-    engine = resolve_study_weights(supplied, "style", "engine")
-    practical = resolve_study_weights(supplied, "style", "practical")
-    assert engine["engine_soundness"] == pytest.approx(0.4)
-    assert engine["practical_gamble"] == 0.0
-    assert practical["engine_soundness"] == 0.0
-    assert practical["practical_gamble"] == pytest.approx(0.6)
+def test_evaluation_weights_are_excluded_and_soft_weights_are_normalized():
+    supplied = {
+        "player_style_match": 0.4,
+        "engine_soundness": 0.9,
+        "practical_gamble": 0.8,
+        "systemness": 0.2,
+        "memory_simplicity": 0.4,
+    }
+    resolved = resolve_study_weights(supplied, "style", "engine")
+
+    assert resolved["engine_soundness"] == 0.0
+    assert resolved["practical_gamble"] == 0.0
+    assert resolved["player_style_match"] == pytest.approx(0.4)
+    assert resolved["systemness"] == pytest.approx(0.2)
+    assert resolved["memory_simplicity"] == pytest.approx(0.4)
+    assert sum(resolved.values()) == pytest.approx(1.0)
+
+
+def test_zero_soft_weight_levels_fall_back_to_equal_active_weights():
+    supplied = {key: 0.0 for key in (
+        "player_style_match",
+        "engine_soundness",
+        "aggressiveness",
+        "practical_gamble",
+        "systemness",
+        "memory_simplicity",
+    )}
+    resolved = resolve_study_weights(supplied, "custom", "practical")
+
+    assert resolved["aggressiveness"] == pytest.approx(1 / 3)
+    assert resolved["systemness"] == pytest.approx(1 / 3)
+    assert resolved["memory_simplicity"] == pytest.approx(1 / 3)
+    assert resolved["player_style_match"] == 0.0
+    assert resolved["engine_soundness"] == 0.0
+    assert resolved["practical_gamble"] == 0.0
+
+
+def test_evaluation_threshold_requires_data_only_when_positive():
+    assert passes_evaluation_threshold(
+        "engine", 0.0,
+        engine_soundness=0.5,
+        engine_target_cp=None,
+        practical_gamble=None,
+    )
+    assert not passes_evaluation_threshold(
+        "engine", 0.6,
+        engine_soundness=0.8,
+        engine_target_cp=None,
+        practical_gamble=None,
+    )
+    assert passes_evaluation_threshold(
+        "engine", 0.6,
+        engine_soundness=0.8,
+        engine_target_cp=300.0,
+        practical_gamble=None,
+    )
+    assert not passes_evaluation_threshold(
+        "practical", 0.6,
+        engine_soundness=0.8,
+        engine_target_cp=300.0,
+        practical_gamble=0.59,
+    )
+    assert passes_evaluation_threshold(
+        "practical", 0.6,
+        engine_soundness=0.2,
+        engine_target_cp=-300.0,
+        practical_gamble=0.6,
+    )
 
 
 def test_cp_to_utility_is_target_oriented_and_bounded():
@@ -237,6 +298,84 @@ _PLAYER = {
 }
 
 
+def test_engine_threshold_filters_only_feasible_player_moves():
+    class FakeEngine:
+        def analyse(self, board, limit):
+            cp = 400 if board.peek().uci() == "e2e4" else -400
+            return {"score": chess.engine.PovScore(chess.engine.Cp(cp), chess.WHITE)}
+
+    nodes = get_opening_study_tree_children(
+        _PLAYER,
+        OPENING_VECTORS,
+        "white",
+        [],
+        20,
+        soundness_engine=FakeEngine(),
+        evaluation_metric="engine",
+        evaluation_threshold=0.5,
+        opponent_move_ordering="popularity",
+    )
+
+    assert [node.move_uci for node in nodes] == ["e2e4"]
+
+
+def test_practical_threshold_filters_player_moves(monkeypatch):
+    class Practical:
+        raw = 0.1
+        sample_size = 100
+        coverage = 1.0
+
+        def __init__(self, percentile: float):
+            self.percentile = percentile
+
+    def fake_practical(board, target_color, opening_vectors_path):
+        return Practical(0.8 if board.peek().uci() == "e2e4" else 0.2)
+
+    monkeypatch.setattr(
+        "utils.opening_study_tree.practical_gamble_for_board",
+        fake_practical,
+    )
+    nodes = get_opening_study_tree_children(
+        _PLAYER,
+        OPENING_VECTORS,
+        "white",
+        [],
+        20,
+        evaluation_metric="practical",
+        evaluation_threshold=0.5,
+        opponent_move_ordering="popularity",
+    )
+
+    assert [node.move_uci for node in nodes] == ["e2e4"]
+
+
+def test_evaluation_threshold_does_not_filter_opponent_replies(monkeypatch):
+    class Practical:
+        percentile = 0.0
+        raw = 0.0
+        sample_size = 100
+        coverage = 1.0
+
+    monkeypatch.setattr(
+        "utils.opening_study_tree.practical_gamble_for_board",
+        lambda board, target_color, opening_vectors_path: Practical(),
+    )
+    nodes = get_opening_study_tree_children(
+        _PLAYER,
+        OPENING_VECTORS,
+        "white",
+        ["e2e4"],
+        5,
+        opponent_top_k=5,
+        evaluation_metric="practical",
+        evaluation_threshold=0.9,
+        opponent_move_ordering="popularity",
+    )
+
+    assert nodes
+    assert all(not node.is_target_move for node in nodes)
+
+
 def test_sparse_family_no_longer_has_max_systemness():
     """1-line family (entropy=0, diversity=0) must not get systemness≈1.0 after coverage shrink."""
     m = compute_node_metrics(
@@ -249,9 +388,9 @@ def test_sparse_family_no_longer_has_max_systemness():
     )
 
 
-def test_engine_soundness_weight_changes_study_score():
+def test_engine_soundness_is_reported_but_does_not_change_soft_score():
     weights = {
-        "player_style_match": 0.0,
+        "player_style_match": 1.0,
         "engine_soundness": 1.0,
         "aggressiveness": 0.0,
         "practical_gamble": 0.0,
@@ -279,17 +418,16 @@ def test_engine_soundness_weight_changes_study_score():
         engine_target_cp=800,
     )
 
-    assert bad["study_score"] == pytest.approx(0.2)
-    assert good["study_score"] == pytest.approx(0.8)
+    assert bad["study_score"] == pytest.approx(good["study_score"])
     assert bad["breakdown"]["engineSoundness"][0]["rawValue"] == pytest.approx(-800)
 
 
-def test_missing_practical_gamble_renormalizes_study_score():
+def test_practical_gamble_is_reported_but_does_not_change_soft_score():
     weights = {
-        "player_style_match": 0.0,
-        "engine_soundness": 0.5,
+        "player_style_match": 1.0,
+        "engine_soundness": 0.0,
         "aggressiveness": 0.0,
-        "practical_gamble": 0.5,
+        "practical_gamble": 1.0,
         "systemness": 0.0,
         "memory_simplicity": 0.0,
     }
@@ -304,8 +442,7 @@ def test_missing_practical_gamble_renormalizes_study_score():
         practical_gamble=0.2,
     )
 
-    assert missing["study_score"] == pytest.approx(0.8)
-    assert available["study_score"] == pytest.approx(0.5)
+    assert missing["study_score"] == pytest.approx(available["study_score"])
 
 
 def test_sparse_family_no_longer_has_zero_memory_complexity():

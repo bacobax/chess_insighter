@@ -4,10 +4,10 @@ This is an *additive* analysis module. It powers an interactive, lazily-expanded
 decision tree that suggests which opening moves a given player should study,
 based on calibrated opening feature vectors and a precomputed player vector.
 
-It is **not** an engine-best-move tree. Nodes are scored on style matching,
-calibrated opening characteristics, Lichess-weighted practical gamble,
-memorisation cost, systemness, and an optional bounded Stockfish soundness
-utility so stylistic matches that are simply losing can be demoted.
+It is **not** an engine-best-move tree. Player moves must first satisfy the
+selected Engine or Practical Gamble threshold. The feasible moves are then
+scored on style matching, calibrated opening characteristics, memorisation
+cost, and systemness.
 
 The module is intentionally dependency-light (csv, math, python-chess) and does
 not import from the FastAPI ``backend`` package so it can be reused from scripts,
@@ -57,9 +57,9 @@ MATCHER_FEATURE_WEIGHTS: dict[str, float] = {
 # Note: ``memory_simplicity`` is applied to ``(1 - memory_complexity)``.
 DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
     "player_style_match": 0.32,
-    "engine_soundness": 0.18,
+    "engine_soundness": 0.0,
     "aggressiveness": 0.15,
-    "practical_gamble": 0.10,
+    "practical_gamble": 0.0,
     "systemness": 0.13,
     "memory_simplicity": 0.12,
 }
@@ -67,27 +67,24 @@ DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
 ENGINE_SOUNDNESS_NEUTRAL = 0.5
 ENGINE_SOUNDNESS_CP_SCALE = 600.0
 
-# Dimensions whose source data overlaps with (or is independent of) the style
-# cosine.  The backend zeroes disallowed keys so client sliders can't reintroduce
-# them when the wrong mode is active.
+# Soft-ranking dimensions whose source data overlaps with (or is independent of)
+# the style cosine. Engine and Practical Gamble are deliberately absent: the
+# selected evaluation signal is a feasibility threshold, not a ranking term.
+# The backend zeroes disallowed keys so client payloads cannot reintroduce them.
 #
-# "style"  — player_style_match, selected evaluation, systemness, memory.
+# "style"  — player_style_match, systemness, memory.
 #             Aggressiveness is excluded because its source features already
 #             participate in the style cosine and would be double-counted.
-# "custom" — selected evaluation, aggro, systemness, memory.
+# "custom" — aggro, systemness, memory.
 #             player_style_match excluded: objective opening properties only.
 ALLOWED_WEIGHTS_BY_MODE: dict[str, frozenset[str]] = {
     "style": frozenset({
         "player_style_match",
-        "engine_soundness",
-        "practical_gamble",
         "systemness",
         "memory_simplicity",
     }),
     "custom": frozenset({
-        "engine_soundness",
         "aggressiveness",
-        "practical_gamble",
         "systemness",
         "memory_simplicity",
     }),
@@ -99,15 +96,50 @@ def resolve_study_weights(
     match_mode: str,
     evaluation_metric: str,
 ) -> dict[str, float]:
-    """Apply mode constraints and make Engine/Practical mutually exclusive."""
+    """Apply mode constraints and normalize the active soft-ranking weights.
+
+    ``evaluation_metric`` remains in the signature for API compatibility. Both
+    evaluation weights are always zero because evaluation is enforced as a
+    separate hard constraint.
+    """
     resolved = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
     allowed = ALLOWED_WEIGHTS_BY_MODE.get(match_mode, ALLOWED_WEIGHTS_BY_MODE["style"])
-    resolved = {key: (value if key in allowed else 0.0) for key, value in resolved.items()}
-    selected = "practical_gamble" if evaluation_metric == "practical" else "engine_soundness"
-    for key in ("engine_soundness", "practical_gamble"):
-        if key != selected:
-            resolved[key] = 0.0
+    resolved = {
+        key: (max(0.0, float(value)) if key in allowed else 0.0)
+        for key, value in resolved.items()
+    }
+    total = sum(resolved[key] for key in allowed)
+    if total <= 0.0:
+        equal_weight = 1.0 / len(allowed)
+        for key in allowed:
+            resolved[key] = equal_weight
+    else:
+        for key in allowed:
+            resolved[key] /= total
     return resolved
+
+
+def passes_evaluation_threshold(
+    evaluation_metric: str,
+    threshold: float,
+    *,
+    engine_soundness: float,
+    engine_target_cp: float | None,
+    practical_gamble: float | None,
+) -> bool:
+    """Return whether a player's candidate move satisfies the hard constraint.
+
+    A zero threshold disables filtering. For a positive threshold, unavailable
+    data cannot establish feasibility and therefore fails the constraint.
+    ``engine_target_cp`` distinguishes a measured neutral engine score from the
+    neutral placeholder used when no engine result is available.
+    """
+    minimum = clamp01(float(threshold))
+    if minimum <= 0.0:
+        return True
+    if evaluation_metric == "practical":
+        return practical_gamble is not None and clamp01(practical_gamble) >= minimum
+    return engine_target_cp is not None and clamp01(engine_soundness) >= minimum
 
 # Common White first moves shown at the root when the target colour is Black,
 # before any style-based recommendation kicks in.
@@ -709,14 +741,11 @@ def compute_node_metrics(
     w = {**DEFAULT_STUDY_WEIGHTS, **(weights or {})}
     score_terms: list[tuple[float, float]] = [
         (w["player_style_match"], style),
-        (w["engine_soundness"], engine_soundness),
         (w["aggressiveness"], aggressiveness),
         (w["systemness"], systemness),
         (w["memory_simplicity"], 1.0 - memory_complexity),
     ]
-    if practical_gamble is not None:
-        score_terms.append((w["practical_gamble"], practical_gamble))
-    weight_sum = sum(abs(weight) for weight, _ in score_terms) or 1.0
+    weight_sum = sum(weight for weight, _ in score_terms) or 1.0
     study_score = sum(weight * value for weight, value in score_terms) / weight_sum
 
     breakdown: dict[str, Any] = {
@@ -1030,6 +1059,7 @@ def get_opening_study_tree_children(
     soundness_depth: int = 8,
     match_mode: str = "style",
     evaluation_metric: str = "engine",
+    evaluation_threshold: float = 0.0,
     opponent_move_ordering: str = "engine",
 ) -> list[OpeningStudyTreeNode]:
     """Compute child suggestion nodes for a single prefix (one level, lazy).
@@ -1057,8 +1087,9 @@ def get_opening_study_tree_children(
 
     top_k = max(1, int(top_k))
     opp_k = max(1, int(opponent_top_k)) if opponent_top_k is not None else top_k
-    # Authoritative backend enforcement: clients cannot score both evaluation
-    # signals at once or re-enable dimensions excluded by the selected mode.
+    threshold = clamp01(float(evaluation_threshold))
+    # Authoritative backend enforcement: clients cannot re-enable dimensions
+    # excluded by the selected mode. Active soft weights are normalized here.
     weights = resolve_study_weights(weights, match_mode, evaluation_metric)
     player = _normalize_player_vector(player_vector)
     prefix = list(prefix_uci or [])
@@ -1078,7 +1109,7 @@ def get_opening_study_tree_children(
     prior_diversity, prior_entropy = _compute_global_priors(fv_rows)
     soundness_cache: dict[str, tuple[float, float | None]] = {}
     use_soundness_engine = soundness_engine if (
-        weights.get("engine_soundness", 0.0) > 0 or opponent_order == "engine"
+        evaluation_metric == "engine" or opponent_order == "engine"
     ) else None
 
     if target == "black" and len(prefix) == 0:
@@ -1175,6 +1206,14 @@ def get_opening_study_tree_children(
             prior_diversity=prior_diversity,
             prior_entropy=prior_entropy,
         )
+        if mover_is_target and not passes_evaluation_threshold(
+            evaluation_metric,
+            threshold,
+            engine_soundness=metrics["engine_soundness"],
+            engine_target_cp=engine_target_cp,
+            practical_gamble=metrics["practical_gamble"],
+        ):
+            continue
         best_fv = max(fv_list, key=lambda r: int(r.get("line_count") or 0))
         names = [
             str(fv.get("opening_name") or "")

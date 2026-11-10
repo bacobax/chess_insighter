@@ -76,6 +76,7 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
             soundness_engine=engine,
             match_mode=request.match_mode,
             evaluation_metric=request.evaluation_metric,
+            evaluation_threshold=request.evaluation_threshold,
             opponent_move_ordering=request.opponent_move_ordering,
         )
 

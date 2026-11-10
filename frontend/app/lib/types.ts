@@ -391,6 +391,7 @@ export type OpeningStudyTreeChildrenRequest = {
   matcherWeights?: Partial<Record<MatcherFeatureKey, number>>;
   matchMode?: MatchMode;
   evaluationMetric?: EvaluationMetric;
+  evaluationThreshold?: number;
 };
 
 export type MetricComponent = {

@@ -227,6 +227,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
       matcherWeights: controls.weightedMatching ? controls.matcherWeights : undefined,
       matchMode: controls.matchMode,
       evaluationMetric: controls.evaluationMetric,
+      evaluationThreshold: controls.evaluationThresholds[controls.evaluationMetric],
     }),
     [controls],
   );
