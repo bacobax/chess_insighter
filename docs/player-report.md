@@ -515,37 +515,37 @@ Use this checklist when modifying the player report:
 Run backend service tests:
 
 ```bash
-conda run -n chess python -m pytest tests/test_backend_services.py -q
+uv run pytest tests/test_backend_services.py -q
 ```
 
 Run global statistics tests:
 
 ```bash
-conda run -n chess python -m pytest test_global_statistics_transformer.py -q
+uv run pytest test_global_statistics_transformer.py -q
 ```
 
 Run player feature tests:
 
 ```bash
-conda run -n chess python -m pytest test_player_feature_transformer.py -q
+uv run pytest test_player_feature_transformer.py -q
 ```
 
 Run game enrichment tests:
 
 ```bash
-conda run -n chess python -m pytest test_game_enrichment_transformer.py -q
+uv run pytest test_game_enrichment_transformer.py -q
 ```
 
 Run all tests:
 
 ```bash
-conda run -n chess python -m pytest -q
+uv run pytest -q
 ```
 
 Run the backend locally:
 
 ```bash
-conda run -n chess python -m uvicorn backend.main:app --port 8000 --reload
+uv run uvicorn backend.main:app --port 8000 --reload
 ```
 
 Run the frontend locally:

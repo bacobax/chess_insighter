@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Python Environment
 
-All Python work runs under the `chess` conda environment — it is the only environment that has `python-chess`, `fastapi`, `uvicorn`, and the other dependencies:
+Python dependencies are managed by [uv](https://docs.astral.sh/uv/): `pyproject.toml` declares them, `uv.lock` pins them, and the environment lives in `.venv/` (Python 3.12, see `.python-version`). Always run Python through `uv run`, which syncs the environment automatically:
 
 ```bash
-conda activate chess
-# or use the full path:
-/Users/francescobassignana/miniforge3/envs/chess/bin/python
+uv sync                    # app + dev (pytest, httpx) dependencies
+uv sync --group ml         # also torch, pyyaml, zstandard, tqdm (encoder training)
+uv sync --group notebooks  # also marimo, altair, scikit-learn (features_comparison.py)
+uv add <package>           # add a dependency (use --group <name> for optional groups)
 ```
 
 ## Common Commands
@@ -18,19 +19,19 @@ conda activate chess
 
 ```bash
 # Run dev server (reload on change)
-conda run -n chess python -m uvicorn backend.main:app --port 8000 --reload
+uv run uvicorn backend.main:app --port 8000 --reload
 
 # Run all tests
-conda run -n chess python -m pytest -q
+uv run pytest -q
 
 # Run a single test file
-conda run -n chess python -m pytest test_opening_study_tree.py -q
+uv run pytest test_opening_study_tree.py -q
 
 # Rebuild opening feature vectors (requires Stockfish; regenerates openings_dataset/opening_feature_vectors.csv)
-conda run -n chess python build_opening_feature_vectors.py
+uv run python build_opening_feature_vectors.py
 
 # Refresh Lichess popularity + Practical Gamble snapshot (requires LICHESS_API_TOKEN and Stockfish)
-conda run -n chess python build_opening_popularity.py
+uv run python build_opening_popularity.py
 ```
 
 ### Frontend (inside `chess_insighter/`)
@@ -208,13 +209,13 @@ Board position → 128-d L2-normalized embedding `z`, trained with multitask dis
 
 ```bash
 # base config
-/Users/francescobassignana/miniforge3/envs/chess/bin/python train_encoder.py --config config/position_encoder_train.yaml
+uv run --group ml python train_encoder.py --config config/position_encoder_train.yaml
 
 # follow-up experiment
-/Users/francescobassignana/miniforge3/envs/chess/bin/python train_encoder.py --config config/position_encoder_followup.yaml
+uv run --group ml python train_encoder.py --config config/position_encoder_followup.yaml
 
 # full sweep (4 configs + plots)
-/Users/francescobassignana/miniforge3/envs/chess/bin/python -u run_sweep.py
+uv run --group ml python -u run_sweep.py
 ```
 
 ### Frontend (`frontend/`)

@@ -14,11 +14,13 @@ The position-style encoder (`train_encoder.py`, `run_sweep.py`, and `utils/posit
 
 ## Environment
 
-Run Python commands in the `chess` conda environment. It contains `python-chess`, FastAPI, Stockfish integrations, and the other required packages.
+Python dependencies are managed by [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`, environment in `.venv/`). Run Python commands through `uv run`; it syncs the environment automatically.
 
 ```bash
-conda run -n chess python --version
-conda run -n chess python -m pip install -r requirements.txt
+uv run python --version
+uv sync                 # app + dev (pytest) dependencies
+uv sync --group ml      # also torch etc. for train_encoder.py / run_sweep.py
+uv sync --group notebooks  # marimo, altair, scikit-learn
 ```
 
 The frontend uses npm and must be run from `frontend/`.
@@ -42,16 +44,16 @@ From the repository root:
 
 ```bash
 # Backend development server: http://localhost:8000
-conda run -n chess python -m uvicorn backend.main:app --port 8000 --reload
+uv run uvicorn backend.main:app --port 8000 --reload
 
 # Full Python test suite
-conda run -n chess python -m pytest -q
+uv run pytest -q
 
 # Focused Python test
-conda run -n chess python -m pytest test_opening_study_tree.py -q
+uv run pytest test_opening_study_tree.py -q
 
 # Rebuild opening vectors (expensive; requires Stockfish)
-conda run -n chess python build_opening_feature_vectors.py
+uv run python build_opening_feature_vectors.py
 ```
 
 From `frontend/`:

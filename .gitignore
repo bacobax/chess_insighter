@@ -17,3 +17,6 @@ run_all.sh
 .DS_Store
 .vscode/
 .env
+
+# uv virtual environment
+.venv/

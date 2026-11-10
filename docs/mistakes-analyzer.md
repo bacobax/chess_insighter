@@ -153,7 +153,7 @@ It does not use `sessionStorage`.
 Backend service tests cover shared initial artifacts, removal without engine work, incremental additions, depth and punishment invalidation, active restore, catalog filtering, invalid IDs, and fallback reports.
 
 ```bash
-conda run -n chess env PYTHONPATH=. pytest -q tests/test_backend_services.py test_mistakes_analyzer.py
+uv run pytest -q tests/test_backend_services.py test_mistakes_analyzer.py
 cd frontend && npm run typecheck
 cd frontend && npm run build
 ```
