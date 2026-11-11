@@ -97,15 +97,19 @@ function StyleProfileSection({
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-2 text-[10px] text-slate-400">
-        <span className="font-medium uppercase tracking-wide">Style profile</span>
-        <div className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-3 rounded-full bg-slate-400" />
-          <span>you</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-3 rounded-full bg-slate-600" />
-          <span>opening</span>
-        </div>
+        <span className="font-medium uppercase tracking-wide">{playerVector ? "Style profile" : "Position profile"}</span>
+        {playerVector ? (
+          <>
+            <div className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded-full bg-slate-400" />
+              <span>you</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded-full bg-slate-600" />
+              <span>opening</span>
+            </div>
+          </>
+        ) : null}
       </div>
       {STYLE_FEATURES.map(({ key, label, color }) => {
         const openingVal = openingFeatures[key] ?? 0;

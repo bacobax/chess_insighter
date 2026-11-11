@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { BarChart3, Bookmark, BookmarkCheck, BookOpen, Loader2, Network, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router";
+import { BarChart3, Bookmark, BookmarkCheck, BookOpen, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Progress } from "~/components/ui/progress";
@@ -466,8 +466,6 @@ function OpeningRepertoireSection({
     black: groups?.black?.opening_characteristics ?? charts.opening_characteristics,
     both: groups?.both?.opening_characteristics ?? charts.opening_characteristics,
   };
-  const studyUrl = `/opening-study?username=${encodeURIComponent(username)}&reportId=${encodeURIComponent(report.report_id ?? "")}`;
-
   return (
     <section aria-labelledby={headingId} className="space-y-4 border-t border-slate-200 pt-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -477,11 +475,6 @@ function OpeningRepertoireSection({
           description="What appears most often and the kinds of positions reached from those openings."
           headingId={headingId}
         />
-        <Link to={studyUrl} className="self-start sm:self-auto">
-          <Button variant="outline" size="sm">
-            <Network className="h-4 w-4" /> Study repertoire
-          </Button>
-        </Link>
       </div>
       <div className="player-report-opening-grid">
         <FavouriteOpeningsChart data={charts.favourite_openings} />

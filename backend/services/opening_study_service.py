@@ -58,9 +58,20 @@ def _resolve_player_vector(request: OpeningStudyTreeChildrenRequest) -> tuple[di
     return vector, f"flat-cache:username={request.username}"
 
 
+# Style match is an in-development feature: the Opening Lab tree is general
+# (not bound to any report or player), so only the custom scoring mode is
+# served. The style path stays in utils/opening_study_tree for later.
+STYLE_MATCH_ENABLED = False
+
+
 def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dict[str, Any]:
     opening_vectors_path = _resolve_opening_vectors_path(request)
-    player_vector, vector_source = _resolve_player_vector(request)
+    if not STYLE_MATCH_ENABLED and request.match_mode != "custom":
+        request = request.model_copy(update={"match_mode": "custom"})
+    if request.match_mode == "style":
+        player_vector, vector_source = _resolve_player_vector(request)
+    else:
+        player_vector, vector_source = {}, None
     weights = request.weights.to_weights() if request.weights is not None else None
     engine_path = settings.stockfish_path
 
@@ -106,5 +117,5 @@ def opening_study_tree_children(request: OpeningStudyTreeChildrenRequest) -> dic
         "prefixUci": list(request.prefix_uci or []),
         "children": [node.to_dict() for node in nodes],
         "vectorSource": vector_source,
-        "playerVector": player_vector,
+        "playerVector": player_vector or None,
     }

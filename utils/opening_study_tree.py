@@ -704,10 +704,13 @@ def compute_node_metrics(
     color_vector = opening_vector_for_color(aggregate, target_color)
 
     effective_matcher_weights = matcher_weights if matcher_weights is not None else MATCHER_FEATURE_WEIGHTS
+    # An empty player vector means a general (report-free) tree: style match
+    # is not computed and contributes nothing.
+    has_player = bool(player_vector)
     style = compute_similarity(
         player_vector, color_vector, effective_matcher_weights,
         similarity_type=similarity_type, weighted=weighted_matching,
-    )
+    ) if has_player else 0.0
     if style is None:
         # No comparable features at all -> hard mismatch, surfaced loudly.
         if not any(player_vector.get(k) is not None for k in MATCHER_FEATURE_WEIGHTS):
@@ -822,7 +825,7 @@ def compute_node_metrics(
                 "weight": float(effective_matcher_weights.get(k, 1.0) if weighted_matching else 1.0),
             }
             for k in MATCHER_COLUMNS_V2
-            if k in effective_matcher_weights
+            if has_player and k in effective_matcher_weights
         ],
         "engineSoundness": [
             {
@@ -1087,7 +1090,7 @@ def _sort_study_nodes(
 
 
 def get_opening_study_tree_children(
-    player_vector: dict[str, float],
+    player_vector: dict[str, float] | None,
     opening_vectors_path: str,
     target_color: str,
     prefix_uci: list[str],
@@ -1134,7 +1137,11 @@ def get_opening_study_tree_children(
     # Authoritative backend enforcement: clients cannot re-enable dimensions
     # excluded by the selected mode. Active soft weights are normalized here.
     weights = resolve_study_weights(weights, match_mode, evaluation_metric)
-    player = _normalize_player_vector(player_vector)
+    player = _normalize_player_vector(player_vector or {})
+    if match_mode == "style" and not player:
+        raise PlayerVectorFeatureMismatch(
+            "Style match mode needs a player vector; use the custom mode for a general tree."
+        )
     prefix = list(prefix_uci or [])
 
     board = _board_for_prefix(prefix)

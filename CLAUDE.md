@@ -113,7 +113,7 @@ Key conventions:
 
 **`opening_study_service.py`** — opening study tree orchestration
 - Keywords: `opening_study_tree_children`, `_resolve_player_vector`, `_resolve_opening_vectors_path`
-- Resolves the player vector (from cache or request body) then calls `utils/opening_study_tree.get_opening_study_tree_children`
+- Calls `utils/opening_study_tree.get_opening_study_tree_children`. Style match is in development (`STYLE_MATCH_ENABLED = False`): requests are coerced to `matchMode=custom` and no player vector or report is resolved, so the tree is general
 
 **`openings_service.py`** — opening feature loading + player↔opening matching
 - Keywords: `opening_feature_rows`, `top_opening_matches`, `weighted_cosine_similarity`, `unweighted_cosine_similarity`, `weighted_dot_product_similarity`, `structure_distribution_similarity`, `build_opening_charts`, `top_opening_features`, `favourite_openings`, `find_opening_family_row`, `uci_to_fen`
@@ -260,7 +260,7 @@ React Router 7 SPA (`ssr: false`), Tailwind CSS 4, Radix UI primitives. API base
 | `home.tsx` | `/` | Username entry form |
 | `games.$username.tsx` | `/games/:username` | Paginated game list |
 | `report.$username.tsx` | `/report/:username` | Full player report (stats + opening matches) |
-| `opening-study.tsx` | `/opening-study?username=&color=` | Interactive Opening Study Tree whiteboard |
+| `opening-study.tsx` | `/opening-study?username=&color=` | Opening Lab tree (general, no report). First visit shows the full-page setup survey (`OpeningLabSetup.tsx`); answers + controls persist in localStorage per account. `username` only sets the Back target. Entry point: player dossier (`OpeningLabEntry.tsx`) |
 | `mistakes.$username.tsx` | `/mistakes/:username` | Mistakes analysis — blunder list |
 | `mistakes.$username.blunder.$blunderKey.tsx` | `/mistakes/:username/blunder/:blunderKey` | Individual blunder deep-dive + punishment line |
 
@@ -324,6 +324,7 @@ Never commit or create branches without the user choosing one of these. Never ad
 ## Feature Flags / Important Invariants
 
 - `opening_study_tree.py` is **additive**: it must not affect the existing opening explorer or report pipeline.
+- Style match is an in-development feature, gated by `STYLE_MATCH_ENABLED` in both `backend/services/opening_study_service.py` and `OpeningStudyControls.tsx`. Its code paths are kept; an empty player vector means style = 0 and no style breakdown.
 - Player vectors in the cache use **generalized** (non-color-prefixed) feature names. Color-specific comparison is done by reading `white_*`/`black_*` columns from the opening CSV, not by storing separate player vectors per color.
 - Engine/Practical Gamble is a hard threshold applied only to the player's candidate moves. The Engine threshold is a percentile among sibling candidates (`engine_percentiles`; moves within `ENGINE_TOP_TOLERANCE_CP` of the best always pass), not an absolute utility. The remaining active soft-ranking weights are normalized by their sum in `resolve_study_weights`, so independent, unnormalized slider levels in API requests still produce valid `[0, 1]` scores.
 - `_load_opening_rows` in the study tree is `@lru_cache(maxsize=8)` keyed by file path string — safe for the lifetime of the process but will not see CSV changes without a restart.

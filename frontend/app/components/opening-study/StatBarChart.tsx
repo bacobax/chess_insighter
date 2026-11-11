@@ -16,7 +16,6 @@ function clamp01(value: number): number {
 
 function barsFor(stats: OpeningStudyTreeNode["stats"]): Bar[] {
   return [
-    { label: "Style", shortLabel: "ST", value: stats.playerStyleMatch, color: "#3b82f6" },
     { label: "Engine", shortLabel: "EN", value: stats.engineSoundness, color: "#14b8a6" },
     { label: "Aggro", shortLabel: "AG", value: stats.aggressiveness, color: "#ef4444" },
     { label: "Practical", shortLabel: "PG", value: stats.practicalGamble, color: "#f59e0b" },

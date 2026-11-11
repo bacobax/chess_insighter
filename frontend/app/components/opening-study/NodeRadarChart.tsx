@@ -6,7 +6,6 @@ import type { OpeningStudyTreeNode } from "~/lib/types";
 // during the hover-reveal animation.
 
 const AXES = [
-  { key: "playerStyleMatch" as const, label: "Style" },
   { key: "aggressiveness" as const, label: "Aggro" },
   { key: "practicalGamble" as const, label: "Practical" },
   { key: "memoryComplexity" as const, label: "Memory" },

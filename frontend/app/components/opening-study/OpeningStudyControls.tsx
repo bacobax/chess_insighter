@@ -1,6 +1,5 @@
-import { RotateCcw, Sparkles } from "lucide-react";
+import { ListChecks, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { cn } from "~/lib/utils";
 import type {
   EvaluationMetric,
@@ -14,13 +13,12 @@ import type {
 } from "~/lib/types";
 import { NodeInspectorPanel } from "./NodeInspectorPanel";
 
+/** Style match is an in-development feature. While it is off, the tree is
+ *  general (no report or player vector) and only the custom mode is offered.
+ *  Mirrors STYLE_MATCH_ENABLED in backend/services/opening_study_service.py. */
+export const STYLE_MATCH_ENABLED = false;
+
 export type StudyControlsState = {
-  /** Preferred vector source: hash from a built player report.
-   *  Uses the vector computed from the exact games+filters of that report. */
-  cacheHash: string;
-  /** Fallback when no cacheHash: username lookup in the flat player_vectors.json.
-   *  Ignores game filters. */
-  username: string;
   targetColor: TargetColor;
   topK: number;
   opponentTopK: number;
@@ -75,7 +73,7 @@ function allowedFor(mode: MatchMode): Set<WeightKey> {
 
 const MODE_DESCRIPTIONS: Record<MatchMode, string> = {
   style: "Ranks feasible openings by YOUR playing style, systemness, and memory simplicity.",
-  custom: "Ranks feasible openings by aggressiveness, systemness, and memory simplicity. Style match is hidden.",
+  custom: "Ranks feasible openings by aggressiveness, systemness, and memory simplicity.",
 };
 
 // Descriptions shown as tooltips on the score weight labels.
@@ -124,6 +122,11 @@ const WEIGHT_FIELDS: { key: WeightKey; label: string; color: string }[] = [
   { key: "memorySimplicity", label: "Mem. simplicity", color: "#7c3aed" },
 ];
 
+// The style weight row is hidden while style match is in development.
+const VISIBLE_WEIGHT_FIELDS = WEIGHT_FIELDS.filter(
+  ({ key }) => STYLE_MATCH_ENABLED || key !== "playerStyleMatch",
+);
+
 function setWeightLevel(
   weights: Required<OpeningStudyWeights>,
   changedKey: WeightKey,
@@ -143,40 +146,19 @@ function effectiveWeight(
   return total > 0 ? weights[key] / total : 1 / allowed.size;
 }
 
-function VectorSourceBadge({ cacheHash }: { cacheHash: string }) {
-  if (cacheHash) {
-    return (
-      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
-        <span className="font-medium">Report vector</span>
-        <br />
-        <span className="font-mono text-[10px] text-emerald-600">{cacheHash.slice(0, 16)}…</span>
-        <br />
-        <span className="text-emerald-600">Game filters from the report apply.</span>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-      <span className="font-medium">Flat cache fallback</span>
-      <br />
-      Game filters (time class, rated, dates) are <span className="font-medium">not</span> applied.
-      Build a report first for accurate suggestions.
-    </div>
-  );
-}
-
 type Props = {
   state: StudyControlsState;
   loading: boolean;
   onChange: (patch: Partial<StudyControlsState>) => void;
   onGenerate: () => void;
   onReset: () => void;
+  onRedoSetup: () => void;
   selectedNode?: OpeningStudyTreeNode | null;
   playerVector?: Record<string, number> | null;
 };
 
-export function OpeningStudyControls({ state, loading, onChange, onGenerate, onReset, selectedNode, playerVector }: Props) {
-  const canGenerate = !loading && (state.cacheHash.trim() !== "" || state.username.trim() !== "");
+export function OpeningStudyControls({ state, loading, onChange, onGenerate, onReset, onRedoSetup, selectedNode, playerVector }: Props) {
+  const canGenerate = !loading;
 
   const allowedKeys = allowedFor(state.matchMode);
 
@@ -185,6 +167,7 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
   }
 
   function handleModeChange(newMode: MatchMode) {
+    if (newMode === "style" && !STYLE_MATCH_ENABLED) return;
     onChange({ matchMode: newMode });
   }
 
@@ -199,34 +182,20 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
   return (
     <div className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto p-4" style={{ backgroundColor: "var(--paper)", borderRight: "1px solid var(--line)" }}>
       <div>
-        <h2 className="text-sm font-semibold text-slate-900">Opening Study Tree</h2>
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-900">Opening Study Tree</h2>
+          <button
+            type="button"
+            onClick={onRedoSetup}
+            className="inline-flex shrink-0 items-center gap-1 text-[10px] text-slate-400 hover:text-slate-600"
+          >
+            <ListChecks className="h-3 w-3" /> Redo setup
+          </button>
+        </div>
         <p className="mt-1 text-xs text-slate-500">
-          Style-matched, lazily expanded opening suggestions. Click a node to expand its branch.
+          General opening suggestions ranked by the criteria below. Click a node to expand its branch.
         </p>
       </div>
-
-      <VectorSourceBadge cacheHash={state.cacheHash} />
-
-      <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-        Report ID
-        <Input
-          value={state.cacheHash}
-          placeholder="Open from a saved report"
-          onChange={(event) => onChange({ cacheHash: event.target.value })}
-        />
-        <span className="text-[10px] text-slate-400">
-          Owner-bound report reference — ensures correct game filters.
-        </span>
-      </label>
-
-      <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-        Username (flat-cache fallback)
-        <Input
-          value={state.username}
-          placeholder="chess.com username"
-          onChange={(event) => onChange({ username: event.target.value })}
-        />
-      </label>
 
       <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
         Target color
@@ -303,23 +272,39 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
       <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
         Scoring mode
         <div className="flex gap-2">
-          {(["style", "custom"] as MatchMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => handleModeChange(m)}
-              className={cn(
-                "flex-1 rounded-md border px-2 py-1.5 text-[11px] capitalize transition-colors",
-                state.matchMode === m
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-              )}
-            >
-              {m === "style" ? "Style match" : "Custom"}
-            </button>
-          ))}
+          {(["style", "custom"] as MatchMode[]).map((m) => {
+            const unavailable = m === "style" && !STYLE_MATCH_ENABLED;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => handleModeChange(m)}
+                disabled={unavailable}
+                aria-describedby={unavailable ? "style-match-in-development" : undefined}
+                className={cn(
+                  "flex flex-1 flex-col items-center gap-0.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors",
+                  state.matchMode === m
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                  unavailable && "cursor-not-allowed opacity-60 hover:bg-white",
+                )}
+              >
+                {m === "style" ? "Style match" : "Custom"}
+                {unavailable ? (
+                  <span className="rounded-full border border-amber-400 px-1.5 text-[8px] font-semibold uppercase tracking-wide text-amber-600">
+                    In development
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
         <p className="text-[10px] text-slate-400">{MODE_DESCRIPTIONS[state.matchMode]}</p>
+        {!STYLE_MATCH_ENABLED ? (
+          <p id="style-match-in-development" className="text-[10px] text-amber-600">
+            Style match (ranking openings by your own playing style) is in development.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
@@ -386,7 +371,7 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
           Levels are independent. Effective weights are normalized from the active levels.
         </p>
 
-        {WEIGHT_FIELDS.map(({ key, label, color }) => {
+        {VISIBLE_WEIGHT_FIELDS.map(({ key, label, color }) => {
           const active = allowedKeys.has(key);
           const levelPct = Math.round(state.weights[key] * 100);
           const effectivePct = Math.round(effectiveWeight(state.weights, key, allowedKeys) * 100);
@@ -447,7 +432,8 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         </div>
       </div>
 
-      {/* Matching configuration */}
+      {/* Matching configuration — style match only (in development) */}
+      {STYLE_MATCH_ENABLED && state.matchMode === "style" && (
       <div className="flex flex-col gap-2 rounded-md border border-slate-200 p-3">
         <span className="text-xs font-medium text-slate-600">Style matching</span>
 
@@ -548,9 +534,10 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
           </div>
         )}
       </div>
+      )}
 
-      {/* Your style — read-only player vector bars */}
-      {playerVector && (
+      {/* Your style — read-only player vector bars (style match only) */}
+      {STYLE_MATCH_ENABLED && playerVector && (
         <div className="flex flex-col gap-1 rounded-md border border-slate-200 p-3">
           <div className="mb-1">
             <span className="text-xs font-medium text-slate-600">Your style</span>

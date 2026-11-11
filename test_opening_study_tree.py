@@ -651,3 +651,47 @@ def test_worst_line_count_round_trips_through_csv(tmp_path):
     assert float(row["raw_black_worst_line_count"]) == pytest.approx(2.45, abs=1e-4)
     assert float(row["black_worst_line_count"])     == pytest.approx(0.80, abs=1e-4)
     assert int(row["black_worst_line_count_raw_int"]) == 9
+
+
+def _general_request(**overrides):
+    from backend.models import OpeningStudyTreeChildrenRequest
+
+    payload = {
+        "targetColor": "white",
+        "prefixUci": [],
+        "topK": 4,
+        "opponentTopK": 4,
+        "opponentMoveOrdering": "popularity",
+        "evaluationMetric": "practical",
+        "evaluationThreshold": 0.0,
+        **overrides,
+    }
+    return OpeningStudyTreeChildrenRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize("color,prefix", [("white", []), ("black", []), ("black", ["e2e4"])])
+def test_general_tree_needs_no_report_or_username(color, prefix):
+    from backend.services.opening_study_service import opening_study_tree_children
+
+    payload = opening_study_tree_children(_general_request(targetColor=color, prefixUci=prefix))
+
+    assert payload["children"]
+    assert payload["playerVector"] is None
+    assert payload["vectorSource"] is None
+    assert all(node["playerStyleMatch"] == 0.0 for node in payload["children"])
+    assert all(not node["breakdown"].get("playerStyleMatch") for node in payload["children"])
+
+
+def test_style_mode_is_disabled_and_coerced_to_custom():
+    from backend.services.opening_study_service import opening_study_tree_children
+
+    # No vector source is given: a real style request would fail to resolve one.
+    payload = opening_study_tree_children(_general_request(matchMode="style", username="nobody"))
+
+    assert payload["children"]
+    assert payload["playerVector"] is None
+
+
+def test_style_mode_without_vector_is_rejected_in_the_engine():
+    with pytest.raises(PlayerVectorFeatureMismatch):
+        get_opening_study_tree_children(None, OPENING_VECTORS, "white", [], 4, match_mode="style")

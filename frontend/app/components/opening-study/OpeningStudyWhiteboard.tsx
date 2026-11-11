@@ -215,8 +215,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
 
   const requestBase = useCallback(
     () => ({
-      reportId: controls.cacheHash.trim() || undefined,
-      username: controls.username.trim() || undefined,
+      // General tree: no report or player vector is sent (style match is in development).
       targetColor: controls.targetColor,
       topK: controls.topK,
       opponentTopK: controls.opponentTopK,

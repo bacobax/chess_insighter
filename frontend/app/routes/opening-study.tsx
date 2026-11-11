@@ -1,58 +1,90 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import {
-  DEFAULT_MATCHER_WEIGHTS,
-  DEFAULT_EVALUATION_THRESHOLDS,
-  DEFAULT_WEIGHTS,
   OpeningStudyControls,
   type StudyControlsState,
 } from "~/components/opening-study/OpeningStudyControls";
+import {
+  DEFAULT_ANSWERS,
+  OpeningLabSetup,
+  controlsFromAnswers,
+  loadStoredSetup,
+  saveStoredSetup,
+  type SetupAnswers,
+} from "~/components/opening-study/OpeningLabSetup";
 import { OpeningStudyWhiteboard } from "~/components/opening-study/OpeningStudyWhiteboard";
 import type { OpeningStudyTreeNode, TargetColor } from "~/lib/types";
-import { RequireAuth } from "~/components/auth/auth-provider";
+import { RequireAuth, useAuth } from "~/components/auth/auth-provider";
 
 export function meta() {
   return [
-    { title: "Opening Study Tree · Chess Insighter" },
-    { name: "description", content: "Interactive, style-matched opening study suggestions." },
+    { title: "Opening Lab · Chess Insighter" },
+    { name: "description", content: "Interactive opening study tree ranked by your own criteria." },
   ];
 }
 
 export default function OpeningStudyPage() {
-  const [searchParams] = useSearchParams();
-  const initialUsername = searchParams.get("username") ?? "";
-  const initialReportId = searchParams.get("reportId") ?? "";
-  const initialColor = (searchParams.get("color") as TargetColor | null) ?? "white";
+  return <RequireAuth><OpeningLab /></RequireAuth>;
+}
 
-  const [controls, setControls] = useState<StudyControlsState>({
-    cacheHash: initialReportId,
-    username: initialUsername,
-    targetColor: initialColor === "black" ? "black" : "white",
-    topK: 4,
-    opponentTopK: 8,
-    opponentMoveOrdering: "popularity",
-    weights: { ...DEFAULT_WEIGHTS },
-    similarityType: "cosine",
-    weightedMatching: true,
-    matcherWeights: { ...DEFAULT_MATCHER_WEIGHTS },
-    matchMode: "style",
-    evaluationMetric: "practical",
-    evaluationThresholds: { ...DEFAULT_EVALUATION_THRESHOLDS },
+function colorParam(value: string | null): TargetColor | null {
+  return value === "white" || value === "black" ? value : null;
+}
+
+function OpeningLab() {
+  const { user } = useAuth();
+  const userId = user?.id ?? "anonymous";
+  const [searchParams] = useSearchParams();
+  // `username` only tells Back where to return; the tree itself is general.
+  const fromUsername = searchParams.get("username") ?? "";
+  const urlColor = colorParam(searchParams.get("color"));
+
+  const [stored] = useState(() => loadStoredSetup(userId));
+  const [answers, setAnswers] = useState<SetupAnswers>(() => ({
+    ...(stored?.answers ?? DEFAULT_ANSWERS),
+    ...(urlColor ? { color: urlColor } : {}),
+  }));
+  const [controls, setControls] = useState<StudyControlsState>(() => {
+    const base = stored?.controls ?? controlsFromAnswers(answers);
+    return urlColor ? { ...base, targetColor: urlColor } : base;
   });
-  const [generationKey, setGenerationKey] = useState(0);
+  // First visit: the survey covers the page until it is answered or skipped.
+  const [hasSetup, setHasSetup] = useState(stored !== null);
+  const [setupOpen, setSetupOpen] = useState(!hasSetup);
+  // Returning users get their saved tree straight away.
+  const [generationKey, setGenerationKey] = useState(stored ? 1 : 0);
   const [selectedNode, setSelectedNode] = useState<OpeningStudyTreeNode | null>(null);
   const [playerVector, setPlayerVector] = useState<Record<string, number> | null>(null);
 
+  useEffect(() => {
+    if (!setupOpen) saveStoredSetup(userId, answers, controls);
+  }, [answers, controls, setupOpen, userId]);
+
   const update = (patch: Partial<StudyControlsState>) => setControls((prev) => ({ ...prev, ...patch }));
 
-  const backTarget = initialUsername
-    ? `/report/${encodeURIComponent(initialUsername)}`
-    : "/";
+  function completeSetup(next: SetupAnswers) {
+    setAnswers(next);
+    setControls(controlsFromAnswers(next));
+    setSelectedNode(null);
+    setHasSetup(true);
+    setSetupOpen(false);
+    setGenerationKey((key) => key + 1);
+  }
 
-  return <RequireAuth>{(
+  const backTarget = fromUsername ? `/report/${encodeURIComponent(fromUsername)}` : "/dashboard";
+
+  return (
     <main id="main-content" className="flex h-screen w-screen flex-col" style={{ color: "var(--ink)" }}>
+      {setupOpen ? (
+        <OpeningLabSetup
+          initialAnswers={answers}
+          canCancel={hasSetup}
+          onComplete={completeSetup}
+          onCancel={() => setSetupOpen(false)}
+        />
+      ) : null}
       <header className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-6" style={{ borderBottom: "1px solid var(--line)", background: "rgba(9,13,11,.92)", backdropFilter: "blur(16px)" }}>
         <Link to={backTarget}>
           <Button variant="ghost" size="sm">
@@ -66,7 +98,7 @@ export default function OpeningStudyPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1" aria-hidden={setupOpen || undefined}>
         <OpeningStudyControls
           state={controls}
           loading={false}
@@ -77,6 +109,7 @@ export default function OpeningStudyPage() {
             setSelectedNode(null);
             setPlayerVector(null);
           }}
+          onRedoSetup={() => setSetupOpen(true)}
           selectedNode={selectedNode}
           playerVector={playerVector}
         />
@@ -90,5 +123,5 @@ export default function OpeningStudyPage() {
         </div>
       </div>
     </main>
-  )}</RequireAuth>;
+  );
 }

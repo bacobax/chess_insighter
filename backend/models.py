@@ -254,7 +254,8 @@ class OpeningStudyTreeChildrenRequest(BaseModel):
     # evaluation signal is a hard feasibility threshold for the player's moves.
     #   "style"  — player_style_match + systemness + memory
     #   "custom" — aggro + systemness + memory
-    match_mode: Literal["style", "custom"] = Field(default="style", alias="matchMode")
+    # "style" is in development and currently coerced to "custom" by the service.
+    match_mode: Literal["style", "custom"] = Field(default="custom", alias="matchMode")
     evaluation_metric: Literal["engine", "practical"] = Field(default="engine", alias="evaluationMetric")
     evaluation_threshold: float = Field(
         default=0.0,
