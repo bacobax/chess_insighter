@@ -10,6 +10,7 @@ from utils.opening_study_tree import (
     PlayerVectorFeatureMismatch,
     clamp01,
     cp_to_utility,
+    engine_percentiles,
     evaluate_engine_soundness,
     get_opening_study_tree_children,
     load_player_vector_from_cache,
@@ -75,34 +76,68 @@ def test_zero_soft_weight_levels_fall_back_to_equal_active_weights():
 def test_evaluation_threshold_requires_data_only_when_positive():
     assert passes_evaluation_threshold(
         "engine", 0.0,
-        engine_soundness=0.5,
-        engine_target_cp=None,
+        engine_percentile=None,
         practical_gamble=None,
     )
     assert not passes_evaluation_threshold(
         "engine", 0.6,
-        engine_soundness=0.8,
-        engine_target_cp=None,
+        engine_percentile=None,
         practical_gamble=None,
     )
     assert passes_evaluation_threshold(
         "engine", 0.6,
-        engine_soundness=0.8,
-        engine_target_cp=300.0,
+        engine_percentile=0.8,
         practical_gamble=None,
     )
     assert not passes_evaluation_threshold(
         "practical", 0.6,
-        engine_soundness=0.8,
-        engine_target_cp=300.0,
+        engine_percentile=1.0,
         practical_gamble=0.59,
     )
     assert passes_evaluation_threshold(
         "practical", 0.6,
-        engine_soundness=0.2,
-        engine_target_cp=-300.0,
+        engine_percentile=0.0,
         practical_gamble=0.6,
     )
+
+
+def test_engine_percentiles_rank_siblings_and_keep_top_band():
+    # best=40; 30 is within the 15cp top band, so it is lifted to 1.0.
+    result = engine_percentiles([40.0, 30.0, 0.0, -50.0, None], top_tolerance_cp=15.0)
+    assert result[0] == 1.0
+    assert result[1] == 1.0
+    assert result[2] == pytest.approx(1 / 3)
+    assert result[3] == 0.0
+    assert result[4] is None
+    assert engine_percentiles([-35.0]) == [1.0]
+    assert engine_percentiles([None, None]) == [None, None]
+    # Ties share the midpoint rank.
+    assert engine_percentiles([100.0, 0.0, 0.0], top_tolerance_cp=0.0)[1:] == [0.25, 0.25]
+
+
+def test_engine_threshold_is_relative_so_black_replies_survive():
+    """Every Black reply is worse than 0cp after 1.e4; a high percentile must
+    still keep the best of them instead of returning an empty, unexpandable node."""
+    class FakeEngine:
+        def analyse(self, board, limit):
+            # White-POV eval: Black's best reply (c7c5) leaves White +20, others +80.
+            cp = 20 if board.peek().uci() == "c7c5" else 80
+            return {"score": chess.engine.PovScore(chess.engine.Cp(cp), chess.WHITE)}
+
+    nodes = get_opening_study_tree_children(
+        _PLAYER,
+        OPENING_VECTORS,
+        "black",
+        ["e2e4"],
+        20,
+        soundness_engine=FakeEngine(),
+        evaluation_metric="engine",
+        evaluation_threshold=1.0,
+        opponent_move_ordering="popularity",
+    )
+
+    assert [node.move_uci for node in nodes] == ["c7c5"]
+    assert nodes[0].engine_soundness < 0.5
 
 
 def test_cp_to_utility_is_target_oriented_and_bounded():
