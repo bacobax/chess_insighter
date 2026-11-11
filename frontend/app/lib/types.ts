@@ -455,6 +455,27 @@ export type OpeningStudyTreeNode = {
     systemness: number;
   };
   breakdown?: NodeBreakdown;
+  explanation?: NodeExplanation;
+};
+
+export type NodeExplanationFactor = {
+  key: "playerStyleMatch" | "aggressiveness" | "systemness" | "memorySimplicity" | string;
+  label: string;
+  /** Criterion value (0-100), oriented so higher raises the score. */
+  value: number;
+  referenceValue: number;
+  /** Share of the score gap to `comparedTo`, in score points. */
+  contribution: number;
+};
+
+/** Plain-language "why this score / why this order" relative to the siblings. */
+export type NodeExplanation = {
+  summary: string;
+  comparedTo: string | null;
+  scoreGap: number | null;
+  factors: NodeExplanationFactor[];
+  highlights: string[];
+  feasibility: string | null;
 };
 
 export type OpeningStudyTreeChildrenResponse = {

@@ -302,6 +302,24 @@ class NodeBreakdown(BaseModel):
     openingFeatures: dict[str, float] = Field(default_factory=dict)
 
 
+class NodeExplanationFactor(BaseModel):
+    key: str
+    label: str
+    value: float
+    referenceValue: float
+    # Share of the score gap to `comparedTo`, in score points (0-100 scale).
+    contribution: float
+
+
+class NodeExplanation(BaseModel):
+    summary: str = ""
+    comparedTo: str | None = None
+    scoreGap: float | None = None
+    factors: list[NodeExplanationFactor] = Field(default_factory=list)
+    highlights: list[str] = Field(default_factory=list)
+    feasibility: str | None = None
+
+
 class OpeningStudyTreeNodeModel(BaseModel):
     moveUci: str
     moveSan: str
@@ -329,6 +347,7 @@ class OpeningStudyTreeNodeModel(BaseModel):
     boardPreviewFen: str
     stats: OpeningStudyNodeStats
     breakdown: NodeBreakdown = Field(default_factory=NodeBreakdown)
+    explanation: NodeExplanation = Field(default_factory=NodeExplanation)
 
 
 class OpeningStudyTreeChildrenResponse(BaseModel):

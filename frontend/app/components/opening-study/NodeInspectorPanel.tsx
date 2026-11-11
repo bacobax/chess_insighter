@@ -87,6 +87,95 @@ function DualBar({
   );
 }
 
+const FACTOR_COLORS: Record<string, string> = {
+  playerStyleMatch: "#3b82f6",
+  aggressiveness: "#ef4444",
+  systemness: "#10b981",
+  memorySimplicity: "#8b5cf6",
+};
+
+function signedPoints(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return `${rounded > 0 ? "+" : rounded < 0 ? "−" : "±"}${Math.abs(rounded).toFixed(1)}`;
+}
+
+/** Why the move scores what it does, relative to the move it is compared with.
+ *  Each bar is that criterion's share of the score gap; the shares add up to it. */
+function WhyThisScoreSection({ node }: { node: OpeningStudyTreeNode }) {
+  const explanation = node.explanation;
+  if (!explanation) return null;
+  const factors = explanation.factors;
+  const scale = Math.max(1, ...factors.map((factor) => Math.abs(factor.contribution)));
+
+  return (
+    <div>
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+        {node.isTargetMove ? "Why this score" : "Why it's listed"}
+      </p>
+      <p className="text-[11px] leading-snug" style={{ color: "var(--ink)" }}>{explanation.summary}</p>
+
+      {explanation.comparedTo && factors.length > 0 ? (
+        <div className="mt-2" role="table" aria-label={`Score difference against ${explanation.comparedTo}`}>
+          <div className="mb-1 flex items-center justify-between text-[9px] text-slate-400" role="row">
+            <span role="columnheader">vs {explanation.comparedTo}</span>
+            <span role="columnheader" className="tabular-nums">
+              {explanation.scoreGap !== null ? `${signedPoints(explanation.scoreGap)} pts total` : ""}
+            </span>
+          </div>
+          {factors.map((factor) => {
+            const width = (Math.abs(factor.contribution) / scale) * 50;
+            const positive = factor.contribution >= 0;
+            return (
+              <div key={factor.key} className="mb-1" role="row">
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span role="cell" className="font-medium">{factor.label}</span>
+                  <span role="cell" className="tabular-nums">
+                    {Math.round(factor.value)} vs {Math.round(factor.referenceValue)} ·{" "}
+                    <span style={{ color: positive ? "var(--accent)" : "var(--coral)" }}>{signedPoints(factor.contribution)}</span>
+                  </span>
+                </div>
+                <div className="relative h-1.5 w-full rounded-full bg-slate-100" aria-hidden="true">
+                  <div className="absolute top-0 h-full w-px" style={{ left: "50%", background: "var(--line)" }} />
+                  <div
+                    className="absolute top-0 h-full rounded-full"
+                    style={{
+                      left: positive ? "50%" : `${50 - width}%`,
+                      width: `${width}%`,
+                      backgroundColor: FACTOR_COLORS[factor.key] ?? "#94a3b8",
+                      opacity: positive ? 1 : 0.6,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          <p className="mt-1 text-[9px] text-slate-400">
+            Bars right of centre raise this move's score against {explanation.comparedTo}; bars left lower it.
+          </p>
+        </div>
+      ) : null}
+
+      {explanation.highlights.length > 0 ? (
+        <ul className="mt-2 flex flex-wrap gap-1">
+          {explanation.highlights.map((highlight) => (
+            <li
+              key={highlight}
+              className="rounded-full px-2 py-0.5 text-[9px]"
+              style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+            >
+              {highlight}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {explanation.feasibility ? (
+        <p className="mt-2 text-[10px]" style={{ color: "var(--ink-soft)" }}>{explanation.feasibility}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function StyleProfileSection({
   openingFeatures,
   playerVector,
@@ -354,6 +443,8 @@ export function NodeInspectorPanel({ node, playerVector }: Props) {
           <MiniChessBoard fen={node.boardPreviewFen} flipped={node.targetColor === "black"} size={140} />
         </ZoomableBoard>
       </div>
+
+      {node.explanation?.summary ? <WhyThisScoreSection node={node} /> : null}
 
       {bd?.openingFeatures && Object.keys(bd.openingFeatures).length > 0 && (
         <StyleProfileSection openingFeatures={bd.openingFeatures} playerVector={playerVector} />

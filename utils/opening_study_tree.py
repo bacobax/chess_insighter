@@ -19,7 +19,7 @@ from __future__ import annotations
 import csv
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -32,6 +32,7 @@ from utils.opening_feature_transformer import (
     opening_vector_for_color,
 )
 from utils.opening_popularity import move_popularity_for_board, practical_gamble_for_board
+from utils.opening_study_explanations import explain_opponent_moves, explain_player_moves
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +196,18 @@ def passes_evaluation_threshold(threshold: float, *, percentile: float | None) -
     return percentile is not None and clamp01(percentile) >= minimum
 
 
+def feasibility_percentiles(
+    nodes: Sequence[OpeningStudyTreeNode],
+    evaluation_metric: str,
+    *,
+    candidate_cps: Sequence[float | None],
+) -> list[float | None]:
+    """Sibling percentile of each candidate for the selected evaluation metric."""
+    if evaluation_metric == "practical":
+        return practical_percentiles([node.practical_gamble for node in nodes])
+    return engine_percentiles(candidate_cps)
+
+
 def filter_feasible_candidates(
     nodes: Sequence[OpeningStudyTreeNode],
     evaluation_metric: str,
@@ -205,10 +218,7 @@ def filter_feasible_candidates(
     """Apply the hard feasibility threshold to the player's sibling candidates."""
     if clamp01(float(threshold)) <= 0.0:
         return list(nodes)
-    if evaluation_metric == "practical":
-        percentiles = practical_percentiles([node.practical_gamble for node in nodes])
-    else:
-        percentiles = engine_percentiles(candidate_cps)
+    percentiles = feasibility_percentiles(nodes, evaluation_metric, candidate_cps=candidate_cps)
     if all(percentile is None for percentile in percentiles):
         # No sibling has data (no engine, no snapshot coverage): the constraint
         # cannot rank anything, so it must not hide the whole position.
@@ -288,6 +298,9 @@ class OpeningStudyTreeNode:
     board_preview_fen: str
     stats: dict[str, float | None] = field(default_factory=dict)
     breakdown: dict[str, Any] = field(default_factory=dict)
+    # Plain-language "why this score / why this order" relative to the siblings
+    # (see utils/opening_study_explanations.py). Empty until attached.
+    explanation: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -317,6 +330,7 @@ class OpeningStudyTreeNode:
             "boardPreviewFen": self.board_preview_fen,
             "stats": dict(self.stats),
             "breakdown": dict(self.breakdown),
+            "explanation": dict(self.explanation),
         }
 
 
@@ -1215,7 +1229,11 @@ def get_opening_study_tree_children(
             soundness_cache=soundness_cache,
             opponent_move_ordering=opponent_order,
         )
-        return nodes[:opp_k] if opp_k < len(nodes) else nodes
+        shown = nodes[:opp_k]
+        return [
+            replace(node, explanation=text)
+            for node, text in zip(shown, explain_opponent_moves(shown, opponent_order))
+        ]
 
     depth = len(prefix)
     mover_is_target = _color_name(board.turn) == target
@@ -1325,7 +1343,12 @@ def get_opening_study_tree_children(
     # The hard evaluation constraint applies only to the player's own moves.
     # Its percentile is relative to all sibling candidates, so it can only be
     # computed once every candidate has been evaluated.
+    percentile_by_move: dict[str, float | None] = {}
     if mover_is_target:
+        percentile_by_move = dict(zip(
+            (node.move_uci for node in nodes),
+            feasibility_percentiles(nodes, evaluation_metric, candidate_cps=candidate_cps),
+        ))
         nodes = filter_feasible_candidates(
             nodes, evaluation_metric, threshold, candidate_cps=candidate_cps,
         )
@@ -1335,4 +1358,16 @@ def get_opening_study_tree_children(
         mover_is_target=mover_is_target,
         opponent_move_ordering=opponent_order,
     )
-    return nodes[:limit]
+    # Explanations compare the moves that are actually shown.
+    shown = nodes[:limit]
+    if mover_is_target:
+        explanations = explain_player_moves(
+            shown,
+            weights,
+            evaluation_metric=evaluation_metric,
+            threshold=threshold,
+            percentiles=percentile_by_move,
+        )
+    else:
+        explanations = explain_opponent_moves(shown, opponent_order)
+    return [replace(node, explanation=text) for node, text in zip(shown, explanations)]

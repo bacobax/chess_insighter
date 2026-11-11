@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
@@ -31,6 +31,7 @@ export function TrainingBoard({
   wrongSquare,
   label,
   className = "tp-board",
+  animate = true,
 }: {
   fen: string;
   orientation: "white" | "black";
@@ -43,9 +44,15 @@ export function TrainingBoard({
   label: string;
   /** Wrapper class; defaults to the training layout's 440px board. */
   className?: string;
+  /** Animate piece moves. react-chessboard measures the board to animate and
+   *  throws when it has no width (e.g. inside a `display: none` panel). */
+  animate?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => setSelected(null), [fen]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  // Re-checked on every render: only animate when the board is actually laid out.
+  const canAnimate = animate && (wrapperRef.current?.getBoundingClientRect().width ?? 0) > 0;
 
   const targets = useMemo(() => {
     if (!movable || !selected) return [];
@@ -84,7 +91,7 @@ export function TrainingBoard({
   if (wrongSquare) styles[wrongSquare] = { ...styles[wrongSquare], ...WRONG };
 
   return (
-    <div className={className} role="group" aria-label={label}>
+    <div ref={wrapperRef} className={className} role="group" aria-label={label}>
       <Chessboard
         options={{
           position: fen,
@@ -107,6 +114,7 @@ export function TrainingBoard({
           darkSquareStyle: { backgroundColor: "#225c42" },
           lightSquareStyle: { backgroundColor: "#c6e8d2" },
           showNotation: true,
+          showAnimations: canAnimate,
           animationDurationInMs: 200,
           boardStyle: { width: "100%", aspectRatio: "1 / 1", borderRadius: 10, overflow: "hidden" },
         }}

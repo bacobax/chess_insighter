@@ -159,6 +159,10 @@ All heavy computation lives here, independent of FastAPI.
 - Keywords: `get_opening_study_tree_children`, `compute_node_metrics`, `load_player_vector_from_cache`, `OpeningStudyTreeNode`, `OpeningStudyTreeRequest`, `compute_similarity`, `weighted_cosine`, `evaluate_engine_soundness`, `_root_children_for_black`, `_make_node`, `_load_opening_rows`, `_load_all_lines`, `_compute_global_priors`
 - Lazy single-level expansion; scores include aggressiveness, Lichess-weighted practical gamble, systemness, and memory complexity
 
+**`opening_study_explanations.py`** — plain-language "why this score" for each node's siblings
+- Keywords: `explain_player_moves`, `explain_opponent_moves`, `CRITERIA`, `FEATURE_PHRASES`
+- Each player move is compared with the top-ranked sibling (the top move with the runner-up); the score gap splits exactly into per-criterion shares `weight × (value − reference)` because active weights sum to 1. Fixed templates (slightly < 5 ≤ clearly ≤ 15 < much; shares < 0.5 pt omitted; gap < 1 pt = "practically tied"); the lead factor names its strongest opening feature. Attached as `explanation` on the shown children
+
 **`custom_opening_explorer.py`** — alternative opening lookup (separate from study tree)
 
 **`opening_repository.py`** — TSV/CSV opening data loading layer

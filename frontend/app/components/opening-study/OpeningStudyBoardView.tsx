@@ -211,6 +211,7 @@ export function OpeningStudyBoardView({ controls, generationKey, active, jump, o
       <div className="mx-auto w-full max-w-[min(640px,calc(100vh-10rem))] shrink-0 lg:mx-0 lg:flex-1">
         <TrainingBoard
           className="w-full"
+          animate={active}
           fen={fen}
           orientation={controls.targetColor}
           movable
@@ -285,23 +286,28 @@ export function OpeningStudyBoardView({ controls, generationKey, active, jump, o
                     onMouseEnter={() => setHovered(index)}
                     onFocus={() => setHovered(index)}
                     onBlur={() => setHovered(null)}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                    className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                     style={{
                       border: "1px solid var(--line)",
                       background: hovered === index ? "var(--paper-raised)" : "var(--paper)",
                     }}
                   >
                     <span
-                      className="h-2.5 w-6 shrink-0 rounded-full"
+                      className="mt-1.5 h-2.5 w-6 shrink-0 rounded-full"
                       style={{ background: arrowColor(ownTurn, index, candidates.length, null) }}
                       aria-hidden="true"
                     />
-                    <span className="w-5 shrink-0 text-xs tabular-nums" style={{ color: "var(--ink-faint)" }}>{index + 1}</span>
+                    <span className="mt-0.5 w-5 shrink-0 text-xs tabular-nums" style={{ color: "var(--ink-faint)" }}>{index + 1}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold">{node.moveSan}</span>
                       <span className="block truncate text-[11px]" style={{ color: "var(--ink-soft)" }}>
                         {node.openingNames[0] ?? `${node.compatibleLineCount} lines`}
                       </span>
+                      {ownTurn && node.explanation?.summary ? (
+                        <span className="mt-1 block text-[11px] leading-snug" style={{ color: "var(--ink-faint)" }}>
+                          {node.explanation.summary}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="shrink-0 text-right text-[11px] tabular-nums" style={{ color: "var(--ink-soft)" }}>
                       {ownTurn

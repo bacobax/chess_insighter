@@ -11,7 +11,8 @@ export const NODE_WIDTH = 76;
 export const NODE_HEIGHT = 76;
 
 export const EXPANDED_NODE_WIDTH = 458;
-export const EXPANDED_NODE_HEIGHT = 340;
+// Includes a full-width strip under the board for the score explanation.
+export const EXPANDED_NODE_HEIGHT = 392;
 const EXPANDED_BOARD_SIZE = 280;
 // Blurred board rendered at this fixed size, centered over the container.
 const BG_BOARD_SIZE = 520;
@@ -370,6 +371,23 @@ export function OpeningStudyNode({
                 <StatBarChart stats={node.stats} />
               </aside>
             </div>
+
+            {node.explanation?.summary ? (
+              <p
+                className="mx-3 mb-3 line-clamp-3 flex-shrink-0 rounded-lg border px-2.5 py-2 text-[10px] leading-snug"
+                style={{
+                  backgroundColor: "rgba(7,12,9,.72)",
+                  borderColor: "rgba(255,255,255,.14)",
+                  color: "rgba(255,255,255,.82)",
+                }}
+                title={node.explanation.summary}
+              >
+                <span className="font-semibold" style={{ color: node.isTargetMove ? "#21e783" : "#ff6a4d" }}>
+                  {node.isTargetMove ? "Why this score · " : "Why it's listed · "}
+                </span>
+                {node.explanation.summary}
+              </p>
+            ) : null}
           </div>
         )}
       </div>
