@@ -329,11 +329,11 @@ export function OpeningStudyControls({ state, loading, onChange, onGenerate, onR
         <p className="text-[10px] text-slate-400">
           {state.evaluationMetric === "engine"
             ? "Engine percentile among your candidate moves at each position: 0% keeps all, 100% keeps only moves within a few centipawns of the best."
-            : "Player moves below the selected threshold are excluded before ranking."}
+            : "Practical-edge percentile among your candidate moves at each position: 0% keeps all, 100% keeps only the trickiest move and near ties."}
         </p>
         <label className="mt-1 flex flex-col gap-0.5">
           <span className="flex items-center justify-between text-[11px]">
-            <span>{state.evaluationMetric === "engine" ? "Minimum engine percentile" : "Minimum practical gamble"}</span>
+            <span>{state.evaluationMetric === "engine" ? "Minimum engine percentile" : "Minimum practical percentile"}</span>
             <span className="tabular-nums text-slate-500">
               {Math.round(state.evaluationThresholds[state.evaluationMetric] * 100)}%
             </span>

@@ -30,11 +30,11 @@ export type SetupAnswers = {
   breadth: Breadth;
 };
 
+// Both thresholds are percentiles among your candidate moves at each
+// position, so the best alternative always survives and no node is emptied.
 const THRESHOLDS: Record<EvaluationMetric, Record<Strictness, number>> = {
-  // Engine threshold is a percentile among your candidate moves.
   engine: { open: 0, balanced: 0.4, strict: 0.7, best: 1 },
-  // Practical Gamble is a dataset percentile of the practical edge.
-  practical: { open: 0, balanced: 0.25, strict: 0.5, best: 0.75 },
+  practical: { open: 0, balanced: 0.4, strict: 0.7, best: 1 },
 };
 
 const LEVEL_VALUE: Record<Level, number> = { high: 1, some: 0.5, low: 0.1 };
@@ -133,9 +133,9 @@ const QUESTIONS: Question[] = [
         ]
       : [
           { value: "open", label: "Keep everything", description: "No filter, every catalogued move is ranked." },
-          { value: "balanced", label: "Some practical edge", description: "Hides moves with almost no practical edge." },
-          { value: "strict", label: "A clear practical edge", description: "Keeps the moves whose edge is above the median." },
-          { value: "best", label: "Only the trickiest lines", description: "Keeps moves in the top quarter by practical edge." },
+          { value: "balanced", label: "Drop the least tricky moves", description: "Keeps moves in the top 60% of the alternatives by practical edge." },
+          { value: "strict", label: "Only clearly tricky moves", description: "Keeps moves in the top 30% of the alternatives by practical edge." },
+          { value: "best", label: "Only the trickiest choice", description: "Keeps the move with the biggest practical edge in each position, plus near ties." },
         ],
   },
   {

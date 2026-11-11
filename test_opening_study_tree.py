@@ -15,6 +15,7 @@ from utils.opening_study_tree import (
     get_opening_study_tree_children,
     load_player_vector_from_cache,
     passes_evaluation_threshold,
+    practical_percentiles,
     resolve_study_weights,
 )
 
@@ -74,31 +75,19 @@ def test_zero_soft_weight_levels_fall_back_to_equal_active_weights():
 
 
 def test_evaluation_threshold_requires_data_only_when_positive():
-    assert passes_evaluation_threshold(
-        "engine", 0.0,
-        engine_percentile=None,
-        practical_gamble=None,
-    )
-    assert not passes_evaluation_threshold(
-        "engine", 0.6,
-        engine_percentile=None,
-        practical_gamble=None,
-    )
-    assert passes_evaluation_threshold(
-        "engine", 0.6,
-        engine_percentile=0.8,
-        practical_gamble=None,
-    )
-    assert not passes_evaluation_threshold(
-        "practical", 0.6,
-        engine_percentile=1.0,
-        practical_gamble=0.59,
-    )
-    assert passes_evaluation_threshold(
-        "practical", 0.6,
-        engine_percentile=0.0,
-        practical_gamble=0.6,
-    )
+    assert passes_evaluation_threshold(0.0, percentile=None)
+    assert not passes_evaluation_threshold(0.6, percentile=None)
+    assert passes_evaluation_threshold(0.6, percentile=0.8)
+    assert passes_evaluation_threshold(0.6, percentile=0.6)
+    assert not passes_evaluation_threshold(0.6, percentile=0.59)
+
+
+def test_practical_percentiles_rank_siblings_and_keep_top_band():
+    # Dataset-wide values 0.11 / 0.39 (open Sicilian): the best sibling is 1.0
+    # even though both sit below 0.5 on the absolute scale.
+    assert practical_percentiles([0.11, 0.39]) == [0.0, 1.0]
+    assert practical_percentiles([0.80, 0.79, 0.20], top_tolerance=0.02) == [1.0, 1.0, 0.0]
+    assert practical_percentiles([None, 0.3]) == [None, 1.0]
 
 
 def test_engine_percentiles_rank_siblings_and_keep_top_band():
@@ -695,3 +684,50 @@ def test_style_mode_is_disabled_and_coerced_to_custom():
 def test_style_mode_without_vector_is_rejected_in_the_engine():
     with pytest.raises(PlayerVectorFeatureMismatch):
         get_opening_study_tree_children(None, OPENING_VECTORS, "white", [], 4, match_mode="style")
+
+
+@pytest.mark.parametrize("threshold", [0.5, 0.75, 1.0])
+def test_practical_threshold_never_empties_a_forcing_node(threshold):
+    """After 1.e4 c5 2.Nf3 d6 3.d4 only cxd4 and Nf6 are catalogued; both are
+    below 50% on the dataset-wide Practical Gamble scale. A relative threshold
+    must still keep the best of them instead of returning an empty node."""
+    nodes = get_opening_study_tree_children(
+        None,
+        OPENING_VECTORS,
+        "black",
+        ["e2e4", "c7c5", "g1f3", "d7d6", "d2d4"],
+        20,
+        match_mode="custom",
+        evaluation_metric="practical",
+        evaluation_threshold=threshold,
+        opponent_move_ordering="popularity",
+    )
+
+    assert nodes
+    assert all(node.is_target_move for node in nodes)
+
+
+def test_threshold_is_skipped_when_no_sibling_has_data(monkeypatch):
+    class Practical:
+        percentile = None
+        raw = None
+        sample_size = 0
+        coverage = 0.0
+
+    monkeypatch.setattr(
+        "utils.opening_study_tree.practical_gamble_for_board",
+        lambda board, target_color, opening_vectors_path: Practical(),
+    )
+    unfiltered = get_opening_study_tree_children(
+        None, OPENING_VECTORS, "white", [], 20,
+        match_mode="custom", evaluation_metric="practical",
+        evaluation_threshold=0.0, opponent_move_ordering="popularity",
+    )
+    filtered = get_opening_study_tree_children(
+        None, OPENING_VECTORS, "white", [], 20,
+        match_mode="custom", evaluation_metric="practical",
+        evaluation_threshold=0.9, opponent_move_ordering="popularity",
+    )
+
+    assert filtered
+    assert [node.move_uci for node in filtered] == [node.move_uci for node in unfiltered]

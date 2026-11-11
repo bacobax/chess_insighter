@@ -67,12 +67,16 @@ DEFAULT_STUDY_WEIGHTS: dict[str, float] = {
 ENGINE_SOUNDNESS_NEUTRAL = 0.5
 ENGINE_SOUNDNESS_CP_SCALE = 600.0
 
-# The Engine threshold is a percentile among the player's sibling candidate
-# moves, not an absolute utility (absolute opening evals barely move off 50%,
-# and Black's replies sit below it). Moves within this many centipawns of the
-# best candidate always pass, so a 100% threshold keeps the small band of
-# top-scoring moves instead of a single depth-limited, noisy winner.
+# Both feasibility thresholds (Engine and Practical Gamble) are percentiles
+# among the player's sibling candidate moves, not absolute cut-offs. Absolute
+# opening evals barely move off 50% (and Black's replies sit below it), and
+# Practical Gamble is a dataset-wide percentile, so a fixed cut-off can reject
+# every catalogued move at a forcing node (e.g. only cxd4 / Nf6 in the open
+# Sicilian). Ranking among siblings means the best candidate always survives.
+# Candidates within these tolerances of the best always pass, so a 100%
+# threshold keeps the small band of top moves instead of a single noisy winner.
 ENGINE_TOP_TOLERANCE_CP = 15.0
+PRACTICAL_TOP_TOLERANCE = 0.02
 
 # Soft-ranking dimensions whose source data overlaps with (or is independent of)
 # the style cosine. Engine and Practical Gamble are deliberately absent: the
@@ -126,30 +130,30 @@ def resolve_study_weights(
     return resolved
 
 
-def engine_percentiles(
-    target_cps: Sequence[float | None],
+def sibling_percentiles(
+    values: Sequence[float | None],
     *,
-    top_tolerance_cp: float = ENGINE_TOP_TOLERANCE_CP,
+    top_tolerance: float = 0.0,
 ) -> list[float | None]:
-    """Rank each candidate's target-oriented eval among its measured siblings.
+    """Rank each candidate's value among its measured siblings (higher = better).
 
     Returns a value in ``[0, 1]`` per candidate (``None`` when unmeasured):
     the share of other measured candidates it beats, ties counted as half.
-    Candidates within ``top_tolerance_cp`` of the best are lifted to ``1.0``.
+    Candidates within ``top_tolerance`` of the best are lifted to ``1.0``.
     A lone measured candidate is ``1.0``.
     """
-    measured = [float(cp) for cp in target_cps if cp is not None]
+    measured = [float(value) for value in values if value is not None]
     if not measured:
-        return [None for _ in target_cps]
+        return [None for _ in values]
     best = max(measured)
     others = len(measured) - 1
     result: list[float | None] = []
-    for cp in target_cps:
-        if cp is None:
+    for raw in values:
+        if raw is None:
             result.append(None)
             continue
-        value = float(cp)
-        if others == 0 or value >= best - max(0.0, top_tolerance_cp):
+        value = float(raw)
+        if others == 0 or value >= best - max(0.0, top_tolerance):
             result.append(1.0)
             continue
         below = sum(1 for other in measured if other < value)
@@ -158,26 +162,62 @@ def engine_percentiles(
     return result
 
 
-def passes_evaluation_threshold(
-    evaluation_metric: str,
-    threshold: float,
+def engine_percentiles(
+    target_cps: Sequence[float | None],
     *,
-    engine_percentile: float | None,
-    practical_gamble: float | None,
-) -> bool:
+    top_tolerance_cp: float = ENGINE_TOP_TOLERANCE_CP,
+) -> list[float | None]:
+    """Sibling percentile of each candidate's target-oriented engine eval."""
+    return sibling_percentiles(target_cps, top_tolerance=top_tolerance_cp)
+
+
+def practical_percentiles(
+    practical_gambles: Sequence[float | None],
+    *,
+    top_tolerance: float = PRACTICAL_TOP_TOLERANCE,
+) -> list[float | None]:
+    """Sibling percentile of each candidate's Practical Gamble."""
+    return sibling_percentiles(practical_gambles, top_tolerance=top_tolerance)
+
+
+def passes_evaluation_threshold(threshold: float, *, percentile: float | None) -> bool:
     """Return whether a player's candidate move satisfies the hard constraint.
 
-    A zero threshold disables filtering. For a positive threshold, unavailable
-    data cannot establish feasibility and therefore fails the constraint.
-    The Engine metric compares ``engine_percentile`` (see
-    :func:`engine_percentiles`); Practical Gamble is already a percentile.
+    ``percentile`` is the candidate's sibling percentile for the selected
+    metric (see :func:`engine_percentiles` / :func:`practical_percentiles`).
+    A zero threshold disables filtering. For a positive threshold, a candidate
+    without data cannot establish feasibility and fails, unless no sibling has
+    data at all (the caller then skips the filter instead of emptying the node).
     """
     minimum = clamp01(float(threshold))
     if minimum <= 0.0:
         return True
+    return percentile is not None and clamp01(percentile) >= minimum
+
+
+def filter_feasible_candidates(
+    nodes: Sequence[OpeningStudyTreeNode],
+    evaluation_metric: str,
+    threshold: float,
+    *,
+    candidate_cps: Sequence[float | None],
+) -> list[OpeningStudyTreeNode]:
+    """Apply the hard feasibility threshold to the player's sibling candidates."""
+    if clamp01(float(threshold)) <= 0.0:
+        return list(nodes)
     if evaluation_metric == "practical":
-        return practical_gamble is not None and clamp01(practical_gamble) >= minimum
-    return engine_percentile is not None and clamp01(engine_percentile) >= minimum
+        percentiles = practical_percentiles([node.practical_gamble for node in nodes])
+    else:
+        percentiles = engine_percentiles(candidate_cps)
+    if all(percentile is None for percentile in percentiles):
+        # No sibling has data (no engine, no snapshot coverage): the constraint
+        # cannot rank anything, so it must not hide the whole position.
+        return list(nodes)
+    return [
+        node
+        for node, percentile in zip(nodes, percentiles)
+        if passes_evaluation_threshold(threshold, percentile=percentile)
+    ]
 
 # Common White first moves shown at the root when the target colour is Black,
 # before any style-based recommendation kicks in.
@@ -1283,20 +1323,12 @@ def get_opening_study_tree_children(
         )
 
     # The hard evaluation constraint applies only to the player's own moves.
-    # The Engine percentile is relative to all sibling candidates, so it can
-    # only be computed once every candidate has been evaluated.
-    if mover_is_target and threshold > 0.0:
-        percentiles = engine_percentiles(candidate_cps)
-        nodes = [
-            node
-            for node, percentile in zip(nodes, percentiles)
-            if passes_evaluation_threshold(
-                evaluation_metric,
-                threshold,
-                engine_percentile=percentile,
-                practical_gamble=node.practical_gamble,
-            )
-        ]
+    # Its percentile is relative to all sibling candidates, so it can only be
+    # computed once every candidate has been evaluated.
+    if mover_is_target:
+        nodes = filter_feasible_candidates(
+            nodes, evaluation_metric, threshold, candidate_cps=candidate_cps,
+        )
 
     _sort_study_nodes(
         nodes,
