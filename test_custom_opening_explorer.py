@@ -30,7 +30,8 @@ def config(target_color=chess.WHITE, no_engine=True):
         max_candidate_moves=None,
         opening_book=None,
         show_progress=False,
-        style_weight=1.0,
+        position_style_weight=1.0,
+        opening_match_weight=0.0,
         cp_weight=0.0,
     )
 
@@ -63,6 +64,7 @@ def test_minimax_minimizes_on_opponent_node():
             maximizing=False,
             target_color=chess.WHITE,
             player_vector=np.array([1.0, 0.0]),
+            opening_vectors=[],
             config=config(chess.WHITE),
             cache={},
         )
@@ -93,6 +95,7 @@ def test_minimax_maximizes_on_target_node():
             maximizing=True,
             target_color=chess.BLACK,
             player_vector=np.array([1.0, 0.0]),
+            opening_vectors=[],
             config=config(chess.BLACK),
             cache={},
         )
@@ -148,7 +151,8 @@ def test_cp_weight_can_drive_leaf_utility():
         max_candidate_moves=None,
         opening_book=None,
         show_progress=False,
-        style_weight=0.0,
+        position_style_weight=0.0,
+        opening_match_weight=0.0,
         cp_weight=1.0,
     )
 
@@ -160,6 +164,7 @@ def test_cp_weight_can_drive_leaf_utility():
         maximizing=True,
         target_color=chess.WHITE,
         player_vector=np.array([0.0, 0.0]),
+        opening_vectors=[],
         config=cp_config,
         cache={},
     )
