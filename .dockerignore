@@ -1,0 +1,16 @@
+# Backend image build context (repo root). Allow-list: only what the API needs at runtime.
+*
+!backend/
+!utils/
+!config/
+!openings_dataset/
+!pyproject.toml
+!uv.lock
+!.python-version
+
+# Never ship these, even inside allowed folders
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+openings_dataset/diagnostics/
+.env

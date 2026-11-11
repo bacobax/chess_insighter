@@ -1,0 +1,31 @@
+# SITE_ADDRESS:
+#   production -> your domain, e.g. chess.example.com (Caddy gets a Let's Encrypt cert automatically)
+#   local test -> :80 (plain HTTP, no certificate)
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# API + WebSockets -> FastAPI container (WebSocket upgrades are proxied automatically).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Static SPA with client-side routing fallback.
+	handle {
+		root * /srv
+
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		@html path / /index.html
+		header @html Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

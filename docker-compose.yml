@@ -1,0 +1,41 @@
+# Production stack (also used for local testing).
+#
+#   local:  HTTP_PORT=8080 docker compose up --build      -> http://localhost:8080
+#   VM:     SITE_ADDRESS=chess.example.com in .env, then docker compose up -d --build
+#
+# Secrets/config come from ./.env (never committed; see .env.example).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chess-insighter-api
+    env_file: .env
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: chess-insighter-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

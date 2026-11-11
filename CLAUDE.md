@@ -43,6 +43,18 @@ npm run build      # production build
 npm run typecheck  # react-router typegen + tsc
 ```
 
+### Docker / deployment
+
+Production runs as two containers via `docker-compose.yml` (target: an Oracle Cloud ARM VM):
+- `api` — root `Dockerfile`: FastAPI + Stockfish compiled from source (`STOCKFISH_TAG`, arch picked from the build platform). Exactly **one** uvicorn worker, because build jobs and their WebSocket streams live in process memory. Build context is allow-listed in `.dockerignore`, so new runtime data folders must be added there.
+- `web` — `frontend/Dockerfile`: builds the SPA and serves it with Caddy (`deploy/Caddyfile`), which also proxies `/api` (HTTP + WebSockets) to `api:8000` and handles HTTPS for `SITE_ADDRESS`. Frontend and API share one origin, so `VITE_API_BASE_URL` stays unset.
+
+```bash
+HTTP_PORT=8080 docker compose up --build   # local test at http://localhost:8080
+```
+
+Configuration comes from `.env` (template: `.env.example`). One-time VM setup: `deploy/setup-vm.sh`. `.github/workflows/deploy.yml` runs tests on push to `main`, then SSH-deploys if the repo variable `DEPLOY_ENABLED=true`.
+
 ## Architecture
 
 The repo is split into a Python backend and a React frontend; they communicate over a local HTTP API. A separate ML training pipeline (`train_encoder.py`, `run_sweep.py`, `utils/position_style_encoder.py`) operates independently of both.
