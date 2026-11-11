@@ -141,7 +141,7 @@ export function OpeningStudyNode({
               transform: "translate(-50%, -50%) scale(1.1)",
             }}
           >
-            <MiniChessBoard fen={node.boardPreviewFen} size={BG_BOARD_SIZE} />
+            <MiniChessBoard fen={node.boardPreviewFen} flipped={node.targetColor === "black"} size={BG_BOARD_SIZE} />
           </div>
         </div>
 
@@ -335,13 +335,14 @@ export function OpeningStudyNode({
                     <ZoomableBoard
                       fen={node.boardPreviewFen}
                       label={node.openingNames[0] ?? node.moveSan}
+                      orientation={node.targetColor}
                     >
-                      <MiniChessBoard fen={node.boardPreviewFen} size={EXPANDED_BOARD_SIZE} />
+                      <MiniChessBoard fen={node.boardPreviewFen} flipped={node.targetColor === "black"} size={EXPANDED_BOARD_SIZE} />
                     </ZoomableBoard>
                   </div>
                 ) : (
                   <div className="pointer-events-none">
-                    <MiniChessBoard fen={node.boardPreviewFen} size={EXPANDED_BOARD_SIZE} />
+                    <MiniChessBoard fen={node.boardPreviewFen} flipped={node.targetColor === "black"} size={EXPANDED_BOARD_SIZE} />
                   </div>
                 )}
               </div>

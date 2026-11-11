@@ -30,6 +30,7 @@ export function TrainingBoard({
   squareStyles,
   wrongSquare,
   label,
+  className = "tp-board",
 }: {
   fen: string;
   orientation: "white" | "black";
@@ -40,6 +41,8 @@ export function TrainingBoard({
   /** Flash this square red, e.g. after a wrong attempt. */
   wrongSquare?: string | null;
   label: string;
+  /** Wrapper class; defaults to the training layout's 440px board. */
+  className?: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => setSelected(null), [fen]);
@@ -81,7 +84,7 @@ export function TrainingBoard({
   if (wrongSquare) styles[wrongSquare] = { ...styles[wrongSquare], ...WRONG };
 
   return (
-    <div className="tp-board" role="group" aria-label={label}>
+    <div className={className} role="group" aria-label={label}>
       <Chessboard
         options={{
           position: fen,

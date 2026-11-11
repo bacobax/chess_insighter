@@ -277,7 +277,9 @@ Route declarations live in `frontend/app/routes.ts`.
 #### Components (`frontend/app/components/`)
 
 **Opening Study** (`opening-study/`):
-- `OpeningStudyWhiteboard.tsx` — main canvas: node layout, drag, zoom, expansion
+- `OpeningStudyWhiteboard.tsx` — tree view: node layout, drag, zoom, expansion
+- `OpeningStudyBoardView.tsx` — board view: interactive board (reuses `training/training-board.tsx`) with rank-faded arrows (green = your moves by study score, coral = opponent replies by the chosen ordering); per-prefix cache; opens at the node selected in the tree. Both views stay mounted; the header Tree/Board switch is remembered in localStorage. Boards and previews are flipped when the target colour is Black
+- `study-request.ts` — `studyRequestBase(controls)`, the request fields shared by both views
 - `OpeningStudyControls.tsx` — sidebar controls: color, weights, match mode, player
 - `OpeningStudyNode.tsx` — individual node card with hover expansion
 - `NodeInspectorPanel.tsx` — full node detail panel (metrics, lines, board)

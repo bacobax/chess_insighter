@@ -3,13 +3,17 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Chessboard } from "react-chessboard";
 
+type BoardOrientation = "white" | "black";
+
 type ZoomableBoardProps = {
   fen: string | null;
   label?: string;
+  /** Side shown at the bottom of the zoomed board (default White). */
+  orientation?: BoardOrientation;
   children: ReactNode;
 };
 
-export function ZoomableBoard({ fen, label, children }: ZoomableBoardProps) {
+export function ZoomableBoard({ fen, label, orientation = "white", children }: ZoomableBoardProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -24,12 +28,22 @@ export function ZoomableBoard({ fen, label, children }: ZoomableBoardProps) {
       >
         {children}
       </button>
-      {open && fen && <BoardModal fen={fen} label={label} onClose={() => setOpen(false)} />}
+      {open && fen && <BoardModal fen={fen} label={label} orientation={orientation} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function BoardModal({ fen, label, onClose }: { fen: string; label?: string; onClose: () => void }) {
+function BoardModal({
+  fen,
+  label,
+  orientation,
+  onClose,
+}: {
+  fen: string;
+  label?: string;
+  orientation: BoardOrientation;
+  onClose: () => void;
+}) {
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -83,6 +97,7 @@ function BoardModal({ fen, label, onClose }: { fen: string; label?: string; onCl
           <Chessboard
             options={{
               position: fen,
+              boardOrientation: orientation,
               allowDragging: false,
               showNotation: true,
               animationDurationInMs: 0,

@@ -3,6 +3,7 @@ import { LocateFixed, Loader2, Minus, Plus, X } from "lucide-react";
 import { fetchOpeningStudyChildren } from "~/lib/api";
 import type { OpeningStudyTreeNode } from "~/lib/types";
 import type { StudyControlsState } from "./OpeningStudyControls";
+import { studyRequestBase } from "./study-request";
 import {
   EXPANDED_NODE_HEIGHT,
   EXPANDED_NODE_WIDTH,
@@ -213,23 +214,7 @@ export function OpeningStudyWhiteboard({ controls, generationKey, onNodeSelect, 
   const [view, setView] = useState({ tx: 40, ty: 40, scale: 1 });
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
-  const requestBase = useCallback(
-    () => ({
-      // General tree: no report or player vector is sent (style match is in development).
-      targetColor: controls.targetColor,
-      topK: controls.topK,
-      opponentTopK: controls.opponentTopK,
-      opponentMoveOrdering: controls.opponentMoveOrdering,
-      weights: controls.weights,
-      similarityType: controls.similarityType,
-      weightedMatching: controls.weightedMatching,
-      matcherWeights: controls.weightedMatching ? controls.matcherWeights : undefined,
-      matchMode: controls.matchMode,
-      evaluationMetric: controls.evaluationMetric,
-      evaluationThreshold: controls.evaluationThresholds[controls.evaluationMetric],
-    }),
-    [controls],
-  );
+  const requestBase = useCallback(() => studyRequestBase(controls), [controls]);
 
   // (Re)generate the root level whenever the user hits "Generate".
   // generationKey === 0 is the initial / reset state: clear everything.

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Grid3x3, Network } from "lucide-react";
 import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
+import { OpeningStudyBoardView } from "~/components/opening-study/OpeningStudyBoardView";
 import {
   OpeningStudyControls,
   type StudyControlsState,
@@ -33,6 +35,25 @@ function colorParam(value: string | null): TargetColor | null {
   return value === "white" || value === "black" ? value : null;
 }
 
+type LabView = "tree" | "board";
+const VIEW_KEY = "chess-insighter:opening-lab:view";
+
+function loadView(): LabView {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === "board" ? "board" : "tree";
+  } catch {
+    return "tree";
+  }
+}
+
+function saveView(view: LabView) {
+  try {
+    window.localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Per-viewer convenience only.
+  }
+}
+
 function OpeningLab() {
   const { user } = useAuth();
   const userId = user?.id ?? "anonymous";
@@ -55,7 +76,12 @@ function OpeningLab() {
   const [setupOpen, setSetupOpen] = useState(!hasSetup);
   // Returning users get their saved tree straight away.
   const [generationKey, setGenerationKey] = useState(stored ? 1 : 0);
-  const [selectedNode, setSelectedNode] = useState<OpeningStudyTreeNode | null>(null);
+  const [view, setView] = useState<LabView>(loadView);
+  // Each view keeps its own selection; the inspector shows the active one.
+  const [treeNode, setTreeNode] = useState<OpeningStudyTreeNode | null>(null);
+  const [boardNode, setBoardNode] = useState<OpeningStudyTreeNode | null>(null);
+  const selectedNode = view === "tree" ? treeNode : boardNode;
+  const [boardJump, setBoardJump] = useState<{ path: string[]; nonce: number }>({ path: [], nonce: 0 });
   const [playerVector, setPlayerVector] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
@@ -67,11 +93,22 @@ function OpeningLab() {
   function completeSetup(next: SetupAnswers) {
     setAnswers(next);
     setControls(controlsFromAnswers(next));
-    setSelectedNode(null);
+    setTreeNode(null);
+    setBoardJump((prev) => ({ path: [], nonce: prev.nonce + 1 }));
     setHasSetup(true);
     setSetupOpen(false);
     setGenerationKey((key) => key + 1);
   }
+
+  const switchView = useCallback((next: LabView) => {
+    if (view === next) return;
+    // Open the board at the position selected in the tree.
+    if (next === "board" && treeNode) {
+      setBoardJump((prev) => ({ path: treeNode.prefixUci, nonce: prev.nonce + 1 }));
+    }
+    saveView(next);
+    setView(next);
+  }, [treeNode, view]);
 
   const backTarget = fromUsername ? `/report/${encodeURIComponent(fromUsername)}` : "/dashboard";
 
@@ -93,8 +130,34 @@ function OpeningLab() {
         </Link>
         <div className="h-7 w-px bg-[var(--line)]" />
         <div>
-          <h1 className="text-sm font-bold tracking-[-.02em]" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>OPENING LAB <span className="text-[var(--accent)]">/ TREE</span></h1>
-          <span className="hidden text-[10px] font-semibold uppercase tracking-[.12em] sm:block" style={{ color: "var(--ink-faint)" }}>Drag to pan · scroll to zoom · click or press Enter to expand</span>
+          <h1 className="text-sm font-bold tracking-[-.02em]" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>OPENING LAB <span className="text-[var(--accent)]">/ {view === "tree" ? "TREE" : "BOARD"}</span></h1>
+          <span className="hidden text-[10px] font-semibold uppercase tracking-[.12em] sm:block" style={{ color: "var(--ink-faint)" }}>
+            {view === "tree"
+              ? "Drag to pan · scroll to zoom · click or press Enter to expand"
+              : "Drag a piece or pick a move · ← → to step through the line"}
+          </span>
+        </div>
+        <div className="ml-auto flex rounded-lg p-0.5" role="tablist" aria-label="Opening Lab view" style={{ border: "1px solid var(--line)", background: "var(--paper-dark)" }}>
+          {([
+            { value: "tree", label: "Tree", Icon: Network },
+            { value: "board", label: "Board", Icon: Grid3x3 },
+          ] as const).map(({ value, label, Icon }) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={view === value}
+              aria-controls={`opening-lab-${value}`}
+              onClick={() => switchView(value)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
+                view === value ? "" : "opacity-70 hover:opacity-100",
+              )}
+              style={view === value ? { background: "var(--accent)", color: "#0a0e0b" } : { color: "var(--ink-soft)" }}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {label}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -106,19 +169,30 @@ function OpeningLab() {
           onGenerate={() => setGenerationKey((key) => key + 1)}
           onReset={() => {
             setGenerationKey(0);
-            setSelectedNode(null);
+            setTreeNode(null);
+            setBoardJump((prev) => ({ path: [], nonce: prev.nonce + 1 }));
             setPlayerVector(null);
           }}
           onRedoSetup={() => setSetupOpen(true)}
           selectedNode={selectedNode}
           playerVector={playerVector}
         />
-        <div className="relative min-w-0 flex-1">
+        {/* Both views stay mounted so switching keeps the expanded tree and the board line. */}
+        <div id="opening-lab-tree" role="tabpanel" className={cn("relative min-w-0 flex-1", view !== "tree" && "hidden")}>
           <OpeningStudyWhiteboard
             controls={controls}
             generationKey={generationKey}
-            onNodeSelect={setSelectedNode}
+            onNodeSelect={setTreeNode}
             onPlayerVectorLoad={setPlayerVector}
+          />
+        </div>
+        <div id="opening-lab-board" role="tabpanel" className={cn("relative min-w-0 flex-1", view !== "board" && "hidden")}>
+          <OpeningStudyBoardView
+            controls={controls}
+            generationKey={generationKey}
+            active={view === "board"}
+            jump={boardJump}
+            onNodeSelect={setBoardNode}
           />
         </div>
       </div>

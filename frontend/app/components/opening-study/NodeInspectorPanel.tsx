@@ -350,8 +350,8 @@ export function NodeInspectorPanel({ node, playerVector }: Props) {
         )}
       </div>
       <div className="flex justify-center">
-        <ZoomableBoard fen={node.boardPreviewFen} label={node.openingNames[0] ?? node.moveSan}>
-          <MiniChessBoard fen={node.boardPreviewFen} size={140} />
+        <ZoomableBoard fen={node.boardPreviewFen} label={node.openingNames[0] ?? node.moveSan} orientation={node.targetColor}>
+          <MiniChessBoard fen={node.boardPreviewFen} flipped={node.targetColor === "black"} size={140} />
         </ZoomableBoard>
       </div>
 
