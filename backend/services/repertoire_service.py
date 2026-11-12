@@ -18,7 +18,7 @@ reaching this position (possibly a transposition), which the client passes to
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 import chess
@@ -101,8 +101,19 @@ def _san(board: chess.Board, uci: str) -> str | None:
     return board.san(chess.Move.from_uci(standard)) if standard else None
 
 
-def _popularity(board: chess.Board, explorer: ExplorerService) -> _Popularity:
-    """Snapshot first (catalogued positions, no request spent), live Explorer otherwise."""
+def is_playable(cp: int | None, cp_loss: int | None, config: RepertoireConfig) -> bool | None:
+    """Within ``cp_tolerance`` of the best move and at least ``min_eval_cp`` for you."""
+    if cp is None or cp_loss is None:
+        return None
+    return cp_loss <= config.cp_tolerance and cp >= config.min_eval_cp
+
+
+def popularity(board: chess.Board, explorer: ExplorerService, *, live: bool = True) -> _Popularity:
+    """Snapshot first (catalogued positions, no request spent), live Explorer otherwise.
+
+    With ``live=False`` only cached Explorer data is used; a position never
+    fetched comes back as ``source="none", status="pending"``.
+    """
     record = load_popularity_snapshot(str(companion_path_for(settings.opening_vectors_path))).get(position_key(board))
     if record is not None:
         moves = []
@@ -115,7 +126,11 @@ def _popularity(board: chess.Board, explorer: ExplorerService) -> _Popularity:
             moves.append({"uci": uci, "san": san, "games": int(item.get("games") or 0), "share": float(item.get("share") or 0.0)})
         return _Popularity("snapshot", "ready", record.total_games, moves)
 
-    live = explorer.position(board)
+    if not live:
+        cached = explorer.cached(board)
+        if cached is None:
+            return _Popularity("none", "pending", 0, [])
+    live = explorer.position(board) if live else cached
     if live.status != "ready":
         return _Popularity("none", live.status, 0, [], retry_after=live.retry_after, message=live.message)
     return _Popularity(
@@ -155,18 +170,18 @@ def repertoire_position(
     messages: list[str] = []
     retry_after: list[float] = []
 
-    popularity = _popularity(board, explorer)
-    if popularity.status == "pending" and popularity.retry_after is not None:
-        retry_after.append(popularity.retry_after)
-    if popularity.message:
-        messages.append(popularity.message)
-    out_of_book = popularity.status == "ready" and popularity.total_games < config.min_position_games
+    popularity_data = popularity(board, explorer)
+    if popularity_data.status == "pending" and popularity_data.retry_after is not None:
+        retry_after.append(popularity_data.retry_after)
+    if popularity_data.message:
+        messages.append(popularity_data.message)
+    out_of_book = popularity_data.status == "ready" and popularity_data.total_games < config.min_position_games
 
     engine_block: dict[str, Any] = {"status": "skipped", "depth": config.engine_depth, "bestMove": None, "evalCp": None}
     moves: list[dict[str, Any]] = []
     if own_turn:
         popular = [
-            m for m in popularity.moves
+            m for m in popularity_data.moves
             if m["share"] >= config.own_min_share and m["games"] >= config.min_position_games
         ][: config.own_max_popular]
         evaluation: PositionEvaluation | None = None
@@ -189,7 +204,7 @@ def repertoire_position(
             messages.append(str(exc))
 
         by_uci: dict[str, dict[str, Any]] = {}
-        for item in popularity.moves:
+        for item in popularity_data.moves:
             by_uci[item["uci"]] = {"uci": item["uci"], "san": item["san"], "games": item["games"], "share": item["share"]}
         candidates = [m["uci"] for m in popular]
         if evaluation is not None:
@@ -198,9 +213,7 @@ def repertoire_position(
             entry = by_uci.get(uci) or {"uci": uci, "san": _san(board, uci) or uci, "games": 0, "share": 0.0}
             move_eval = evaluation.moves.get(uci) if evaluation else None
             cp_loss = evaluation.cp_loss(uci) if evaluation else None
-            playable = None
-            if move_eval is not None and cp_loss is not None:
-                playable = cp_loss <= config.cp_tolerance and move_eval.cp >= config.min_eval_cp
+            playable = is_playable(move_eval.cp if move_eval else None, cp_loss, config)
             moves.append({
                 **entry,
                 "cp": move_eval.cp if move_eval else None,
@@ -213,7 +226,7 @@ def repertoire_position(
         # Playable first, then the moves people actually play, then the engine's order.
         moves.sort(key=lambda m: (m["playable"] is not True, -m["share"], m["cpLoss"] if m["cpLoss"] is not None else 10**6))
     else:
-        replies = [m for m in popularity.moves if m["share"] >= config.opponent_min_share]
+        replies = [m for m in popularity_data.moves if m["share"] >= config.opponent_min_share]
         replies.sort(key=lambda m: m["share"], reverse=True)
         for item in replies[: config.opponent_max_replies]:
             moves.append({
@@ -231,12 +244,12 @@ def repertoire_position(
     if deepest is not None:
         named, ply = deepest
         opening = {"eco": named.eco, "name": named.name, "ply": ply, "exact": ply == len(boards) - 1}
-    elif popularity.explorer_opening and popularity.explorer_opening[1]:
-        eco, name = popularity.explorer_opening
+    elif popularity_data.explorer_opening and popularity_data.explorer_opening[1]:
+        eco, name = popularity_data.explorer_opening
         opening = {"eco": eco, "name": name, "ply": len(boards) - 1, "exact": True}
 
     # Partial answers (engine moves without shares, say) still carry what is known.
-    pending = popularity.status == "pending" or engine_block["status"] == "pending"
+    pending = popularity_data.status == "pending" or engine_block["status"] == "pending"
     lab_prefix = index.lab_prefix_for(board)
     return {
         "status": "pending" if pending else "ready",
@@ -253,10 +266,10 @@ def repertoire_position(
         "inCatalog": lab_prefix is not None or index.opening_at(board) is not None,
         "labPrefixUci": list(lab_prefix) if lab_prefix is not None else None,
         "popularity": {
-            "source": popularity.source,
-            "status": popularity.status,
-            "totalGames": popularity.total_games,
-            "fetchedAt": popularity.fetched_at,
+            "source": popularity_data.source,
+            "status": popularity_data.status,
+            "totalGames": popularity_data.total_games,
+            "fetchedAt": popularity_data.fetched_at,
             "outOfBook": out_of_book,
         },
         "engine": engine_block,
@@ -264,11 +277,3 @@ def repertoire_position(
         "settings": {"cpTolerance": config.cp_tolerance, "minEvalCp": config.min_eval_cp},
     }
 
-
-def config_with_overrides(cp_tolerance: int | None = None, min_eval_cp: int | None = None) -> RepertoireConfig:
-    updates = {}
-    if cp_tolerance is not None:
-        updates["cp_tolerance"] = cp_tolerance
-    if min_eval_cp is not None:
-        updates["min_eval_cp"] = min_eval_cp
-    return replace(DEFAULT_CONFIG, **updates)

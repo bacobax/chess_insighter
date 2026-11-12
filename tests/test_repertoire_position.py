@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 import chess
@@ -187,7 +188,8 @@ def test_route_validates_and_serializes(monkeypatch):
     monkeypatch.setattr(repertoire_service, "get_explorer_service", lambda: explorer())
     # White's repertoire with Black to move: an opponent turn, so no engine search.
     body = RepertoirePositionRequest.model_validate({"color": "white", "prefixUci": uci_line("e4", "e5", "Nf3")})
-    response = asyncio.run(api_main.repertoire_position_route(body))
+    request = SimpleNamespace(state=SimpleNamespace(auth_user=SimpleNamespace(id="owner-1")))
+    response = asyncio.run(api_main.repertoire_position_route(body, request))
     assert response.ownTurn is False and response.sideToMove == "black"
     assert response.popularity.source == "snapshot"
     assert "b8c6" in [move.uci for move in response.moves]

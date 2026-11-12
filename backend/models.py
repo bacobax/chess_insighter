@@ -835,3 +835,94 @@ class RepertoirePositionResponse(BaseModel):
     engine: RepertoireEngine
     moves: list[RepertoireMove]
     settings: RepertoireSettings
+
+
+class RepertoireChoice(BaseModel):
+    uci: str
+    san: str
+    prefixUci: list[str]
+    cp: int | None = None
+    cpLoss: int | None = None
+    depth: int | None = None
+    source: Literal["user", "seed"]
+    chosenAt: str
+
+
+class RepertoireUserSettings(BaseModel):
+    cpTolerance: int = Field(ge=0, le=300)
+    minEvalCp: int = Field(ge=-500, le=200)
+    minReach: float = Field(ge=0.005, le=0.5)
+    maxOwnMoves: int = Field(ge=1, le=30)
+
+
+class RepertoireSettingsPatch(BaseModel):
+    cpTolerance: int | None = Field(default=None, ge=0, le=300)
+    minEvalCp: int | None = Field(default=None, ge=-500, le=200)
+    minReach: float | None = Field(default=None, ge=0.005, le=0.5)
+    maxOwnMoves: int | None = Field(default=None, ge=1, le=30)
+
+
+class RepertoireResponse(BaseModel):
+    color: Literal["white", "black"]
+    # Keyed by position (EPD).
+    choices: dict[str, RepertoireChoice]
+    settings: RepertoireUserSettings
+    updatedAt: str | None = None
+
+
+class RepertoireChoiceRequest(BaseModel):
+    prefix_uci: list[str] = Field(default_factory=list, max_length=60, alias="prefixUci")
+    move_uci: str = Field(min_length=4, max_length=5, alias="moveUci")
+
+    model_config = {"populate_by_name": True}
+
+
+class RepertoireSeedRequest(BaseModel):
+    # SAN lines such as "1.e4 e5 2.Nf3 Nc6"; omitted = the training plan's simple repertoire.
+    lines: list[str] | None = Field(default=None, max_length=10)
+
+
+class RepertoireLinesRequest(BaseModel):
+    start_prefix_uci: list[str] = Field(default_factory=list, max_length=60, alias="startPrefixUci")
+    fetch_budget: int = Field(default=3, ge=0, le=10, alias="fetchBudget")
+
+    model_config = {"populate_by_name": True}
+
+
+class RepertoireLine(BaseModel):
+    id: str
+    prefixUci: list[str]
+    san: list[str]
+    reach: float
+    status: Literal["complete", "out_of_book", "needs_choice", "pending", "no_data"]
+    endReason: Literal["move_cap", "below_cutoff", "game_over", "depth_limit"] | None = None
+    ownMoves: int
+    epd: str
+    openingEco: str | None = None
+    openingName: str | None = None
+
+
+class RepertoireCoverage(BaseModel):
+    complete: float
+    outOfBook: float
+    needsChoice: float
+    pending: float
+    noData: float
+    pruned: float
+
+
+class RepertoireLineSettings(BaseModel):
+    minReach: float
+    maxOwnMoves: int
+
+
+class RepertoireLinesResponse(BaseModel):
+    color: Literal["white", "black"]
+    startPrefixUci: list[str]
+    lines: list[RepertoireLine]
+    coverage: RepertoireCoverage
+    status: Literal["ready", "pending"]
+    retryAfter: float | None = None
+    choicesUsed: int
+    truncated: bool
+    settings: RepertoireLineSettings

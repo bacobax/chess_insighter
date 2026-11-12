@@ -43,6 +43,7 @@ def _ensure_indexes(db: Database) -> None:
     db.target_players.create_index([("owner_id", ASCENDING), ("username_key", ASCENDING)], unique=True)
     db.audit_events.create_index([("user_id", ASCENDING)])
     db[BLOBS].create_index([("namespace", ASCENDING), ("key", ASCENDING)])
+    db.repertoires.create_index([("owner_id", ASCENDING)])
 
 
 def get_database() -> Database:

@@ -86,7 +86,8 @@ Key conventions:
 | `/api/opening-study-tree/children` | POST | `opening_study_service.opening_study_tree_children` |
 | `/api/reports/{id}` (+ `/save`, PATCH, DELETE) | GET/POST/PATCH/DELETE | `report_repository.ReportsRepository` |
 | `/api/training-plans/builds` | POST (+ `GET /{id}`, `POST /{id}/cancel`, WS `/{id}/status`) | `training_plan_service.run_training_plan_job` |
-| `/api/repertoire/position` | POST | `repertoire_service.repertoire_position` |
+| `/api/repertoire/position` | POST | `repertoire_service.repertoire_position` (account's saved limits unless overridden) |
+| `/api/repertoires/{color}` (+ `PUT/DELETE /choices`, `PATCH /settings`, `POST /seed`, `POST /lines`) | GET/PUT/DELETE/PATCH/POST | `repertoire_repository.RepertoireStore`, `repertoire_lines.repertoire_lines` |
 | `/api/players/{username}/training-plan` | GET | `training_plan_service.TrainingPlanStore` |
 | `/api/players/{username}/training-plan/cards/{card_id}/review` | POST | `TrainingPlanStore.review` |
 
@@ -143,6 +144,14 @@ Key conventions:
 **`repertoire_service.py`** — one repertoire position (`POST /api/repertoire/position`)
 - Keywords: `repertoire_position`, `RepertoireConfig`, `config_with_overrides`, `replay_prefix`
 - Popularity from the offline snapshot where catalogued, else the live Explorer. Your turn: popular moves ∪ engine top moves, each with `cpLoss` and `playable` (≤ `cp_tolerance` behind the best move **and** ≥ `min_eval_cp` for you). Opponent turn: replies ≥ 2% share, no engine. `status="pending"` + `retryAfter` while the Explorer is rate-limited or the engine is busy (partial data still returned). `labPrefixUci` = catalogued move order reaching the position (handles transpositions); pass it to `/api/opening-study-tree/children` for Lab scores. Stopping lines (reach probability, move cap) is the caller's job; `popularity.outOfBook` flags < 30 games
+
+**`repertoire_repository.py`** — saved repertoires, collection `repertoires` (`_id` = `<owner>:<color>`)
+- Keywords: `RepertoireStore`, `set_choice`, `remove_choice`, `update_settings`, `seed`, `ChoiceNotPlayable`, `config_for`, `line_settings_for`
+- Choices keyed by **position (EPD)**, so transpositions reuse them. `set_choice` checks the move with `evaluate_position` against the account's `cpTolerance`/`minEvalCp` (422 `not_playable`; 503 `engine_busy`/`engine_unavailable`). `seed` adds moves along SAN lines (default: `SIMPLE_REPERTOIRE`) only where no choice exists, without the engine check. Settings: `cpTolerance`, `minEvalCp`, `minReach`, `maxOwnMoves`
+
+**`repertoire_lines.py`** — expands a repertoire into its lines
+- Keywords: `repertoire_lines`, `LineSettings`, `EndReason`
+- Plays your choice at your turns, branches over opponent replies ≥ 2% share; each line's `reach` = product of reply shares. Leaves: `complete` (`endReason` `move_cap` / `below_cutoff` / …), `out_of_book` (< 30 games), `needs_choice`, `pending` (no data yet; call again after `retryAfter`), `no_data` (none fetchable: Explorer not configured or token rejected; final). Rare/cut replies are summed as `coverage.pruned`; coverage parts add up to 1. Reads cached popularity only, plus up to `fetch_budget` live Explorer fetches per call
 
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`

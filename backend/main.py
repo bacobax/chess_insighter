@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import re
+from typing import Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.concurrency import run_in_threadpool
@@ -40,8 +42,14 @@ from backend.models import (
     ReportSummary,
     OpeningDrillCatalog,
     OpeningDrillRequest,
+    RepertoireChoiceRequest,
+    RepertoireLinesRequest,
+    RepertoireLinesResponse,
     RepertoirePositionRequest,
     RepertoirePositionResponse,
+    RepertoireResponse,
+    RepertoireSeedRequest,
+    RepertoireSettingsPatch,
     TrainingCard,
     TrainingCardReviewRequest,
     TrainingPlanBuildRequest,
@@ -65,7 +73,10 @@ from backend.services.chesscom_service import ChessComServiceError, UnknownChess
 from backend.services.hparams_service import load_hparams
 from backend.services.mistakes_service import analyse_position
 from backend.services.opening_study_service import opening_study_tree_children
-from backend.services.repertoire_service import config_with_overrides, repertoire_position
+from backend.services.engine_eval_service import EngineBusy, EngineUnavailable
+from backend.services.repertoire_lines import repertoire_lines
+from backend.services.repertoire_repository import ChoiceNotPlayable, RepertoireStore, config_for, line_settings_for
+from backend.services.repertoire_service import ENGINE_BUSY_RETRY_SECONDS, repertoire_position
 from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
 from backend.services.report_build_job_service import (
@@ -556,11 +567,83 @@ def review_training_card(username: str, card_id: str, body: TrainingCardReviewRe
     return TrainingCard.model_validate(TrainingPlanStore().review(request_user(request).id, username, card_id, body))
 
 
+@app.exception_handler(ChoiceNotPlayable)
+async def choice_not_playable_handler(_request, exc: ChoiceNotPlayable):
+    return JSONResponse(status_code=422, content={"code": "not_playable", "message": str(exc)})
+
+
+@app.exception_handler(EngineBusy)
+async def engine_busy_handler(_request, exc: EngineBusy):
+    return JSONResponse(
+        status_code=503,
+        content={"code": "engine_busy", "message": str(exc), "details": {"retryAfter": ENGINE_BUSY_RETRY_SECONDS}},
+        headers={"Retry-After": str(int(ENGINE_BUSY_RETRY_SECONDS))},
+    )
+
+
+@app.exception_handler(EngineUnavailable)
+async def engine_unavailable_handler(_request, exc: EngineUnavailable):
+    return JSONResponse(status_code=503, content={"code": "engine_unavailable", "message": str(exc)})
+
+
 @app.post("/api/repertoire/position", response_model=RepertoirePositionResponse)
-async def repertoire_position_route(body: RepertoirePositionRequest) -> RepertoirePositionResponse:
-    config = config_with_overrides(body.cp_tolerance, body.min_eval_cp)
+async def repertoire_position_route(body: RepertoirePositionRequest, request: Request) -> RepertoirePositionResponse:
+    # The account's saved limits apply unless the request overrides them.
+    saved = config_for(RepertoireStore().get(request_user(request).id, body.color)["settings"])
+    config = replace(
+        saved,
+        cp_tolerance=body.cp_tolerance if body.cp_tolerance is not None else saved.cp_tolerance,
+        min_eval_cp=body.min_eval_cp if body.min_eval_cp is not None else saved.min_eval_cp,
+    )
     payload = await run_in_threadpool(lambda: repertoire_position(body.color, body.prefix_uci, config=config))
     return RepertoirePositionResponse.model_validate(payload)
+
+
+RepertoireColor = Literal["white", "black"]
+
+
+@app.get("/api/repertoires/{color}", response_model=RepertoireResponse)
+def get_repertoire(color: RepertoireColor, request: Request) -> RepertoireResponse:
+    return RepertoireResponse.model_validate(RepertoireStore().get(request_user(request).id, color))
+
+
+@app.put("/api/repertoires/{color}/choices", response_model=RepertoireResponse)
+async def set_repertoire_choice(color: RepertoireColor, body: RepertoireChoiceRequest, request: Request) -> RepertoireResponse:
+    owner = request_user(request).id
+    payload = await run_in_threadpool(lambda: RepertoireStore().set_choice(owner, color, body.prefix_uci, body.move_uci))
+    return RepertoireResponse.model_validate(payload)
+
+
+@app.delete("/api/repertoires/{color}/choices", response_model=RepertoireResponse)
+def remove_repertoire_choice(color: RepertoireColor, request: Request, prefix: str = "") -> RepertoireResponse:
+    """``prefix`` is the position's moves as space- or comma-separated UCI."""
+    moves = [token for token in prefix.replace(",", " ").split() if token]
+    return RepertoireResponse.model_validate(RepertoireStore().remove_choice(request_user(request).id, color, moves))
+
+
+@app.patch("/api/repertoires/{color}/settings", response_model=RepertoireResponse)
+def update_repertoire_settings(color: RepertoireColor, body: RepertoireSettingsPatch, request: Request) -> RepertoireResponse:
+    patch = body.model_dump(exclude_none=True)
+    return RepertoireResponse.model_validate(RepertoireStore().update_settings(request_user(request).id, color, patch))
+
+
+@app.post("/api/repertoires/{color}/seed", response_model=RepertoireResponse)
+def seed_repertoire(color: RepertoireColor, body: RepertoireSeedRequest, request: Request) -> RepertoireResponse:
+    return RepertoireResponse.model_validate(RepertoireStore().seed(request_user(request).id, color, body.lines))
+
+
+@app.post("/api/repertoires/{color}/lines", response_model=RepertoireLinesResponse)
+async def repertoire_lines_route(color: RepertoireColor, body: RepertoireLinesRequest, request: Request) -> RepertoireLinesResponse:
+    saved = RepertoireStore().get(request_user(request).id, color)
+    payload = await run_in_threadpool(lambda: repertoire_lines(
+        color,
+        saved["choices"],
+        start_prefix_uci=body.start_prefix_uci,
+        config=config_for(saved["settings"]),
+        line_settings=line_settings_for(saved["settings"]),
+        fetch_budget=body.fetch_budget,
+    ))
+    return RepertoireLinesResponse.model_validate(payload)
 
 
 @app.post("/api/training/opening-drill", response_model=OpeningDrillCatalog)
