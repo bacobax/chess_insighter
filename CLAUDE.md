@@ -86,6 +86,7 @@ Key conventions:
 | `/api/opening-study-tree/children` | POST | `opening_study_service.opening_study_tree_children` |
 | `/api/reports/{id}` (+ `/save`, PATCH, DELETE) | GET/POST/PATCH/DELETE | `report_repository.ReportsRepository` |
 | `/api/training-plans/builds` | POST (+ `GET /{id}`, `POST /{id}/cancel`, WS `/{id}/status`) | `training_plan_service.run_training_plan_job` |
+| `/api/repertoire/position` | POST | `repertoire_service.repertoire_position` |
 | `/api/players/{username}/training-plan` | GET | `training_plan_service.TrainingPlanStore` |
 | `/api/players/{username}/training-plan/cards/{card_id}/review` | POST | `TrainingPlanStore.review` |
 
@@ -137,7 +138,11 @@ Key conventions:
 
 **`engine_eval_service.py`** — deeper Stockfish evaluations for repertoire choices
 - Keywords: `evaluate_position`, `cached_evaluation`, `PositionEvaluation.cp_loss`, `EngineUnavailable`
-- Depth 18, top 5 moves (multipv), plus any requested move searched alone via `root_moves`; merged per position in blob namespace `engine_evals` (key `d<depth>:<EPD>`). Scores are from the side to move; one search at a time (process lock)
+- Depth 18, top 5 moves (multipv), plus requested extra moves in one search restricted via `root_moves`; merged per position in blob namespace `engine_evals` (key `d<depth>:<EPD>`). Scores are from the side to move; one search at a time (process lock; `wait=` raises `EngineBusy`)
+
+**`repertoire_service.py`** — one repertoire position (`POST /api/repertoire/position`)
+- Keywords: `repertoire_position`, `RepertoireConfig`, `config_with_overrides`, `replay_prefix`
+- Popularity from the offline snapshot where catalogued, else the live Explorer. Your turn: popular moves ∪ engine top moves, each with `cpLoss` and `playable` (≤ `cp_tolerance` behind the best move **and** ≥ `min_eval_cp` for you). Opponent turn: replies ≥ 2% share, no engine. `status="pending"` + `retryAfter` while the Explorer is rate-limited or the engine is busy (partial data still returned). `labPrefixUci` = catalogued move order reaching the position (handles transpositions); pass it to `/api/opening-study-tree/children` for Lab scores. Stopping lines (reach probability, move cap) is the caller's job; `popularity.outOfBook` flags < 30 games
 
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`
@@ -174,6 +179,11 @@ All heavy computation lives here, independent of FastAPI.
 **`lichess_explorer.py`** — one-request Lichess Explorer client shared by `build_opening_popularity.py` and `explorer_service.py`
 - Keywords: `request_explorer_position`, `normalized_moves`, `default_window`, `cohort_label`, `ExplorerRateLimited`, `ExplorerTransientError`, `ExplorerAuthRejected`
 - Fixed cohort (blitz+rapid, 1200–2000, last 24 complete months); raises typed errors instead of retrying, so the build script sleeps and the API backs off
+- Lichess writes castling as king-takes-rook (`e1h1`, also in the popularity snapshot); `standard_uci` converts to the engine's `e1g1`
+
+**`opening_catalog_index.py`** — position-keyed index of `all.tsv`
+- Keywords: `catalog_index`, `CatalogIndex.opening_at`, `lab_prefix_for`, `deepest_opening`
+- EPD → name (where a named line ends) and EPD → the move order the Lab should expand from (most lines through it), so transposed move orders still find the catalog
 
 **`custom_opening_explorer.py`** — alternative opening lookup (separate from study tree)
 

@@ -40,6 +40,8 @@ from backend.models import (
     ReportSummary,
     OpeningDrillCatalog,
     OpeningDrillRequest,
+    RepertoirePositionRequest,
+    RepertoirePositionResponse,
     TrainingCard,
     TrainingCardReviewRequest,
     TrainingPlanBuildRequest,
@@ -63,6 +65,7 @@ from backend.services.chesscom_service import ChessComServiceError, UnknownChess
 from backend.services.hparams_service import load_hparams
 from backend.services.mistakes_service import analyse_position
 from backend.services.opening_study_service import opening_study_tree_children
+from backend.services.repertoire_service import config_with_overrides, repertoire_position
 from backend.services.openings_service import top_opening_matches_from_cached_report
 from backend.services.statistics_service import build_report
 from backend.services.report_build_job_service import (
@@ -551,6 +554,13 @@ def player_training_plan(username: str, request: Request) -> TrainingPlanRespons
 @app.post("/api/players/{username}/training-plan/cards/{card_id}/review", response_model=TrainingCard)
 def review_training_card(username: str, card_id: str, body: TrainingCardReviewRequest, request: Request) -> TrainingCard:
     return TrainingCard.model_validate(TrainingPlanStore().review(request_user(request).id, username, card_id, body))
+
+
+@app.post("/api/repertoire/position", response_model=RepertoirePositionResponse)
+async def repertoire_position_route(body: RepertoirePositionRequest) -> RepertoirePositionResponse:
+    config = config_with_overrides(body.cp_tolerance, body.min_eval_cp)
+    payload = await run_in_threadpool(lambda: repertoire_position(body.color, body.prefix_uci, config=config))
+    return RepertoirePositionResponse.model_validate(payload)
 
 
 @app.post("/api/training/opening-drill", response_model=OpeningDrillCatalog)

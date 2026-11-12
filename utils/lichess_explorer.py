@@ -139,6 +139,18 @@ def request_explorer_position(
     raise ExplorerResponseError(f"Lichess Explorer failed with HTTP {status}")
 
 
+def standard_uci(board: chess.Board, uci: str) -> str | None:
+    """Explorer UCI → the engine's form, or ``None`` if illegal here.
+
+    Lichess writes castling as king-takes-rook (``e1h1``); python-chess and
+    Stockfish use ``e1g1``. Without this the same move appears twice.
+    """
+    try:
+        return board.parse_uci(uci).uci()
+    except ValueError:
+        return None
+
+
 def move_games(move: Mapping[str, Any]) -> int:
     return int(move.get("white") or 0) + int(move.get("draws") or 0) + int(move.get("black") or 0)
 

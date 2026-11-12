@@ -32,6 +32,7 @@ from utils.lichess_explorer import (
     default_window,
     move_games,
     request_explorer_position,
+    standard_uci,
 )
 from utils.opening_popularity import position_key
 
@@ -139,15 +140,13 @@ def _position_from_record(board: chess.Board, record: dict[str, Any], *, stale: 
     covered = sum(move_games(move) for move in raw_moves)
     moves = []
     for move in raw_moves:
-        san = str(move.get("san") or "")
-        if not san:
-            try:
-                san = board.san(chess.Move.from_uci(str(move["uci"])))
-            except ValueError:
-                continue
+        uci = standard_uci(board, str(move["uci"]))
+        if uci is None:
+            continue
+        san = str(move.get("san") or "") or board.san(chess.Move.from_uci(uci))
         games = move_games(move)
         moves.append(ExplorerMove(
-            uci=str(move["uci"]),
+            uci=uci,
             san=san,
             games=games,
             share=games / covered if covered else 0.0,

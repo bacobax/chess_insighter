@@ -764,3 +764,74 @@ class OpeningDrillLine(BaseModel):
 
 class OpeningDrillCatalog(BaseModel):
     lines: list[OpeningDrillLine]
+
+
+class RepertoirePositionRequest(BaseModel):
+    color: Literal["white", "black"]
+    prefix_uci: list[str] = Field(default_factory=list, max_length=60, alias="prefixUci")
+    cp_tolerance: int | None = Field(default=None, ge=0, le=300, alias="cpTolerance")
+    min_eval_cp: int | None = Field(default=None, ge=-500, le=200, alias="minEvalCp")
+
+    model_config = {"populate_by_name": True}
+
+
+class RepertoireMove(BaseModel):
+    uci: str
+    san: str
+    games: int
+    share: float
+    cp: int | None = None
+    mate: int | None = None
+    cpLoss: int | None = None
+    engineRank: int | None = None
+    playable: bool | None = None
+    openingEco: str | None = None
+    openingName: str | None = None
+    inCatalog: bool
+
+
+class RepertoireOpening(BaseModel):
+    eco: str | None = None
+    name: str
+    ply: int
+    exact: bool
+
+
+class RepertoirePopularity(BaseModel):
+    source: Literal["snapshot", "live", "none"]
+    status: Literal["ready", "pending", "unavailable"]
+    totalGames: int
+    fetchedAt: str | None = None
+    outOfBook: bool
+
+
+class RepertoireEngine(BaseModel):
+    status: Literal["ready", "pending", "unavailable", "skipped"]
+    depth: int
+    bestMove: str | None = None
+    evalCp: int | None = None
+
+
+class RepertoireSettings(BaseModel):
+    cpTolerance: int
+    minEvalCp: int
+
+
+class RepertoirePositionResponse(BaseModel):
+    status: Literal["ready", "pending"]
+    retryAfter: float | None = None
+    messages: list[str]
+    color: Literal["white", "black"]
+    prefixUci: list[str]
+    fen: str
+    epd: str
+    ply: int
+    sideToMove: Literal["white", "black"]
+    ownTurn: bool
+    opening: RepertoireOpening | None = None
+    inCatalog: bool
+    labPrefixUci: list[str] | None = None
+    popularity: RepertoirePopularity
+    engine: RepertoireEngine
+    moves: list[RepertoireMove]
+    settings: RepertoireSettings

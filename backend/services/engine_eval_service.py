@@ -2,9 +2,9 @@
 
 The Opening Lab tree uses depth 8, which is too noisy for a move someone saves
 into a repertoire. Here a position is searched once at ``DEFAULT_DEPTH`` with
-the top ``DEFAULT_MULTIPV`` moves; moves outside that set (a popular Explorer
-move, say) are searched on their own at the same depth and merged into the same
-record. Every user shares the cache, so each position costs one search.
+the top ``DEFAULT_MULTIPV`` moves; moves outside that set (popular Explorer
+moves, say) get one more search restricted to them, at the same depth, merged
+into the same record. Every user shares the cache, so each position costs one search.
 
 Scores are from the side to move's point of view. ``cp_loss`` is the
 centipawn gap to the best move, never negative.
@@ -37,6 +37,10 @@ _engine_lock = threading.Lock()
 
 class EngineUnavailable(RuntimeError):
     """No Stockfish binary is configured or found."""
+
+
+class EngineBusy(RuntimeError):
+    """Another search held the engine longer than the caller was willing to wait."""
 
 
 @dataclass(frozen=True)
@@ -154,11 +158,14 @@ def evaluate_position(
     depth: int = DEFAULT_DEPTH,
     multipv: int = DEFAULT_MULTIPV,
     engine: chess.engine.SimpleEngine | None = None,
+    wait: float | None = None,
 ) -> PositionEvaluation:
     """Top ``multipv`` moves plus every legal move in ``moves``, at ``depth``.
 
     Only what the cache is missing is searched. Raises ``EngineUnavailable``
-    when a search is needed and no Stockfish is configured.
+    when a search is needed and no Stockfish is configured, and ``EngineBusy``
+    when another search keeps the engine for more than ``wait`` seconds
+    (``None`` waits as long as it takes).
     """
     key = cache_key(board, depth)
     legal = {move.uci(): move for move in board.legal_moves}
@@ -177,7 +184,9 @@ def evaluate_position(
     if record is not None and not need_multipv and not extra:
         return _record_to_evaluation(board, record)
 
-    with _engine_lock:
+    if not _engine_lock.acquire(timeout=-1 if wait is None else max(0.0, wait)):
+        raise EngineBusy("The engine is busy with another position.")
+    try:
         # Another request may have filled the cache while this one waited.
         record = mongo_service.blob_get(NAMESPACE, key)
         record = record if isinstance(record, dict) else None
@@ -201,11 +210,15 @@ def evaluate_position(
                                 record["best_move"] = entry[0]
                     record["multipv"] = count
                     extra = [uci for uci in wanted if uci not in entries]
-                for uci in extra:
-                    info = active.analyse(board, limit, root_moves=[legal[uci]])
-                    entry = _move_entry(board, info if isinstance(info, dict) else info[0], None)
-                    if entry is not None:
-                        entries[entry[0]] = {**entry[1], "rank": entries.get(uci, {}).get("rank")}
+                if extra:
+                    # One search restricted to the extra moves, one line each.
+                    analysed = active.analyse(board, limit, multipv=len(extra), root_moves=[legal[uci] for uci in extra])
+                    for info in analysed if isinstance(analysed, list) else [analysed]:
+                        entry = _move_entry(board, info, None)
+                        if entry is not None and entry[0] in extra:
+                            entries[entry[0]] = entry[1]
                 record["moves"] = entries
             mongo_service.blob_put(NAMESPACE, key, record, epd=position_key(board), depth=depth)
+    finally:
+        _engine_lock.release()
     return _record_to_evaluation(board, record)

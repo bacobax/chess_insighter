@@ -185,6 +185,13 @@ def test_rejected_token_is_unavailable():
     assert result.status == "unavailable"
 
 
+def test_castling_is_normalized_to_the_engine_form():
+    board = chess.Board("r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4")
+    payload = {**PAYLOAD, "moves": [{"uci": "e1h1", "san": "O-O", "white": 3, "draws": 0, "black": 1}]}
+    result = service(Session(Response(200, payload))).position(board)
+    assert [m.uci for m in result.moves] == ["e1g1"]
+
+
 def test_missing_san_is_derived_from_the_board():
     payload = {**PAYLOAD, "moves": [{"uci": "g1f3", "white": 1, "draws": 0, "black": 0}]}
     result = service(Session(Response(200, payload))).position(chess.Board())
@@ -210,7 +217,7 @@ class FakeEngine:
     def analyse(self, board, limit, multipv=None, root_moves=None):
         self.calls.append({"multipv": multipv, "root_moves": [m.uci() for m in root_moves or []]})
         if root_moves:
-            return self._info(board, root_moves[0])
+            return [self._info(board, move) for move in root_moves][:multipv or 1]
         ordered = sorted(board.legal_moves, key=lambda m: self.SCORES.get(m.uci(), -60), reverse=True)
         return [self._info(board, move) for move in ordered[:multipv]]
 
@@ -229,8 +236,8 @@ def test_extra_moves_are_searched_alone_and_cached():
     engine = FakeEngine()
     evaluate_position(chess.Board(), depth=12, multipv=3, engine=engine)
     result = evaluate_position(chess.Board(), moves=["c2c4", "e2e4", "a2a3", "e7e5"], depth=12, multipv=3, engine=engine)
-    # e2e4 was already known; a2a3 and c2c4 are new; e7e5 is illegal and ignored.
-    assert [call["root_moves"] for call in engine.calls[1:]] == [["c2c4"], ["a2a3"]]
+    # e2e4 was already known; c2c4 and a2a3 are new (one restricted search); e7e5 is illegal.
+    assert engine.calls[1:] == [{"multipv": 2, "root_moves": ["c2c4", "a2a3"]}]
     assert result.cp_loss("c2c4") == 20 and result.cp_loss("a2a3") == 100
     assert result.moves["c2c4"].rank is None and result.moves["e2e4"].rank == 1
 
