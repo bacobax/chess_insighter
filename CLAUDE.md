@@ -131,6 +131,14 @@ Key conventions:
 - Keywords: `build_training_plan_for_player`, `run_training_plan_job`, `TrainingPlanStore`, `is_standard_game`
 - Fetches the last N standard games, enriches + runs `analyze_mistakes` per game (cached in blob namespace `training_analysis`), then calls `utils/training_plan.build_training_plan`; latest plan per account+player stored in blob namespace `training_plans`
 
+**`explorer_service.py`** — live Lichess Explorer positions (repertoire positions past the named lines)
+- Keywords: `ExplorerService`, `get_explorer_service`, `ExplorerPosition`, `ExplorerMove`
+- Cached for every user in blob namespace `explorer_positions` (key = cohort + EPD), refreshed after 90 days. Needs `LICHESS_API_TOKEN`. Requests are serialized ≥ 1 s apart; a 429 blocks new requests for `Retry-After` (60 s default) and uncached positions answer `status="pending"` instead of holding the single worker; stale entries are served while a refresh fails
+
+**`engine_eval_service.py`** — deeper Stockfish evaluations for repertoire choices
+- Keywords: `evaluate_position`, `cached_evaluation`, `PositionEvaluation.cp_loss`, `EngineUnavailable`
+- Depth 18, top 5 moves (multipv), plus any requested move searched alone via `root_moves`; merged per position in blob namespace `engine_evals` (key `d<depth>:<EPD>`). Scores are from the side to move; one search at a time (process lock)
+
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`
 - Orchestrates `enrichment_service` → `global_statistics_transformer` → formats into `ReportBuildResponse`
@@ -162,6 +170,10 @@ All heavy computation lives here, independent of FastAPI.
 **`opening_study_explanations.py`** — plain-language "why this score" for each node's siblings
 - Keywords: `explain_player_moves`, `explain_opponent_moves`, `CRITERIA`, `FEATURE_PHRASES`
 - Each player move is compared with the top-ranked sibling (the top move with the runner-up); the score gap splits exactly into per-criterion shares `weight × (value − reference)` because active weights sum to 1. Fixed templates (slightly < 5 ≤ clearly ≤ 15 < much; shares < 0.5 pt omitted; gap < 1 pt = "practically tied"); the lead factor names its strongest opening feature. Attached as `explanation` on the shown children
+
+**`lichess_explorer.py`** — one-request Lichess Explorer client shared by `build_opening_popularity.py` and `explorer_service.py`
+- Keywords: `request_explorer_position`, `normalized_moves`, `default_window`, `cohort_label`, `ExplorerRateLimited`, `ExplorerTransientError`, `ExplorerAuthRejected`
+- Fixed cohort (blitz+rapid, 1200–2000, last 24 complete months); raises typed errors instead of retrying, so the build script sleeps and the API backs off
 
 **`custom_opening_explorer.py`** — alternative opening lookup (separate from study tree)
 

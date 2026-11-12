@@ -34,12 +34,21 @@ from utils.opening_popularity import (
     weighted_practical_gamble,
 )
 from utils.opening_study_tree import cp_to_utility
+from utils.lichess_explorer import (
+    DEFAULT_RATE_LIMIT_WAIT_SECONDS,
+    EXPLORER_URL,
+    MAX_MOVES,
+    RATINGS,
+    SPEEDS,
+    ExplorerAuthRejected,
+    ExplorerRateLimited,
+    ExplorerTransientError,
+    default_window,
+    normalized_moves,
+    request_explorer_position,
+)
 
 
-EXPLORER_URL = "https://explorer.lichess.org/lichess"
-SPEEDS = ("blitz", "rapid")
-RATINGS = (1200, 1400, 1600, 1800, 2000)
-MAX_MOVES = 50
 ENGINE_DEPTH = 8
 SNAPSHOT_COLUMNS = (
     "position_epd",
@@ -82,21 +91,6 @@ class DirectMetric:
     raw: float | None
     sample_size: int
     coverage: float
-
-
-def _month_index(year: int, month: int) -> int:
-    return year * 12 + month - 1
-
-
-def _month_from_index(value: int) -> str:
-    year, zero_month = divmod(value, 12)
-    return f"{year:04d}-{zero_month + 1:02d}"
-
-
-def default_window(now: datetime | None = None) -> tuple[str, str]:
-    current = now or datetime.now(timezone.utc)
-    last_complete = _month_index(current.year, current.month) - 1
-    return _month_from_index(last_complete - 23), _month_from_index(last_complete)
 
 
 def board_from_epd(epd: str) -> chess.Board:
@@ -177,56 +171,27 @@ def fetch_explorer_position(
             "Set it in the environment or run this command interactively."
         )
 
-    params = {
-        "variant": "standard",
-        "fen": board.fen(),
-        "speeds": ",".join(SPEEDS),
-        "ratings": ",".join(str(rating) for rating in RATINGS),
-        "since": since,
-        "until": until,
-        "moves": MAX_MOVES,
-        "topGames": 0,
-        "recentGames": 0,
-    }
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     for attempt in range(max_retries + 1):
         try:
-            response = session.get(EXPLORER_URL, params=params, headers=headers, timeout=45)
-        except requests.RequestException as exc:
+            payload = request_explorer_position(board, session=session, token=token, since=since, until=until)
+        except ExplorerAuthRejected:
+            raise
+        except ExplorerRateLimited as exc:
             if attempt >= max_retries:
-                raise RuntimeError("Lichess Explorer transport failed after retries") from exc
-            time.sleep(min(60.0, 2.0 ** attempt))
+                raise RuntimeError("Lichess Explorer still failing after retries (HTTP 429)") from exc
+            wait_seconds = exc.retry_after if exc.retry_after is not None else DEFAULT_RATE_LIMIT_WAIT_SECONDS
+            time.sleep(max(1.0, wait_seconds))
             continue
-        if response.status_code == 200:
-            try:
-                payload = response.json()
-            except requests.JSONDecodeError as exc:
-                raise RuntimeError("Lichess Explorer returned malformed JSON") from exc
-            if not isinstance(payload, dict) or not isinstance(payload.get("moves", []), list):
-                raise RuntimeError("Lichess Explorer returned an unexpected response shape")
-            _write_json_atomic(cache_path, payload)
-            if request_delay > 0:
-                time.sleep(request_delay)
-            return payload
-        if response.status_code in {401, 403}:
-            raise RuntimeError("Lichess Explorer rejected the OAuth token")
-        if response.status_code != 429 and response.status_code < 500:
-            raise RuntimeError(f"Lichess Explorer failed with HTTP {response.status_code}")
-        if attempt >= max_retries:
-            raise RuntimeError(f"Lichess Explorer still failing after retries (HTTP {response.status_code})")
-        retry_after = response.headers.get("Retry-After")
-        try:
-            if retry_after:
-                wait_seconds = float(retry_after)
-            elif response.status_code == 429:
-                # Lichess asks clients to wait a full minute after an unannotated
-                # rate-limit response rather than probing repeatedly.
-                wait_seconds = 60.0
-            else:
-                wait_seconds = min(60.0, 2.0 ** attempt)
-        except ValueError:
-            wait_seconds = 60.0 if response.status_code == 429 else min(60.0, 2.0 ** attempt)
-        time.sleep(max(1.0, wait_seconds))
+        except ExplorerTransientError as exc:
+            if attempt >= max_retries:
+                raise RuntimeError(f"Lichess Explorer still failing after retries ({exc})") from exc
+            wait_seconds = exc.retry_after if exc.retry_after is not None else min(60.0, 2.0 ** attempt)
+            time.sleep(max(1.0, wait_seconds))
+            continue
+        _write_json_atomic(cache_path, payload)
+        if request_delay > 0:
+            time.sleep(request_delay)
+        return payload
     raise AssertionError("retry loop exhausted")
 
 
@@ -294,25 +259,6 @@ def analyse_position(
         },
     )
     return result
-
-
-def _games(move: dict[str, Any]) -> int:
-    return int(move.get("white") or 0) + int(move.get("draws") or 0) + int(move.get("black") or 0)
-
-
-def normalized_moves(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int]:
-    total_games = int(payload.get("white") or 0) + int(payload.get("draws") or 0) + int(payload.get("black") or 0)
-    raw_moves = [move for move in payload.get("moves", []) if isinstance(move, dict) and move.get("uci")]
-    covered_games = sum(_games(move) for move in raw_moves)
-    moves = [
-        {
-            "uci": str(move["uci"]),
-            "games": _games(move),
-            "share": (_games(move) / covered_games) if covered_games else 0.0,
-        }
-        for move in raw_moves
-    ]
-    return moves, total_games, covered_games
 
 
 def compute_direct_metric(

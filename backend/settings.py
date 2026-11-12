@@ -31,6 +31,8 @@ class Settings:
     csrf_cookie_name: str = "chess_insighter_csrf"
     resend_api_key: str | None = os.environ.get("RESEND_API_KEY")
     resend_from_email: str | None = os.environ.get("RESEND_FROM_EMAIL")
+    # Live Lichess opening explorer (repertoire positions past the named lines).
+    lichess_api_token: str | None = os.environ.get("LICHESS_API_TOKEN", "").strip() or None
 
     @property
     def stockfish_path(self) -> str | None:
