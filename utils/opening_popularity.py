@@ -16,6 +16,8 @@ from typing import Any, Iterable, Mapping
 
 import chess
 
+from utils.lichess_explorer import LICHESS_CASTLING_UCI, merge_castling_uci
+
 
 POPULARITY_FILENAME = "opening_position_popularity.csv"
 POPULARITY_MANIFEST_FILENAME = "opening_position_popularity.manifest.json"
@@ -131,7 +133,15 @@ def _load_popularity_snapshot_cached(path: str, modified_ns: int) -> dict[str, P
                 parsed_moves = json.loads(str(raw.get("moves_json") or "[]"))
             except json.JSONDecodeError:
                 parsed_moves = []
-            moves = tuple(item for item in parsed_moves if isinstance(item, dict))
+            moves_list = [item for item in parsed_moves if isinstance(item, dict)]
+            # Snapshots built before castling was normalized store Lichess's e1h1.
+            if any(item.get("uci") in LICHESS_CASTLING_UCI for item in moves_list):
+                fen = str(raw.get("fen") or "").strip() or f"{epd} 0 1"
+                try:
+                    moves_list = merge_castling_uci(chess.Board(fen), moves_list)
+                except ValueError:
+                    pass
+            moves = tuple(moves_list)
             result[epd] = PositionPopularity(
                 position_epd=epd,
                 total_games=_int(raw.get("total_games")),

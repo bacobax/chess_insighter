@@ -269,7 +269,7 @@ def compute_direct_metric(
     min_games: int,
 ) -> DirectMetric:
     target_color = "black" if board.turn == chess.WHITE else "white"
-    moves, total_games, _ = normalized_moves(explorer_payload)
+    moves, total_games, _ = normalized_moves(explorer_payload, board)
     move_games = {str(move["uci"]): int(move["games"]) for move in moves}
     move_utilities = {
         move: cp_to_utility(cp if target_color == "white" else -cp)
@@ -341,7 +341,7 @@ def write_snapshot(
     for epd in ordered_keys:
         board = base_positions[epd]
         payload = explorer_payloads[epd]
-        moves, total_games, covered_games = normalized_moves(payload)
+        moves, total_games, covered_games = normalized_moves(payload, board)
         white = _metric_fields(assigned[(epd, "white")], percentiles[(epd, "white")])
         black = _metric_fields(assigned[(epd, "black")], percentiles[(epd, "black")])
         rows_by_epd[epd] = {

@@ -155,10 +155,35 @@ def move_games(move: Mapping[str, Any]) -> int:
     return int(move.get("white") or 0) + int(move.get("draws") or 0) + int(move.get("black") or 0)
 
 
-def normalized_moves(payload: Mapping[str, Any]) -> tuple[list[dict[str, Any]], int, int]:
+# Lichess's king-takes-rook castling moves; only these need a board to convert.
+LICHESS_CASTLING_UCI = frozenset({"e1h1", "e1a1", "e8h8", "e8a8"})
+
+
+def merge_castling_uci(board: chess.Board, moves: list[dict[str, Any]], *, count_key: str = "games") -> list[dict[str, Any]]:
+    """Rewrite Lichess castling (``e1h1``) as ``e1g1``, merging any duplicate.
+
+    Other moves pass through untouched, so no legality check is paid for them.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for move in moves:
+        uci = str(move.get("uci") or "")
+        if uci in LICHESS_CASTLING_UCI:
+            uci = standard_uci(board, uci) or uci
+        if uci in merged:
+            merged[uci][count_key] = int(merged[uci].get(count_key) or 0) + int(move.get(count_key) or 0)
+            if "share" in move:
+                merged[uci]["share"] = float(merged[uci].get("share") or 0.0) + float(move.get("share") or 0.0)
+        else:
+            merged[uci] = {**move, "uci": uci}
+    return list(merged.values())
+
+
+def normalized_moves(payload: Mapping[str, Any], board: chess.Board | None = None) -> tuple[list[dict[str, Any]], int, int]:
     """``(moves with games + share, total games, games covered by the listed moves)``.
 
     Shares are over the covered games, so they add up to 1 across the listed moves.
+    With ``board``, castling uses the engine's form (``e1g1``), so game counts
+    line up with engine evaluations.
     """
     total_games = move_games(payload)
     raw_moves = [move for move in payload.get("moves", []) if isinstance(move, dict) and move.get("uci")]
@@ -171,4 +196,6 @@ def normalized_moves(payload: Mapping[str, Any]) -> tuple[list[dict[str, Any]], 
         }
         for move in raw_moves
     ]
+    if board is not None:
+        moves = merge_castling_uci(board, moves)
     return moves, total_games, covered_games

@@ -179,7 +179,7 @@ All heavy computation lives here, independent of FastAPI.
 **`lichess_explorer.py`** — one-request Lichess Explorer client shared by `build_opening_popularity.py` and `explorer_service.py`
 - Keywords: `request_explorer_position`, `normalized_moves`, `default_window`, `cohort_label`, `ExplorerRateLimited`, `ExplorerTransientError`, `ExplorerAuthRejected`
 - Fixed cohort (blitz+rapid, 1200–2000, last 24 complete months); raises typed errors instead of retrying, so the build script sleeps and the API backs off
-- Lichess writes castling as king-takes-rook (`e1h1`, also in the popularity snapshot); `standard_uci` converts to the engine's `e1g1`
+- Lichess writes castling as king-takes-rook (`e1h1`); `standard_uci` / `merge_castling_uci` convert to the engine's `e1g1`. The popularity snapshot is normalized on load (older snapshots store `e1h1`), and `normalized_moves(payload, board)` does it at build time so Practical Gamble counts castling games
 
 **`opening_catalog_index.py`** — position-keyed index of `all.tsv`
 - Keywords: `catalog_index`, `CatalogIndex.opening_at`, `lab_prefix_for`, `deepest_opening`

@@ -197,3 +197,68 @@ def test_enrich_opening_vectors_adds_popularity_columns(tmp_path):
     assert "lichess_position_games" in content
     assert "white_practical_gamble" in content
     assert ",600,0.6,0.6,0.2,0.8,600,0.1,0.4,600" in content
+
+
+ITALIAN_BEFORE_CASTLING = "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+
+
+def test_normalized_moves_converts_and_merges_castling_with_a_board():
+    from utils.lichess_explorer import normalized_moves
+
+    payload = {
+        "white": 10, "draws": 0, "black": 0,
+        "moves": [
+            {"uci": "e1h1", "white": 6, "draws": 0, "black": 0},
+            {"uci": "e1g1", "white": 1, "draws": 0, "black": 0},
+            {"uci": "c2c3", "white": 3, "draws": 0, "black": 0},
+        ],
+    }
+    raw, _, _ = normalized_moves(payload)
+    assert [m["uci"] for m in raw] == ["e1h1", "e1g1", "c2c3"]
+    moves, total, covered = normalized_moves(payload, chess.Board(ITALIAN_BEFORE_CASTLING))
+    assert (total, covered) == (10, 10)
+    assert [(m["uci"], m["games"], round(m["share"], 1)) for m in moves] == [("e1g1", 7, 0.7), ("c2c3", 3, 0.3)]
+
+
+def test_rook_move_from_e1_is_not_mistaken_for_castling():
+    from utils.lichess_explorer import merge_castling_uci
+
+    board = chess.Board("4k3/8/8/8/8/8/8/K3R3 w - - 0 1")
+    assert merge_castling_uci(board, [{"uci": "e1h1", "games": 4}]) == [{"uci": "e1h1", "games": 4}]
+
+
+def test_snapshot_load_normalizes_lichess_castling(tmp_path):
+    from utils.opening_popularity import move_popularity_for_board
+
+    board = chess.Board(ITALIAN_BEFORE_CASTLING)
+    snapshot = tmp_path / "opening_position_popularity.csv"
+    snapshot.write_text(
+        "position_epd,fen,total_games,covered_games,coverage,moves_json\n"
+        f'{position_key(board)},{board.fen()},100,100,1.0,"[{{""uci"":""e1h1"",""games"":60,""share"":0.6}},'
+        f'{{""uci"":""c2c3"",""games"":40,""share"":0.4}}]"\n',
+        encoding="utf-8",
+    )
+    vectors = tmp_path / "opening_feature_vectors.csv"
+    popularity = move_popularity_for_board(board, vectors)
+    assert popularity == {"e1g1": (0.6, 60), "c2c3": (0.4, 40)}
+
+
+def test_drill_catalog_treats_snapshot_castling_as_the_main_line_move():
+    from backend.settings import settings
+    from utils.opening_drill import drill_catalog
+    from utils.opening_popularity import companion_path_for
+    from utils.training_plan import SIMPLE_REPERTOIRE
+
+    lines = drill_catalog(
+        SIMPLE_REPERTOIRE["white"]["line"],
+        "white",
+        popularity_path=companion_path_for(settings.opening_vectors_path),
+        openings_path=settings.openings_path,
+    )
+    for line in lines:
+        for choice in line["opponent_choices"]:
+            # Castling used to appear both as the main-line move and as a "deviation".
+            assert choice["san"] not in [alt["san"] for alt in choice["alternatives"]]
+    main = next(line for line in lines if line["main_line"])
+    castle = next(choice for choice in main["opponent_choices"] if choice["san"] == "O-O")
+    assert castle["share"] is not None and castle["share"] > 0.05
