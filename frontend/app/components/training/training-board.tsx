@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
@@ -50,6 +50,9 @@ export function TrainingBoard({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => setSelected(null), [fen]);
+  // react-chessboard finds squares with document.querySelector(`#${id}-square-…`) to
+  // animate; boards sharing the default id would measure each other (e.g. a hidden one).
+  const boardId = `board-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const wrapperRef = useRef<HTMLDivElement>(null);
   // Re-checked on every render: only animate when the board is actually laid out.
   const canAnimate = animate && (wrapperRef.current?.getBoundingClientRect().width ?? 0) > 0;
@@ -94,6 +97,7 @@ export function TrainingBoard({
     <div ref={wrapperRef} className={className} role="group" aria-label={label}>
       <Chessboard
         options={{
+          id: boardId,
           position: fen,
           boardOrientation: orientation,
           allowDragging: movable,

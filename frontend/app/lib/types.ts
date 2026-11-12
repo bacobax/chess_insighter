@@ -649,3 +649,100 @@ export type OpeningDrillLine = {
 };
 
 export type OpeningDrillCatalog = { lines: OpeningDrillLine[] };
+
+// --- Repertoire (saved moves by position, lines, drill) -------------------------------
+
+export type RepertoireColor = "white" | "black";
+
+export type RepertoireMove = {
+  uci: string;
+  san: string;
+  games: number;
+  share: number;
+  /** Engine eval after the move, from your side (centipawns). */
+  cp: number | null;
+  mate: number | null;
+  /** How far behind the engine's best move. */
+  cpLoss: number | null;
+  engineRank: number | null;
+  /** Within your tolerance and eval floor; null when the engine has not checked it. */
+  playable: boolean | null;
+  openingEco: string | null;
+  openingName: string | null;
+  inCatalog: boolean;
+};
+
+export type RepertoirePosition = {
+  status: "ready" | "pending";
+  retryAfter: number | null;
+  messages: string[];
+  color: RepertoireColor;
+  prefixUci: string[];
+  fen: string;
+  epd: string;
+  ply: number;
+  sideToMove: RepertoireColor;
+  ownTurn: boolean;
+  opening: { eco: string | null; name: string; ply: number; exact: boolean } | null;
+  inCatalog: boolean;
+  /** Catalogued move order reaching this position, for Opening Lab scores. */
+  labPrefixUci: string[] | null;
+  popularity: { source: "snapshot" | "live" | "none"; status: "ready" | "pending" | "unavailable"; totalGames: number; fetchedAt: string | null; outOfBook: boolean };
+  engine: { status: "ready" | "pending" | "unavailable" | "skipped"; depth: number; bestMove: string | null; evalCp: number | null };
+  moves: RepertoireMove[];
+  settings: { cpTolerance: number; minEvalCp: number };
+};
+
+export type RepertoireChoice = {
+  uci: string;
+  san: string;
+  prefixUci: string[];
+  cp: number | null;
+  cpLoss: number | null;
+  depth: number | null;
+  source: "user" | "seed";
+  chosenAt: string;
+};
+
+export type RepertoireSettings = {
+  cpTolerance: number;
+  minEvalCp: number;
+  minReach: number;
+  maxOwnMoves: number;
+};
+
+export type Repertoire = {
+  color: RepertoireColor;
+  /** Keyed by position (EPD). */
+  choices: Record<string, RepertoireChoice>;
+  settings: RepertoireSettings;
+  updatedAt: string | null;
+};
+
+export type RepertoireLineStatus = "complete" | "out_of_book" | "needs_choice" | "pending" | "no_data";
+
+export type RepertoireLine = {
+  id: string;
+  prefixUci: string[];
+  san: string[];
+  /** Share of your games in which you meet this line. */
+  reach: number;
+  status: RepertoireLineStatus;
+  endReason: "move_cap" | "no_common_reply" | "game_over" | "depth_limit" | null;
+  ownMoves: number;
+  epd: string;
+  openingEco: string | null;
+  openingName: string | null;
+};
+
+export type RepertoireLines = {
+  color: RepertoireColor;
+  startPrefixUci: string[];
+  lines: RepertoireLine[];
+  coverage: { complete: number; outOfBook: number; needsChoice: number; pending: number; noData: number; pruned: number };
+  status: "ready" | "pending";
+  retryAfter: number | null;
+  choicesUsed: number;
+  truncated: boolean;
+  settings: { minReach: number; maxOwnMoves: number };
+};

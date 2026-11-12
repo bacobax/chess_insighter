@@ -7,8 +7,8 @@ opponent's reply shares along it, i.e. how often you meet it.
 
 A branch stops when:
 
-- ``complete``     you have played ``max_own_moves`` moves, or every further
-                   reply is under the reach cutoff (``endReason`` says which);
+- ``complete``     you have played ``max_own_moves`` moves, or the opponent has
+                   no reply with at least the minimum share (``endReason``);
 - ``out_of_book``  the position has fewer than ``min_position_games`` games;
 - ``needs_choice`` it is your turn and you have not chosen a move yet;
 - ``pending``      no popularity data is known yet for an opponent position
@@ -16,9 +16,12 @@ A branch stops when:
 - ``no_data``      no data and none can be fetched (Explorer not configured,
                    token rejected, …): final, polling will not help.
 
-Replies below the share floor, or whose reach falls below ``min_reach``, are
-not expanded; their reach is reported as ``pruned``. Because the reaches of
-all leaves add up to at most 1, a cutoff of 2% means at most 50 lines.
+The opponent's most common reply is always followed, so main lines go as deep
+as your move cap whatever their reach. Other replies are followed only while
+the line's reach stays at or above ``min_reach``; replies below the share
+floor or that cutoff are reported as ``pruned``. Every extra branch starts at
+``min_reach`` or more, which keeps the number of lines manageable, but unlike
+a pure cutoff there is no fixed upper bound.
 
 The walk only reads cached data, except for up to ``fetch_budget`` uncached
 opponent positions fetched from the live Explorer per call. The rest come back
@@ -41,7 +44,7 @@ from utils.opening_popularity import position_key
 
 LeafStatus = Literal["complete", "out_of_book", "needs_choice", "pending", "no_data"]
 # Why a ``complete`` line ends.
-EndReason = Literal["move_cap", "below_cutoff", "game_over", "depth_limit"]
+EndReason = Literal["move_cap", "no_common_reply", "game_over", "depth_limit"]
 MAX_NODES = 3000
 # Retry hint when the per-call fetch budget ran out (the Explorer's request spacing).
 BUDGET_RETRY_SECONDS = 1.0
@@ -150,9 +153,10 @@ def _expand(walk: _Walk, board: chess.Board, moves: list[str], sans: list[str], 
         reverse=True,
     )[: walk.config.opponent_max_replies]
     expanded = 0.0
-    for reply in replies:
+    for rank, reply in enumerate(replies):
         child_reach = reach * reply["share"]
-        if child_reach < walk.line_settings.min_reach:
+        # The most common reply is always followed; the others only above the cutoff.
+        if rank > 0 and child_reach < walk.line_settings.min_reach:
             continue
         expanded += child_reach
         move = chess.Move.from_uci(reply["uci"])
@@ -163,9 +167,9 @@ def _expand(walk: _Walk, board: chess.Board, moves: list[str], sans: list[str], 
             board.pop()
     # Rare replies and those under the reach cutoff are not drilled.
     walk.pruned += max(0.0, reach - expanded)
-    if not expanded:
-        # Every reply is rarer than the cutoff: the line is as deep as it needs to be.
-        _leaf(walk, board, moves, sans, reach, own_moves, "complete", "below_cutoff")
+    if not replies:
+        # No reply reaches the share floor: nothing common left to prepare for.
+        _leaf(walk, board, moves, sans, reach, own_moves, "complete", "no_common_reply")
         walk.pruned -= reach  # counted as a leaf, not as pruned
 
 

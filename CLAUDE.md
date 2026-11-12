@@ -151,7 +151,7 @@ Key conventions:
 
 **`repertoire_lines.py`** — expands a repertoire into its lines
 - Keywords: `repertoire_lines`, `LineSettings`, `EndReason`
-- Plays your choice at your turns, branches over opponent replies ≥ 2% share; each line's `reach` = product of reply shares. Leaves: `complete` (`endReason` `move_cap` / `below_cutoff` / …), `out_of_book` (< 30 games), `needs_choice`, `pending` (no data yet; call again after `retryAfter`), `no_data` (none fetchable: Explorer not configured or token rejected; final). Rare/cut replies are summed as `coverage.pruned`; coverage parts add up to 1. Reads cached popularity only, plus up to `fetch_budget` live Explorer fetches per call
+- Plays your choice at your turns, branches over opponent replies ≥ 2% share; each line's `reach` = product of reply shares. The opponent's **most common reply is always followed** (main lines reach the move cap); other replies only while reach ≥ `minReach`. Leaves: `complete` (`endReason` `move_cap` / `no_common_reply` / …), `out_of_book` (< 30 games), `needs_choice`, `pending` (no data yet; call again after `retryAfter`), `no_data` (none fetchable: Explorer not configured or token rejected; final). Rare/cut replies are summed as `coverage.pruned`; coverage parts add up to 1. Reads cached popularity only, plus up to `fetch_budget` live Explorer fetches per call
 
 **`statistics_service.py`** — full report assembly
 - Keywords: `build_report`, `skill_profile`, `opening_components`, `time_management_indicators`, `advantage_components`, `resourcefulness_components`, `game_analysis_components`, `average_time_by_complexity`, `deep_merge`
@@ -295,7 +295,7 @@ React Router 7 SPA (`ssr: false`), Tailwind CSS 4, Radix UI primitives. API base
 | `home.tsx` | `/` | Username entry form |
 | `games.$username.tsx` | `/games/:username` | Paginated game list |
 | `report.$username.tsx` | `/report/:username` | Full player report (stats + opening matches) |
-| `opening-study.tsx` | `/opening-study?username=&color=` | Opening Lab tree (general, no report). First visit shows the full-page setup survey (`OpeningLabSetup.tsx`); answers + controls persist in localStorage per account. `username` only sets the Back target. Entry point: player dossier (`OpeningLabEntry.tsx`) |
+| `opening-study.tsx` | `/opening-study?username=&color=&view=` | Opening Lab: Tree / Board / Repertoire views (`view=repertoire` opens the saved repertoire). General tree, no report. First visit shows the full-page setup survey (`OpeningLabSetup.tsx`); answers + controls persist in localStorage per account. `username` only sets the Back target. Entry point: player dossier (`OpeningLabEntry.tsx`) |
 | `mistakes.$username.tsx` | `/mistakes/:username` | Mistakes analysis — blunder list |
 | `mistakes.$username.blunder.$blunderKey.tsx` | `/mistakes/:username/blunder/:blunderKey` | Individual blunder deep-dive + punishment line |
 
@@ -321,6 +321,15 @@ Route declarations live in `frontend/app/routes.ts`.
 - `NodeRadarChart.tsx` — radar chart of node style scores
 - `StatBarChart.tsx` — bar chart for individual score components
 - `MiniChessBoard.tsx` — lightweight CSS/Unicode board (avoids mounting heavy widgets)
+
+**Repertoire** (`repertoire/`), shared by the Opening Lab's Repertoire view and the training drill:
+- `RepertoireWorkspace.tsx` — Build / Drill switch, coverage bar, gap list, Rules (settings) popover, seeding (`autoSeed` fills an empty repertoire from `seedLines`)
+- `RepertoireBuilder.tsx` — board + `/api/repertoire/position`: on your turn choose among engine-accepted moves (Lab scores merged by move from `labPrefixUci`), on the opponent's turn step into replies
+- `RepertoireDrill.tsx` — plays lines from `/lines` with `useLineTrainer`; never-drilled lines first, weighted by reach; per-line progress in localStorage (`rep:drill:<user>:<color>`)
+- `repertoire-hooks.ts` — `useRepertoire`, `useRepertoirePosition`, `useRepertoireLines` (poll while `pending`, max 20 times)
+- `training/opening-repertoire.tsx` — training-plan slots (As White / Black vs 1.e4 / 1.d4) → colour + start prefix
+
+`training/training-board.tsx` gives every board a unique react-chessboard `id`: the library measures squares with `document.querySelector('#<id>-square-…')`, so boards sharing the default id (e.g. one in a hidden view) crash the animation.
 
 **Report** (`report/`):
 - `player-report.tsx` — full report layout and tabs

@@ -895,7 +895,7 @@ class RepertoireLine(BaseModel):
     san: list[str]
     reach: float
     status: Literal["complete", "out_of_book", "needs_choice", "pending", "no_data"]
-    endReason: Literal["move_cap", "below_cutoff", "game_over", "depth_limit"] | None = None
+    endReason: Literal["move_cap", "no_common_reply", "game_over", "depth_limit"] | None = None
     ownMoves: int
     epd: str
     openingEco: str | None = None

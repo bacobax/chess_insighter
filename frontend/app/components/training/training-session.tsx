@@ -6,7 +6,7 @@ import type { TrainingBlock, TrainingCard, TrainingDay, TrainingPlan } from "~/l
 import { CardExercise } from "./card-exercise";
 import { ErrorReview, FlashcardDeck } from "./error-review";
 import { GameChecklist } from "./game-checklist";
-import { OpeningDrill } from "./opening-drill";
+import { OpeningRepertoire } from "./opening-repertoire";
 import { type HoursKey, WEEKDAYS, isDue, localIsoDate, percent, scaleMinutes, todayKey } from "./training-format";
 import { formatClock, useCountdown, usePersistentState } from "./training-hooks";
 
@@ -132,7 +132,7 @@ export function TrainingSession({ plan, dayKey, hours }: { plan: TrainingPlan; d
       <div className="tp-grid-3">
         <ToolCard kind="Your positions" badge={`${dueCount} due`} title="Flashcards" text="Every mistake from your games becomes a card. Each one comes back after 1, 3, 7 and 21 days." active={mode.kind === "tool" && mode.tool === "flashcards"} onOpen={() => open({ kind: "tool", tool: "flashcards" })} cta="Open flashcards" />
         <ToolCard kind="Your positions" badge={`${cards.filter((card) => !card.retired).length} errors`} title="Error review" text="Filter your errors by cause, phase and severity, then practise any selection on the board." active={mode.kind === "tool" && mode.tool === "review"} onOpen={() => open({ kind: "tool", tool: "review" })} cta="Open review" />
-        <ToolCard kind="Openings" badge={`${plan.repertoire.recommended.length} lines`} title="Opening drill" text={`Play ${plan.repertoire.recommended.map((item) => item.name.split(" · ")[0]).join(", ")} from memory. Three clean runs in a row masters a line.`} active={mode.kind === "tool" && mode.tool === "drill"} onOpen={() => open({ kind: "tool", tool: "drill" })} cta="Start drilling" />
+        <ToolCard kind="Openings" badge={`${plan.repertoire.recommended.length} lines`} title="Opening drill" text={`Play ${plan.repertoire.recommended.map((item) => item.name.split(" · ")[0]).join(", ")} from memory, every common reply included. Your repertoire is shared with the Opening Lab.`} active={mode.kind === "tool" && mode.tool === "drill"} onOpen={() => open({ kind: "tool", tool: "drill" })} cta="Start drilling" />
         <ToolCard kind="Calculation" badge={`${calculationCards(cards).length} lines`} title="Calculation trainer" text="The lines that punished your moves. Play both sides, move by move, before the engine shows you." active={mode.kind === "tool" && mode.tool === "calculation"} onOpen={() => open({ kind: "tool", tool: "calculation" })} cta="Start calculating" />
         <ToolCard kind="Play" badge="Saturday" title="Slow-game checklist" text="The blunder check, a clock budget for your time control, and a post-game log." active={mode.kind === "tool" && mode.tool === "checklist"} onOpen={() => open({ kind: "tool", tool: "checklist" })} cta="Open checklist" />
         <article className="tp-card tp-tool">
@@ -173,7 +173,7 @@ function MainPanel({
     const body = {
       flashcards: <FlashcardDeck username={username} cards={cards} onReviewed={onReviewed} />,
       review: <ErrorReview username={username} cards={cards} initialProcess={day.weakness} onReviewed={onReviewed} />,
-      drill: <OpeningDrill username={username} openings={plan.repertoire.recommended} />,
+      drill: <OpeningRepertoire openings={plan.repertoire.recommended} />,
       calculation: <CardExercise username={username} queue={calculationCards(cards)} calculation title="Calculation trainer" onReviewed={onReviewed} onExit={onExit} onClose={onExit} />,
       checklist: <GameChecklist username={username} focus="play" />,
     }[mode.tool];
@@ -185,7 +185,7 @@ function MainPanel({
       ? <CardExercise username={username} queue={blockQueue} calculation={block.kind === "calculation"} title={`${block.label} · ${block.text}`} onReviewed={onReviewed} onExit={onDone} />
       : <div className="tp-empty"><p className="folio">Nothing to review</p><p>No cards are waiting for this block. Good work, or build a new plan with more games.</p></div>;
   }
-  if (block.kind === "repertoire") return <OpeningDrill username={username} openings={plan.repertoire.recommended} />;
+  if (block.kind === "repertoire") return <OpeningRepertoire openings={plan.repertoire.recommended} />;
   if (block.kind === "play") return <GameChecklist username={username} focus="play" />;
   if (block.kind === "review") return <GameChecklist username={username} focus="review" />;
   return (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArrowLeft, Grid3x3, Network } from "lucide-react";
+import { ArrowLeft, BookOpen, Grid3x3, Network } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { OpeningStudyBoardView } from "~/components/opening-study/OpeningStudyBoardView";
@@ -17,6 +17,7 @@ import {
   type SetupAnswers,
 } from "~/components/opening-study/OpeningLabSetup";
 import { OpeningStudyWhiteboard } from "~/components/opening-study/OpeningStudyWhiteboard";
+import { RepertoireWorkspace } from "~/components/repertoire/RepertoireWorkspace";
 import type { OpeningStudyTreeNode, TargetColor } from "~/lib/types";
 import { RequireAuth, useAuth } from "~/components/auth/auth-provider";
 
@@ -35,12 +36,16 @@ function colorParam(value: string | null): TargetColor | null {
   return value === "white" || value === "black" ? value : null;
 }
 
-type LabView = "tree" | "board";
+type LabView = "tree" | "board" | "repertoire";
 const VIEW_KEY = "chess-insighter:opening-lab:view";
+
+function viewParam(value: string | null): LabView | null {
+  return value === "tree" || value === "board" || value === "repertoire" ? value : null;
+}
 
 function loadView(): LabView {
   try {
-    return window.localStorage.getItem(VIEW_KEY) === "board" ? "board" : "tree";
+    return viewParam(window.localStorage.getItem(VIEW_KEY)) ?? "tree";
   } catch {
     return "tree";
   }
@@ -76,11 +81,15 @@ function OpeningLab() {
   const [setupOpen, setSetupOpen] = useState(!hasSetup);
   // Returning users get their saved tree straight away.
   const [generationKey, setGenerationKey] = useState(stored ? 1 : 0);
-  const [view, setView] = useState<LabView>(loadView);
+  const urlView = viewParam(searchParams.get("view"));
+  const [view, setView] = useState<LabView>(() => urlView ?? loadView());
+  // The repertoire view mounts on first visit and then stays mounted, like the other views.
+  const [repertoireMounted, setRepertoireMounted] = useState(view === "repertoire");
+  useEffect(() => { if (view === "repertoire") setRepertoireMounted(true); }, [view]);
   // Each view keeps its own selection; the inspector shows the active one.
   const [treeNode, setTreeNode] = useState<OpeningStudyTreeNode | null>(null);
   const [boardNode, setBoardNode] = useState<OpeningStudyTreeNode | null>(null);
-  const selectedNode = view === "tree" ? treeNode : boardNode;
+  const selectedNode = view === "tree" ? treeNode : view === "board" ? boardNode : null;
   const [boardJump, setBoardJump] = useState<{ path: string[]; nonce: number }>({ path: [], nonce: 0 });
   const [playerVector, setPlayerVector] = useState<Record<string, number> | null>(null);
 
@@ -130,17 +139,20 @@ function OpeningLab() {
         </Link>
         <div className="h-7 w-px bg-[var(--line)]" />
         <div>
-          <h1 className="text-sm font-bold tracking-[-.02em]" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>OPENING LAB <span className="text-[var(--accent)]">/ {view === "tree" ? "TREE" : "BOARD"}</span></h1>
+          <h1 className="text-sm font-bold tracking-[-.02em]" style={{ fontFamily: "var(--font-display)", color: "var(--ink)" }}>OPENING LAB <span className="text-[var(--accent)]">/ {view.toUpperCase()}</span></h1>
           <span className="hidden text-[10px] font-semibold uppercase tracking-[.12em] sm:block" style={{ color: "var(--ink-faint)" }}>
             {view === "tree"
               ? "Drag to pan · scroll to zoom · click or press Enter to expand"
-              : "Drag a piece or pick a move · ← → to step through the line"}
+              : view === "board"
+                ? "Drag a piece or pick a move · ← → to step through the line"
+                : `Your ${controls.targetColor} repertoire · build it, then drill it`}
           </span>
         </div>
         <div className="ml-auto flex rounded-lg p-0.5" role="tablist" aria-label="Opening Lab view" style={{ border: "1px solid var(--line)", background: "var(--paper-dark)" }}>
           {([
             { value: "tree", label: "Tree", Icon: Network },
             { value: "board", label: "Board", Icon: Grid3x3 },
+            { value: "repertoire", label: "Repertoire", Icon: BookOpen },
           ] as const).map(({ value, label, Icon }) => (
             <button
               key={value}
@@ -194,6 +206,16 @@ function OpeningLab() {
             jump={boardJump}
             onNodeSelect={setBoardNode}
           />
+        </div>
+        <div id="opening-lab-repertoire" role="tabpanel" className={cn("relative min-w-0 flex-1 overflow-y-auto p-4 lg:p-6", view !== "repertoire" && "hidden")}>
+          {repertoireMounted ? (
+            <RepertoireWorkspace
+              key={controls.targetColor}
+              color={controls.targetColor}
+              studyControls={controls}
+              active={view === "repertoire"}
+            />
+          ) : null}
         </div>
       </div>
     </main>

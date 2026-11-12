@@ -1,4 +1,4 @@
-import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillCatalog, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
+import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillCatalog, Repertoire, RepertoireColor, RepertoireLines, RepertoirePosition, RepertoireSettings, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -277,5 +277,55 @@ export function getOpeningDrillCatalog(line: string, side: "white" | "black") {
   return apiFetch<OpeningDrillCatalog>("/api/training/opening-drill", {
     method: "POST",
     body: JSON.stringify({ line, side }),
+  });
+}
+
+// --- Repertoire ------------------------------------------------------------------------
+
+/** Your playable moves (engine-checked) or the opponent's popular replies in one position. */
+export function getRepertoirePosition(color: RepertoireColor, prefixUci: string[]) {
+  return apiFetch<RepertoirePosition>("/api/repertoire/position", {
+    method: "POST",
+    body: JSON.stringify({ color, prefixUci }),
+  });
+}
+
+export function getRepertoire(color: RepertoireColor) {
+  return apiFetch<Repertoire>(`/api/repertoires/${color}`);
+}
+
+/** Save your move in a position; rejected (422 not_playable) when the engine says it loses too much. */
+export function setRepertoireChoice(color: RepertoireColor, prefixUci: string[], moveUci: string) {
+  return apiFetch<Repertoire>(`/api/repertoires/${color}/choices`, {
+    method: "PUT",
+    body: JSON.stringify({ prefixUci, moveUci }),
+  });
+}
+
+export function removeRepertoireChoice(color: RepertoireColor, prefixUci: string[]) {
+  return apiFetch<Repertoire>(`/api/repertoires/${color}/choices?prefix=${encodeURIComponent(prefixUci.join(" "))}`, {
+    method: "DELETE",
+  });
+}
+
+export function updateRepertoireSettings(color: RepertoireColor, patch: Partial<RepertoireSettings>) {
+  return apiFetch<Repertoire>(`/api/repertoires/${color}/settings`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Fill empty positions along SAN lines ("1.e4 e5 2.Nf3"); omitted = the default short repertoire. */
+export function seedRepertoire(color: RepertoireColor, lines?: string[]) {
+  return apiFetch<Repertoire>(`/api/repertoires/${color}/seed`, {
+    method: "POST",
+    body: JSON.stringify({ lines: lines ?? null }),
+  });
+}
+
+export function getRepertoireLines(color: RepertoireColor, startPrefixUci: string[] = [], fetchBudget = 3) {
+  return apiFetch<RepertoireLines>(`/api/repertoires/${color}/lines`, {
+    method: "POST",
+    body: JSON.stringify({ startPrefixUci, fetchBudget }),
   });
 }

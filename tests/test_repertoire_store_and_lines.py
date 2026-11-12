@@ -259,15 +259,22 @@ def test_seeded_italian_expands_into_lines_from_the_snapshot(monkeypatch):
     assert any(line.status == "needs_choice" for line in response.lines)
 
 
-def test_line_ends_complete_when_every_reply_is_under_the_cutoff(monkeypatch):
+def test_the_most_common_reply_is_followed_below_the_cutoff(monkeypatch):
     table = {
         epd_after("e4"): (10_000, [("e5", 1.0)]),
         epd_after("e4", "e5", "Nf3"): (10_000, [("Nc6", 0.5), ("d6", 0.5)]),
+        epd_after("e4", "e5", "Nf3", "Nc6", "Bc4"): (10_000, [("a6", 0.01)]),
     }
     monkeypatch.setattr(lines_module, "popularity", fake_popularity(table))
-    choices = {epd_after(): {"uci": "e2e4"}, epd_after("e4", "e5"): {"uci": "g1f3"}}
+    choices = {
+        epd_after(): {"uci": "e2e4"},
+        epd_after("e4", "e5"): {"uci": "g1f3"},
+        epd_after("e4", "e5", "Nf3", "Nc6"): {"uci": "f1c4"},
+    }
     result = repertoire_lines("white", choices, line_settings=LineSettings(min_reach=0.6), explorer=no_explorer(), fetch_budget=0)
+    # Nc6 (reach 0.5 < 0.6) is still followed as the top reply; d6 is cut.
     [line] = result["lines"]
-    assert line["san"] == ["e4", "e5", "Nf3"]
-    assert (line["status"], line["endReason"]) == ("complete", "below_cutoff")
-    assert result["coverage"]["complete"] == 1.0 and result["coverage"]["pruned"] == 0.0
+    assert line["san"] == ["e4", "e5", "Nf3", "Nc6", "Bc4"]
+    # After 3.Bc4 no reply reaches the 2% share floor.
+    assert (line["status"], line["endReason"]) == ("complete", "no_common_reply")
+    assert result["coverage"]["complete"] == 0.5 and result["coverage"]["pruned"] == 0.5
