@@ -636,20 +636,6 @@ export type TrainingCardReviewRequest = {
   note?: string | null;
 };
 
-export type OpeningDrillLine = {
-  id: string;
-  probability: number;
-  main_line: boolean;
-  moves: string[];
-  user_color: "white" | "black";
-  eco: string | null;
-  variation: string | null;
-  deviates_at: number | null;
-  opponent_choices: { ply: number; san: string; share: number | null; main_line: boolean; alternatives: { san: string; share: number }[] }[];
-};
-
-export type OpeningDrillCatalog = { lines: OpeningDrillLine[] };
-
 // --- Repertoire (saved moves by position, lines, drill) -------------------------------
 
 export type RepertoireColor = "white" | "black";

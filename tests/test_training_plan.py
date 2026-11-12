@@ -261,52 +261,14 @@ def test_training_plan_http_endpoints(monkeypatch):
         assert reviewed.status_code == 200 and reviewed.json()["interval_days"] == 1
         assert client.post("/api/players/me/training-plan/cards/missing/review", json={"grade": "good"}, headers=csrf).status_code == 404
 
-        drill = client.post("/api/training/opening-drill", json={"line": "1.e4 e5 2.Nf3 Nf6 3.Nxe5 d6", "side": "black"}, headers=csrf)
-        assert drill.status_code == 200
-        lines = drill.json()["lines"]
-        assert lines[0]["main_line"] and lines[0]["moves"] == ["e4", "e5", "Nf3", "Nf6", "Nxe5", "d6"]
-        assert len({line["id"] for line in lines}) == len(lines) > 1
-        assert client.post("/api/training/opening-drill", json={"line": "1.e4 Ke2", "side": "white"}, headers=csrf).status_code == 400
     finally:
         client.close()
 
 
-def test_opening_drill_varies_opponent_within_the_repertoire_slot():
-    import random
+def test_parse_line_text_reads_numbered_san():
+    from utils.training_plan import parse_line_text
 
-    from backend.settings import settings
-    from utils.opening_drill import parse_line_text, sample_drill_line
-    from utils.opening_popularity import companion_path_for
-
-    paths = {"popularity_path": companion_path_for(settings.opening_vectors_path), "openings_path": settings.openings_path}
-    line = SIMPLE_REPERTOIRE["black_vs_d4"]["line"]
     assert parse_line_text("1.d4 d5 2.c4 e6 3.Nc3…Nf6") == ["d4", "d5", "c4", "e6", "Nc3", "Nf6"]
-
-    main = sample_drill_line(line, "black", variations=False, rng=random.Random(0), **paths)
-    assert main["moves"] == line and main["deviates_at"] is None
-
-    lines = [sample_drill_line(line, "black", rng=random.Random(seed), **paths) for seed in range(30)]
-    assert len({tuple(item["moves"]) for item in lines}) > 3
-    for item in lines:
-        board = chess.Board()
-        for san in item["moves"]:
-            board.push_san(san)
-        assert item["moves"][0] == "d4"  # the slot-defining move is never varied
-        if item["deviates_at"] is not None:
-            assert item["deviates_at"] >= 2 and item["deviates_at"] % 2 == 0  # only White (the opponent) deviates
-
+    assert parse_line_text("1. e4 e5") == ["e4", "e5"]
     with pytest.raises(ValueError):
-        sample_drill_line(["e4", "Ke2", "Kxe8"], "white", **paths)
-
-
-def test_drill_catalog_lists_each_line_once_with_probabilities():
-    from backend.settings import settings
-    from utils.opening_drill import drill_catalog
-    from utils.opening_popularity import companion_path_for
-
-    line = SIMPLE_REPERTOIRE["white"]["line"]
-    catalog = drill_catalog(line, "white", popularity_path=companion_path_for(settings.opening_vectors_path), openings_path=settings.openings_path)
-    assert catalog[0]["main_line"] and catalog[0]["moves"] == line
-    assert len({item["id"] for item in catalog}) == len(catalog) >= 5
-    assert abs(sum(item["probability"] for item in catalog) - 1) < 0.01
-    assert all(item["moves"][:2] == ["e4", "e5"] for item in catalog)  # Black's first reply is pinned
+        parse_line_text("1. 2.")

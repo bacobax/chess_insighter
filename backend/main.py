@@ -40,8 +40,6 @@ from backend.models import (
     ReportBuildJobAccepted,
     ReportBuildJobStatus,
     ReportSummary,
-    OpeningDrillCatalog,
-    OpeningDrillRequest,
     RepertoireChoiceRequest,
     RepertoireLinesRequest,
     RepertoireLinesResponse,
@@ -99,8 +97,6 @@ from backend.services.report_analysis_service import (
     query_report_games,
 )
 from backend.settings import settings
-from utils.opening_drill import drill_catalog, parse_line_text
-from utils.opening_popularity import companion_path_for
 
 
 app = FastAPI(title="Chess Insighter API", version="0.1.0")
@@ -644,15 +640,3 @@ async def repertoire_lines_route(color: RepertoireColor, body: RepertoireLinesRe
         fetch_budget=body.fetch_budget,
     ))
     return RepertoireLinesResponse.model_validate(payload)
-
-
-@app.post("/api/training/opening-drill", response_model=OpeningDrillCatalog)
-async def opening_drill_catalog(body: OpeningDrillRequest) -> OpeningDrillCatalog:
-    def build() -> list[dict]:
-        return drill_catalog(
-            parse_line_text(body.line),
-            body.side,
-            popularity_path=companion_path_for(settings.opening_vectors_path),
-            openings_path=settings.openings_path,
-        )
-    return OpeningDrillCatalog(lines=await run_in_threadpool(build))

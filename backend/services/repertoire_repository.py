@@ -18,9 +18,8 @@ from backend.services import mongo_service
 from backend.services.engine_eval_service import evaluate_position
 from backend.services.repertoire_lines import LineSettings
 from backend.services.repertoire_service import DEFAULT_CONFIG, RepertoireConfig, is_playable, replay_prefix
-from utils.opening_drill import parse_line_text
 from utils.opening_popularity import position_key
-from utils.training_plan import SIMPLE_REPERTOIRE
+from utils.training_plan import SIMPLE_REPERTOIRE, parse_line_text
 
 
 Color = Literal["white", "black"]

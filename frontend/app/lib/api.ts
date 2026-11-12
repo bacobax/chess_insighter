@@ -1,4 +1,4 @@
-import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, OpeningDrillCatalog, Repertoire, RepertoireColor, RepertoireLines, RepertoirePosition, RepertoireSettings, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
+import type { AuthUser, DashboardResponse, GamesQueryRequest, GamesQueryResponse, Hparams, MistakePositionRequest, OpeningStudyTreeChildrenRequest, OpeningStudyTreeChildrenResponse, OpeningStudyTreeNode, PlayerReportsResponse, PositionAnalysis, RegisterResponse, ReportBuildJobAccepted, ReportBuildJobStatus, ReportBuildRequest, ReportBuildResponse, ReportGamesCatalogRequest, ReportGamesCatalogResponse, ReportMistakeDetailResponse, ReportMistakesResponse, ReportMistakesSelectionRequest, ReportSummary, Repertoire, RepertoireColor, RepertoireLines, RepertoirePosition, RepertoireSettings, TrainingCard, TrainingCardReviewRequest, TrainingPlan, TrainingPlanBuildRequest } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -270,14 +270,6 @@ export function reviewTrainingCard(username: string, cardId: string, request: Tr
     `/api/players/${encodeURIComponent(username)}/training-plan/cards/${encodeURIComponent(cardId)}/review`,
     { method: "POST", body: JSON.stringify(request) },
   );
-}
-
-/** Every drill line for a repertoire opening, the opponent's replies branching over popular Lichess moves. */
-export function getOpeningDrillCatalog(line: string, side: "white" | "black") {
-  return apiFetch<OpeningDrillCatalog>("/api/training/opening-drill", {
-    method: "POST",
-    body: JSON.stringify({ line, side }),
-  });
 }
 
 // --- Repertoire ------------------------------------------------------------------------

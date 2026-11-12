@@ -241,24 +241,3 @@ def test_snapshot_load_normalizes_lichess_castling(tmp_path):
     vectors = tmp_path / "opening_feature_vectors.csv"
     popularity = move_popularity_for_board(board, vectors)
     assert popularity == {"e1g1": (0.6, 60), "c2c3": (0.4, 40)}
-
-
-def test_drill_catalog_treats_snapshot_castling_as_the_main_line_move():
-    from backend.settings import settings
-    from utils.opening_drill import drill_catalog
-    from utils.opening_popularity import companion_path_for
-    from utils.training_plan import SIMPLE_REPERTOIRE
-
-    lines = drill_catalog(
-        SIMPLE_REPERTOIRE["white"]["line"],
-        "white",
-        popularity_path=companion_path_for(settings.opening_vectors_path),
-        openings_path=settings.openings_path,
-    )
-    for line in lines:
-        for choice in line["opponent_choices"]:
-            # Castling used to appear both as the main-line move and as a "deviation".
-            assert choice["san"] not in [alt["san"] for alt in choice["alternatives"]]
-    main = next(line for line in lines if line["main_line"])
-    castle = next(choice for choice in main["opponent_choices"] if choice["san"] == "O-O")
-    assert castle["share"] is not None and castle["share"] > 0.05

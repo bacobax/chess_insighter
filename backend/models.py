@@ -737,35 +737,6 @@ class TrainingCardReviewRequest(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-class OpeningDrillRequest(BaseModel):
-    line: str = Field(min_length=2, max_length=400)
-    side: Literal["white", "black"]
-
-
-class OpeningDrillChoice(BaseModel):
-    ply: int
-    san: str
-    share: float | None = None
-    main_line: bool
-    alternatives: list[JsonObject]
-
-
-class OpeningDrillLine(BaseModel):
-    id: str
-    probability: float
-    main_line: bool
-    moves: list[str]
-    user_color: Literal["white", "black"]
-    eco: str | None = None
-    variation: str | None = None
-    deviates_at: int | None = None
-    opponent_choices: list[OpeningDrillChoice]
-
-
-class OpeningDrillCatalog(BaseModel):
-    lines: list[OpeningDrillLine]
-
-
 class RepertoirePositionRequest(BaseModel):
     color: Literal["white", "black"]
     prefix_uci: list[str] = Field(default_factory=list, max_length=60, alias="prefixUci")

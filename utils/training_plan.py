@@ -792,6 +792,18 @@ def _weighted_score(rows: list[dict[str, Any]]) -> float | None:
     return round(sum(r["score"] * r["games"] for r in rows) / games, 3) if games else None
 
 
+def parse_line_text(line: str) -> list[str]:
+    """"1.e4 e5 2.Nf3 Nc6" (or "1. e4 e5", "1…e5") → ["e4", "e5", "Nf3", "Nc6"]."""
+    moves = []
+    for token in line.replace("…", " ").split():
+        token = token.split(".")[-1]
+        if token and not token.isdigit():
+            moves.append(token)
+    if not moves:
+        raise ValueError("The opening line has no moves.")
+    return moves
+
+
 def san_line(moves: Iterable[str]) -> str:
     parts = []
     for index, san in enumerate(moves):
